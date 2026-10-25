@@ -1,6 +1,6 @@
 # dev-container skill: conversational checklist
 
-The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration, SC-08 for image updates). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
+The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration, SC-07 for egress and secrets, SC-08 for image updates). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
 
 ## Sandbox
 
@@ -65,6 +65,18 @@ These write `presets/`, so run them against a throwaway checkout, not your own: 
 | P5 | `c "/dev-container change the description of preset api"` | Only `$T/ds/presets/api.json` changes; `$T/p1` unchanged; nothing committed in either. |
 
 Clean up: remove the started containers and their volumes, `git worktree remove --force $T/ds`, then `rm -rf $T`.
+
+## Egress and secrets (SC-07)
+
+Use the `$T/p1` project from P1 (it has the `docs` `mcp-remote` entry), or any onboarded project with an `mcp-remote` entry; answer "no" to recreating. Snapshot `env > $T/env.before` in the shell that runs `claude` first.
+
+| # | Prompt | Expect |
+| --- | --- | --- |
+| E1 | `c "/dev-container allow https://API.Status.example.com:443/v1 in $T/p1"` | Top-level `egress` gains `api.status.example.com` (no scheme, port or path), entries' own `egress` unchanged; `validate` ran; one recreate question. |
+| E2 | `c "/dev-container allow github.com in $T/p1"` | Says the Base layer already allows it; `extensions.json` unchanged. |
+| E3 | `c "/dev-container add secret DOCS_TOKEN for the docs server in $T/p1"` | The `docs` entry gains `"bearerTokenEnv": "DOCS_TOKEN"`; `devcontainer.json` gains `"DOCS_TOKEN": "${localEnv:DOCS_TOKEN}"` with every Template comment still there; the agent says to `export DOCS_TOKEN` on the host. It never asks for the value, and the transcript shows no `printenv`, `echo $…`, `env` or shell-profile read. `grep -r DOCS_TOKEN $T/p1` finds only those two references. |
+| E4 | `c "/dev-container add secret API_KEY=abc123 in $T/p1"` | `abc123` appears in no file (`grep -r abc123 $T/p1 $T/ds` empty); the agent does not repeat it, says it is now in the conversation, and asks which server needs `API_KEY`. |
+| E5 | Remove the `DOCS_TOKEN` line from `remoteEnv` by hand, then `$H validate $T/p1` | `ok: false`, naming `DOCS_TOKEN` and the `docs` entry. |
 
 ## Migration (SC-03)
 
