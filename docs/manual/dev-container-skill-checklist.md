@@ -37,7 +37,7 @@ For a local image instead of the published one, tell the agent the image ref to 
 
 ## Presets (SC-01 Presets part, SC-06, SC-10)
 
-These write `presets/`, so run them against a throwaway checkout, not your own: `git worktree add $T/ds && (cd $T/ds/installer && npx -y pnpm@11.0.0 install --frozen-lockfile) && (cd $T/ds/skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile) && ln -sfn $T/ds/skills/dev-container $T/claude/skills/dev-container`. Seed two Presets in `$T/ds/presets/`: `web.json` (description, two skills, an `mcp-remote` with egress `docs.example.com`, top-level egress `cdn.example.com`) , `api.json` (description, one other skill, top-level egress `cdn.example.com` and `api.example.com`) and `dup.json` (description, one skill with the same directory name as one in `web`). Fake SHAs are fine; answer "no" to starting the container.
+These write `presets/`, so run them against a throwaway checkout, not your own: `git worktree add $T/ds && (cd $T/ds/installer && npx -y pnpm@11.0.0 install --frozen-lockfile) && (cd $T/ds/skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile) && ln -sfn $T/ds/skills/dev-container $T/claude/skills/dev-container`. Seed two Presets in `$T/ds/presets/`: `web.json` (description, two skills, an `mcp-remote` with egress `docs.example.com`, top-level egress `cdn.example.com`), `api.json` (description, one other skill, top-level egress `cdn.example.com` and `api.example.com`) and `dup.json` (description, one skill with the same directory name as one in `web`). Fake SHAs are fine; answer "no" to starting the container.
 
 | # | Prompt | Expect |
 | --- | --- | --- |
