@@ -5,16 +5,20 @@
   "build": { "dockerfile": "Dockerfile", "context": "../.." },
   "remoteUser": "node",
   // Root only for the start-up entrypoint; every dev-user process runs as `node`
-  // (remoteUser). Template adds --cap-drop=ALL, so root holds just these two caps.
+  // (remoteUser). Template adds --cap-drop=ALL, so root holds just these caps.
+  // DAC_READ_SEARCH lets root read the project's .devcontainer/extensions.json
+  // when the project directory is owner-only (mode 700), which is common.
   "containerUser": "root",
   "features": { "./.devcontainer/features/egress": {} },
-  "capAdd": ["NET_ADMIN", "NET_RAW"],
+  "capAdd": ["NET_ADMIN", "NET_RAW", "DAC_READ_SEARCH"],
   "init": true,
   "securityOpt": ["no-new-privileges"],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
     "CODEX_HOME": "/home/node/.codex",
     "DISABLE_AUTOUPDATER": "1",
+    // Where the start-up step reads the Consuming Project layer (.devcontainer/extensions.json).
+    "DEV_SETUP_WORKSPACE": "/workspace",
     "GIT_CONFIG_GLOBAL": "/etc/dev-setup/gitconfig",
     // pnpm supply-chain policy (ADR 0001). pnpm 11 honours only some keys from
     // its global config.yaml (not trustPolicy, strictDepBuilds, frozenLockfile),
@@ -42,7 +46,7 @@
     "VSCODE_IPC_HOOK_CLI": "",
     "VSCODE_GIT_IPC_HANDLE": ""
   },
-  "postStartCommand": "sh /etc/profile.d/dev-setup-scrub.sh",
+  "postStartCommand": "sh /usr/local/share/egress/wait-ready.sh && sh /etc/profile.d/dev-setup-scrub.sh",
   "mounts": [
     "source=claude-${devcontainerId},target=/home/node/.claude,type=volume",
     "source=codex-${devcontainerId},target=/home/node/.codex,type=volume"

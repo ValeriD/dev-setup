@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Thin CLI over the library: `install --mode build --manifest FILE...`.
 import { parseArgs } from 'node:util';
-import { installBuild, ManifestError } from './index.mjs';
+import { installBuild, installStart, ManifestError } from './index.mjs';
 
 const USAGE = `usage: dev-setup-installer install --mode build --manifest FILE [--manifest FILE...]
+       dev-setup-installer install --mode start --manifest FILE [--manifest FILE...] --project FILE
        [--git-base URL] [--claude-skills DIR] [--codex-skills DIR] [--egress-out FILE]`;
 
 function main(argv) {
@@ -13,6 +14,7 @@ function main(argv) {
     options: {
       mode: { type: 'string' },
       manifest: { type: 'string', multiple: true },
+      project: { type: 'string' },
       'git-base': { type: 'string' },
       'claude-skills': { type: 'string' },
       'codex-skills': { type: 'string' },
@@ -20,8 +22,10 @@ function main(argv) {
     },
   });
   if (positionals[0] !== 'install' || positionals.length !== 1 || !values.manifest?.length) throw new Error(USAGE);
-  if (values.mode !== 'build') throw new Error(`unsupported --mode ${JSON.stringify(values.mode)}: only "build" exists so far\n${USAGE}`);
-  const r = installBuild({
+  if (values.mode !== 'build' && values.mode !== 'start') throw new Error(`unsupported --mode ${JSON.stringify(values.mode)}\n${USAGE}`);
+  if ((values.mode === 'start') !== Boolean(values.project)) throw new Error(`--project is required in start mode and only valid there\n${USAGE}`);
+  const r = (values.mode === 'start' ? installStart : installBuild)({
+    project: values.project,
     manifests: values.manifest,
     gitBase: values['git-base'],
     claudeSkills: values['claude-skills'],

@@ -53,7 +53,7 @@ test('SC-06 (privilege): node has no sudo, no capabilities, no setuid path to ro
   const status = ok(a, 'cat /proc/self/status');
   assert.match(status, /^CapEff:\s+0+$/m);
   // Bounding set keeps only what the root start-up step needed; no-new-privileges neutralises it for node.
-  assert.match(status, /^CapBnd:\s+0*3000$/m);
+  assert.match(status, /^CapBnd:\s+0*3004$/m);
   assert.match(status, /^CapPrm:\s+0+$/m);
   assert.match(status, /^NoNewPrivs:\s+1$/m);
   assert.equal(ok(a, 'find / -xdev -type f \\( -perm -4000 -o -perm -2000 \\) 2>/dev/null; true').trim(), '');
@@ -61,8 +61,8 @@ test('SC-06 (privilege): node has no sudo, no capabilities, no setuid path to ro
   const hc = JSON.parse(run('docker', ['inspect', a.containerId, '--format', '{{json .HostConfig}}']).out);
   assert.equal(hc.Privileged, false);
   assert.deepEqual(hc.CapDrop, ['ALL']);
-  // Root's start-up step holds exactly these two caps; node's CapEff is 0 (above).
-  assert.deepEqual([...(hc.CapAdd ?? [])].sort(), ['CAP_NET_ADMIN', 'CAP_NET_RAW']);
+  // Root's start-up step holds exactly these caps; node's CapEff is 0 (above).
+  assert.deepEqual([...(hc.CapAdd ?? [])].sort(), ['CAP_DAC_READ_SEARCH', 'CAP_NET_ADMIN', 'CAP_NET_RAW']);
   assert.ok(!hc.Binds?.some((b) => b.includes('docker.sock')));
 });
 
