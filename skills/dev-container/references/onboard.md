@@ -12,7 +12,9 @@ Run `H resolve-target <what the user gave you>`. Add `--projects-root <dir>` onl
 
 If `hasDevcontainer` is true, stop: replacing an existing dev container is the migrate operation, which is not built yet.
 
-**Done when the project folder exists, is a git repository, and the repository question (new repos only) has an answer.** Keep the `resolve-target` JSON: later steps use `hasDocsAgents`, `hasPackageJson` and `lockfiles`.
+After a clone or `git init`, run `H resolve-target <path>` again: the facts from the first run describe a folder that did not exist yet.
+
+**Done when the project folder exists, is a git repository, and the repository question (new repos only) has an answer.** Keep the latest `resolve-target` JSON: later steps use `hasDocsAgents`, `hasPackageJson` and `lockfiles`.
 
 ## 2. Pick the Variant
 
@@ -42,7 +44,7 @@ On yes, edit the file at `path` yourself: add or change only the keys in `missin
 
 ## 5. Start the container and the first lockfile
 
-Ask once: "Start the dev container now?" On no, skip to step 6 and say in the summary how to start it later (VS Code "Reopen in Container"); the first lockfile then still needs creating, so mention that too.
+Ask once: "Start the dev container now? Starting (or later recreating) it ends any agent sessions running inside." On no, skip to step 6 and say in the summary how to start it later (VS Code "Reopen in Container"); the first lockfile then still needs creating, so mention that too.
 
 On yes, run `H up <path>`. Then branch on the `lockfiles` from step 1:
 
@@ -57,7 +59,7 @@ On yes, run `H up <path>`. Then branch on the `lockfiles` from step 1:
 Print:
 
 - the project path, the Variant, and the image digest (marked unverified);
-- every file created or changed, all uncommitted, for the user to review and commit;
+- every file created or changed (including `package.json` and `pnpm-lock.yaml` from step 5), all uncommitted, for the user to review and commit;
 - the GitHub repository created, if any;
 - anything declined or still missing (VS Code settings, container not started, lockfile conversion).
 

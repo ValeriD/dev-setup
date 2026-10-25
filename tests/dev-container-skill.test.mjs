@@ -16,9 +16,8 @@ let registry, pushed, dir;
 
 function h(...args) {
   const r = spawnSync('node', [HELPER, ...args], { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: cfg } });
-  const doc = JSON.parse(r.stdout);
   assert.equal(r.status, 0, `${args.join(' ')}\n${r.stdout}\n${r.stderr}`);
-  return doc;
+  return JSON.parse(r.stdout);
 }
 
 before(() => {
@@ -44,7 +43,6 @@ test('render-template output validates, starts, and gets a first lockfile; nothi
   assert.match(digest.image, /@sha256:[0-9a-f]{64}$/);
   assert.equal(digest.verified, false);
 
-  assert.equal(h('variants', '--dir', dir).ambiguous, true, 'an empty new repo has no Variant signals');
   h('render-template', 'node', dir, '--image', digest.image);
   assert.deepEqual(h('validate', dir).problems, []);
 

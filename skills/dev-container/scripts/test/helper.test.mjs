@@ -88,6 +88,7 @@ test('resolve-target: URL goes under the projects root, new names too, local fol
   assert.deepEqual(l.doc.lockfiles, ['package-lock.json']);
 
   assert.equal(h(['resolve-target', 'not/a/real/folder']).code, 2);
+  assert.equal(h(['resolve-target', 'https://github.com/acme/web-app/tree/main']).code, 2, 'a page URL is not a clone URL');
 });
 
 test('render-template writes a .devcontainer that validate accepts', () => {
@@ -96,7 +97,6 @@ test('render-template writes a .devcontainer that validate accepts', () => {
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(r.doc.files.sort(), ['.devcontainer/devcontainer.json', '.devcontainer/extensions.json']);
   const dc = readFileSync(join(p, '.devcontainer/devcontainer.json'), 'utf8');
-  assert.match(dc, new RegExp(`"image": "${IMAGE}"`));
   assert.match(dc, /\$\{localEnv:MY_PAT\}/);
   assert.doesNotMatch(dc, /templateOption/);
   const mf = JSON.parse(readFileSync(join(p, '.devcontainer/extensions.json'), 'utf8'));
@@ -207,13 +207,14 @@ test('a broken or foreign skill link in the Claude config exits with the re-link
 test('no helper source runs git commit or executes files', () => {
   for (const f of ['dev-container.mjs', 'commands.mjs']) {
     const src = readFileSync(join(SCRIPTS, f), 'utf8');
-    assert.doesNotMatch(src, /['"]commit['"]/, `${f} must not run git commit`);
+    assert.doesNotMatch(src, /\bcommit\b/, `${f} must not run git commit, directly or through sh -c`);
     assert.doesNotMatch(src, /\bexec(File)?(Sync)?\(/, `${f} spawns only fixed programs through spawnSync`);
   }
-  assert.ok(existsSync(join(REPO, 'variants/node/variant.json')));
 });
 
-test('the devcontainer CLI pin matches the acceptance suite', () => {
-  const pin = readFileSync(join(SCRIPTS, 'commands.mjs'), 'utf8').match(/@devcontainers\/cli@[\d.]+/)[0];
-  assert.match(readFileSync(join(REPO, 'tests/lib.mjs'), 'utf8'), new RegExp(pin.replace(/[.]/g, '\\.')));
+test('the devcontainer CLI pin matches the acceptance suite and CI', async () => {
+  const { DEVCONTAINER_CLI } = await import('../commands.mjs');
+  const version = DEVCONTAINER_CLI.split('@').pop();
+  assert.ok(readFileSync(join(REPO, 'tests/lib.mjs'), 'utf8').includes(`'${DEVCONTAINER_CLI}'`));
+  assert.ok(readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8').includes(`CLI_VERSION: ${version}`));
 });

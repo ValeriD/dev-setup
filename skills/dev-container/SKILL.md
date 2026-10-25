@@ -1,6 +1,6 @@
 ---
 name: dev-container
-description: Wire a project to a hardened dev-setups dev container from the host. Use when the user wants to set up, onboard or containerise a project (a local folder, a GitHub URL, or a new repo) with a dev container.
+description: Wire a project to a hardened dev-setups dev container from the host. Use when the user wants to onboard a project (a local folder, a GitHub URL, or a new repo) onto a dev container.
 ---
 
 # dev-container

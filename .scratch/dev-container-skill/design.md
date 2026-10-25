@@ -113,7 +113,7 @@ Paths are navigation hints.
 ## Constraints
 
 - The helper never runs fetched content. Fetched sources go into a fresh `mkdtemp` directory and are read as data. Inventory heuristics (detected hosts) are labelled as heuristics.
-- The helper never writes project files, apart from `render-template` writing into `.devcontainer/`. Every other mutation is an agent edit followed by `validate`, so the confirmation points stay in the skill's conversation.
+- The helper never writes project files, apart from `render-template` writing into `.devcontainer/` and `first-lockfile`, whose in-container pnpm run creates `pnpm-lock.yaml` (and `package.json` when there was none; amended in ticket 01). Every other mutation is an agent edit followed by `validate`, so the confirmation points stay in the skill's conversation.
 - No subcommand accepts a secret value, and no subcommand commits. `status` reports secret names only.
 - `verify-image` fails closed. A missing signature, an identity mismatch or missing provenance is a hard failure, with no override flag.
 - The skill must not invoke `/setup-matt-pocock-skills`, and must not write `docs/agents/` or `.scratch/`.

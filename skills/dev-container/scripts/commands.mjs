@@ -118,7 +118,9 @@ function resolveTarget([target], opts) {
   if (GIT_URL.test(target)) {
     kind = 'url';
     url = target;
-    const name = basename(target.replace(/\/+$/, '').replace(/^.*:/, '')).replace(/\.git$/, '');
+    const web = target.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/*$/);
+    if (/^https?:\/\/github\.com\//.test(target) && !web) throw new UsageError(`${target} is not a repository URL (expected https://github.com/<owner>/<repo>)`);
+    const name = web ? web[2] : basename(target.replace(/\/+$/, '').replace(/^.*:/, '')).replace(/\.git$/, '');
     if (!NEW_NAME.test(name)) throw new UsageError(`cannot derive a folder name from ${target}`);
     path = join(root, name);
   } else {
@@ -153,7 +155,7 @@ function imageDigest([variant], { ref }, { repo }) {
   const r = spawnSync('docker', ['buildx', 'imagetools', 'inspect', source, '--format', '{{json .Manifest}}'], { encoding: 'utf8' });
   if (r.status !== 0) return { doc: { ok: false, ref: source, error: `cannot read ${source} from the registry: ${(r.stderr || r.error?.message || '').trim()}` } };
   const digest = JSON.parse(r.stdout).digest;
-  if (!/^sha256:[0-9a-f]{64}$/.test(digest ?? '')) return { doc: { ok: false, ref: source, error: `unexpected manifest from ${source}` } };
+  if (!DIGEST_REF.test(`@${digest}`)) return { doc: { ok: false, ref: source, error: `unexpected manifest from ${source}` } };
   return {
     doc: {
       ok: true,
