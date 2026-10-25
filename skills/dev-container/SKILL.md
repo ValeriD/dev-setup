@@ -1,6 +1,6 @@
 ---
 name: dev-container
-description: Wire a project to a hardened dev-setups dev container from the host. Use when the user wants to onboard a project (a local folder, a GitHub URL, or a new repo) onto a dev container.
+description: Wire a project to a hardened dev-setups dev container from the host. Use when the user wants to onboard a project (a local folder, a GitHub URL, or a new repo) onto a dev container, or migrate an existing project (its own dev container, npm or yarn lockfile) onto one.
 ---
 
 # dev-container
@@ -30,5 +30,6 @@ These hold in every operation:
 ## Operations
 
 - **Onboard** a local folder, a GitHub URL or a new repo: read [references/onboard.md](references/onboard.md) and follow it.
+- **Migrate** a project that has its own `.devcontainer/` or an npm or yarn lockfile: read [references/migrate.md](references/migrate.md) and follow it.
 
-Other operations (migrate an existing dev container, add or remove Agent Extensions, egress, secrets, image updates, Presets, status) are not built yet. Say so plainly and stop.
+Other operations (add or remove Agent Extensions, egress, secrets, image updates, Presets, status) are not built yet. Say so plainly and stop.

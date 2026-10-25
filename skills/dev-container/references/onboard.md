@@ -10,7 +10,7 @@ Run `H resolve-target <what the user gave you>`. Add `--projects-root <dir>` onl
 - `local`: use `path` as it is. If `isGitRepo` is false, run `git init` there.
 - `new`: create `path`, run `git init` in it. Then ask once: "Create a private GitHub repository `<name>` for it?" Only on yes, run `gh repo create <name> --private --source <path> --remote origin`. On no, it stays local.
 
-If `hasDevcontainer` is true, stop: replacing an existing dev container is the migrate operation, which is not built yet.
+If `hasDevcontainer` is true, switch to [migrate.md](migrate.md): replacing an existing dev container is the migrate operation.
 
 After a clone or `git init`, run `H resolve-target <path>` again: the facts from the first run describe a folder that did not exist yet.
 
@@ -50,7 +50,7 @@ On yes, run `H up <path>`. Then branch on the `lockfiles` from step 1:
 
 - None: run `H first-lockfile <path>`. The image enforces frozen installs, so this one install runs with `--no-frozen-lockfile` inside the container; it also creates `package.json` when there was none. Tell the user it created `pnpm-lock.yaml` and why.
 - Only `pnpm-lock.yaml`: nothing to do.
-- `package-lock.json`, `npm-shrinkwrap.json` or `yarn.lock`: tell the user installs will fail inside the container until the project is converted to pnpm (the migrate operation, not built yet). Leave the lockfile alone.
+- `package-lock.json`, `npm-shrinkwrap.json` or `yarn.lock`: tell the user installs will fail inside the container until the project is converted to pnpm (the migrate operation). Leave the lockfile alone.
 
 **Done when the container started (and the lockfile step ran), or the user declined.**
 

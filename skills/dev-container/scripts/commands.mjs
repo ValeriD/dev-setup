@@ -1,9 +1,10 @@
 // Subcommands of the dev-container helper. Each returns { doc, code } for the
 // entry point to print. The helper reads repository data, validates, renders
-// the Template into `.devcontainer/` and drives the devcontainer CLI; every
-// other project edit is the agent's, followed by `validate`.
+// the Template into `.devcontainer/` and drives the devcontainer CLI (pnpm runs
+// only inside the container); every other project edit is the agent's,
+// followed by `validate`.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -25,22 +26,27 @@ const USAGE = `usage: dev-container.mjs <command> [args]
   variants [--dir DIR]                          list Variants; with --dir, propose one
   resolve-target TARGET [--projects-root DIR]   URL, local folder or new name -> project path and facts
   image-digest VARIANT [--ref IMAGE]            current registry digest of the Variant image (unverified)
-  render-template VARIANT DIR --image REF@sha256:... [--option NAME=VALUE]...
+  render-template VARIANT DIR --image REF@sha256:... [--option NAME=VALUE]... [--replace]
+                                                --replace deletes an existing .devcontainer/ first (migrate)
   validate DIR                                  check .devcontainer/devcontainer.json and extensions.json
   vscode-settings [--settings FILE]             check the host VS Code settings ADR 0003 relies on
   up DIR [--recreate]                           start (or recreate) the project's container
-  first-lockfile DIR                            create the first pnpm lockfile inside the container`;
+  first-lockfile DIR                            create the first pnpm lockfile inside the container
+  import-lockfile DIR                           convert an npm/yarn lockfile with pnpm import inside the container
+  frozen-install DIR                            pnpm install --frozen-lockfile inside the container; lists blocked builds`;
 
 const COMMANDS = {
   check: { positionals: 0, options: {}, fn: (_, __, ctx) => ({ doc: { ok: true, repo: ctx.repo } }) },
   variants: { positionals: 0, options: { dir: { type: 'string' } }, fn: variants },
   'resolve-target': { positionals: 1, options: { 'projects-root': { type: 'string' } }, fn: resolveTarget },
   'image-digest': { positionals: 1, options: { ref: { type: 'string' } }, fn: imageDigest },
-  'render-template': { positionals: 2, options: { image: { type: 'string' }, option: { type: 'string', multiple: true } }, fn: renderTemplate },
+  'render-template': { positionals: 2, options: { image: { type: 'string' }, option: { type: 'string', multiple: true }, replace: { type: 'boolean' } }, fn: renderTemplate },
   validate: { positionals: 1, options: {}, fn: validate },
   'vscode-settings': { positionals: 0, options: { settings: { type: 'string' } }, fn: vscodeSettings },
   up: { positionals: 1, options: { recreate: { type: 'boolean' } }, fn: up },
   'first-lockfile': { positionals: 1, options: {}, fn: firstLockfile },
+  'import-lockfile': { positionals: 1, options: {}, fn: importLockfile },
+  'frozen-install': { positionals: 1, options: {}, fn: frozenInstall },
 };
 
 export async function run(argv, ctx) {
@@ -175,14 +181,15 @@ function filesUnder(dir, prefix = '') {
     d.isDirectory() ? filesUnder(join(dir, d.name), join(prefix, d.name)) : [join(prefix, d.name)]);
 }
 
-function renderTemplate([variant, dir], { image, option = [] }, { repo }) {
+function renderTemplate([variant, dir], { image, option = [], replace }, { repo }) {
   requireVariant(repo, variant);
   if (!image) throw new UsageError('render-template: --image is required');
   if (!DIGEST_REF.test(image)) throw new UsageError(`--image must be digest-pinned (…@sha256:<64 hex>), got ${image}`);
   const project = resolve(dir);
   if (!existsSync(project) || !statSync(project).isDirectory()) throw new Error(`${project} is not a directory`);
-  if (existsSync(join(project, '.devcontainer/devcontainer.json'))) {
-    throw new Error(`${project}/.devcontainer/devcontainer.json already exists; replacing an existing dev container is the migrate operation`);
+  const devcontainerDir = join(project, '.devcontainer');
+  if (!replace && existsSync(join(devcontainerDir, 'devcontainer.json'))) {
+    throw new Error(`${project}/.devcontainer/devcontainer.json already exists; replacing an existing dev container is the migrate operation (--replace)`);
   }
 
   const declared = templateManifest(repo, variant).options ?? {};
@@ -206,6 +213,13 @@ function renderTemplate([variant, dir], { image, option = [] }, { repo }) {
   if (!out.some((f) => f.rel === 'extensions.json')) {
     out.push({ rel: 'extensions.json', text: JSON.stringify({ $schema: schema.$id, extensions: [] }, null, 2) + '\n' });
   }
+  // Everything that can fail is checked above, so --replace never leaves the project without a dev container.
+  let replaced = [];
+  if (replace && existsSync(devcontainerDir)) {
+    if (!lstatSync(devcontainerDir).isDirectory()) throw new Error(`${devcontainerDir} is not a directory; nothing was written`);
+    replaced = filesUnder(devcontainerDir).map((rel) => join('.devcontainer', rel));
+    rmSync(devcontainerDir, { recursive: true });
+  }
   for (const f of out) {
     const target = join(project, '.devcontainer', f.rel);
     if (existsSync(target)) throw new Error(`${target} already exists; nothing was written`);
@@ -215,7 +229,7 @@ function renderTemplate([variant, dir], { image, option = [] }, { repo }) {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, f.text);
   }
-  return { doc: { ok: true, dir: project, variant, options: values, files: out.map((f) => join('.devcontainer', f.rel)) } };
+  return { doc: { ok: true, dir: project, variant, options: values, files: out.map((f) => join('.devcontainer', f.rel)), replaced } };
 }
 
 // ---------- Validation ----------
@@ -324,4 +338,52 @@ function firstLockfile([dir]) {
   const created = existsSync(join(project, 'pnpm-lock.yaml'));
   if (r.code !== 0 || !created) return { doc: { ok: false, dir: project, error: 'pnpm install inside the container failed', log: tail(r.err + '\n' + r.out) } };
   return { doc: { ok: true, dir: project, lockfile: 'pnpm-lock.yaml', createdPackageJson: !before.hasPackageJson } };
+}
+
+const FOREIGN_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock'];
+
+function importLockfile([dir]) {
+  const project = resolve(dir);
+  const before = projectFacts(project);
+  const from = before.lockfiles.filter((f) => FOREIGN_LOCKFILES.includes(f));
+  if (before.lockfiles.includes('pnpm-lock.yaml')) return { doc: { ok: false, dir: project, error: 'project already has pnpm-lock.yaml; nothing to convert' } };
+  if (!from.length) return { doc: { ok: false, dir: project, error: `no ${FOREIGN_LOCKFILES.join(', ')} to convert` } };
+  // packageManager first: pnpm refuses to run in a project that declares another package manager.
+  // `pnpm import` honours the image's frozen-lockfile policy, so it opts out for this one run.
+  const script = 'npm pkg set "packageManager=pnpm@$(pnpm --version)" && pnpm_config_frozen_lockfile=false pnpm import' +
+    ` && rm -f ${from.join(' ')} && npm pkg get packageManager`;
+  const r = devcontainer(['exec', '--workspace-folder', project, 'sh', '-c', script]);
+  if (r.code !== 0 || !existsSync(join(project, 'pnpm-lock.yaml'))) {
+    return { doc: { ok: false, dir: project, error: 'pnpm import inside the container failed; package.json may already carry the new packageManager, the old lockfile is kept', log: tail(r.err + '\n' + r.out) } };
+  }
+  const packageManager = JSON.parse(readFileSync(join(project, 'package.json'), 'utf8')).packageManager;
+  return { doc: { ok: true, dir: project, imported: from, removed: from, lockfile: 'pnpm-lock.yaml', packageManager } };
+}
+
+/** `pkg@1.2.3` or `@scope/pkg@1.2.3` -> { name, version }. */
+function parsePackageId(id) {
+  const at = id.lastIndexOf('@');
+  return at > 0 ? { name: id.slice(0, at), version: id.slice(at + 1) } : { name: id, version: null };
+}
+
+function frozenInstall([dir]) {
+  const project = resolve(dir);
+  if (!existsSync(join(project, 'pnpm-lock.yaml'))) {
+    return { doc: { ok: false, dir: project, error: 'no pnpm-lock.yaml: convert the project (import-lockfile) or create a first lockfile before a frozen install' } };
+  }
+  const r = devcontainer(['exec', '--workspace-folder', project, 'pnpm', 'install', '--frozen-lockfile']);
+  const output = r.out + '\n' + r.err;
+  if (r.code === 0) return { doc: { ok: true, dir: project, installed: true, blockedBuilds: [] } };
+  // strictDepBuilds: the dependencies are installed, but pnpm fails naming the build scripts it did not run.
+  const m = output.match(/ERR_PNPM_IGNORED_BUILDS\s+Ignored build scripts: ([^\n]+?)\.?\s*$/m);
+  if (!m) return { doc: { ok: false, dir: project, error: 'pnpm install --frozen-lockfile inside the container failed', log: tail(output) } };
+  return {
+    doc: {
+      ok: true,
+      dir: project,
+      installed: true,
+      blockedBuilds: m[1].split(/,\s*/).map(parsePackageId),
+      note: 'Installs fail until each blocked package is decided in pnpm-workspace.yaml under allowBuilds (true runs its script, false skips it); then run pnpm rebuild in the container.',
+    },
+  };
 }

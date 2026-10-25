@@ -123,6 +123,36 @@ test('render-template refuses a tag-only image, unknown options and an existing 
   assert.deepEqual(snapshot(existing), ['.devcontainer', '.devcontainer/devcontainer.json']);
 });
 
+test('render-template --replace swaps an existing .devcontainer/ for the Template and lists what it removed', () => {
+  const p = dir({
+    'package.json': '{}',
+    '.devcontainer/devcontainer.json': '{ "image": "mcr.microsoft.com/devcontainers/javascript-node" }',
+    '.devcontainer/Dockerfile': 'FROM node:24\n',
+    '.devcontainer/scripts/setup.sh': 'echo hi\n',
+  });
+  // A failing render (unknown option) keeps the old dev container.
+  assert.equal(h(['render-template', 'node', p, '--image', IMAGE, '--option', 'nope=1', '--replace']).code, 2);
+  assert.ok(existsSync(join(p, '.devcontainer/Dockerfile')));
+
+  const r = h(['render-template', 'node', p, '--image', IMAGE, '--replace']);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(r.doc.replaced.sort(), ['.devcontainer/Dockerfile', '.devcontainer/devcontainer.json', '.devcontainer/scripts/setup.sh']);
+  assert.deepEqual(snapshot(join(p, '.devcontainer')), ['devcontainer.json', 'extensions.json']);
+  assert.equal(h(['validate', p]).code, 0);
+});
+
+test('import-lockfile and frozen-install refuse projects they cannot act on, writing nothing', () => {
+  const none = dir({ 'package.json': '{}' });
+  assert.match(h(['import-lockfile', none]).doc.error, /no package-lock.json/);
+  assert.match(h(['frozen-install', none]).doc.error, /no pnpm-lock.yaml/);
+  const pnpm = dir({ 'package.json': '{}', 'pnpm-lock.yaml': '' });
+  const r = h(['import-lockfile', pnpm]);
+  assert.equal(r.code, 1);
+  assert.match(r.doc.error, /already has pnpm-lock.yaml/);
+  assert.deepEqual(snapshot(none), ['package.json']);
+  assert.deepEqual(snapshot(pnpm), ['package.json', 'pnpm-lock.yaml']);
+});
+
 test('validate reports broken JSONC, unpinned images, placeholders and invalid manifests', () => {
   const good = JSON.stringify({ extensions: [] });
   const cases = [
