@@ -6,7 +6,8 @@ import { installBuild, installStart, ManifestError } from './index.mjs';
 const USAGE = `usage: dev-setup-installer install --mode build --manifest FILE [--manifest FILE...]
        dev-setup-installer install --mode start --manifest FILE [--manifest FILE...] --project FILE
        [--git-base URL] [--claude-skills DIR] [--codex-skills DIR] [--egress-out FILE]
-       [--mcp-root DIR] [--claude-mcp FILE] [--codex-config FILE] [--secrets-out FILE]`;
+       [--mcp-root DIR] [--claude-mcp FILE] [--codex-config FILE] [--secrets-out FILE]
+       [--claude-policy FILE] [--claude-settings FILE] [--claude-dropin FILE] [--marketplaces DIR] [--hooks DIR]`;
 
 function main(argv) {
   const { positionals, values } = parseArgs({
@@ -24,6 +25,11 @@ function main(argv) {
       'claude-mcp': { type: 'string' },
       'codex-config': { type: 'string' },
       'secrets-out': { type: 'string' },
+      'claude-policy': { type: 'string' },
+      'claude-settings': { type: 'string' },
+      'claude-dropin': { type: 'string' },
+      marketplaces: { type: 'string' },
+      hooks: { type: 'string' },
     },
   });
   if (positionals[0] !== 'install' || positionals.length !== 1 || !values.manifest?.length) throw new Error(USAGE);
@@ -40,8 +46,13 @@ function main(argv) {
     claudeMcp: values['claude-mcp'],
     codexConfig: values['codex-config'],
     secretsOut: values['secrets-out'],
+    claudePolicy: values['claude-policy'],
+    claudeSettings: values['claude-settings'],
+    claudeDropin: values['claude-dropin'],
+    marketplaces: values.marketplaces,
+    hooks: values.hooks,
   });
-  console.log(`installer: ${r.skills.length} skill(s), ${r.mcp.length} MCP package(s), ${r.egress.length} egress domain(s)`);
+  console.log(`installer: ${r.skills.length} skill(s), ${r.plugins.length} plugin(s), ${r.hooks} hook(s), ${r.mcp.length} MCP package(s), ${r.egress.length} egress domain(s)`);
 }
 
 try {

@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, writeFileSync, existsSync, renameSync, rmSync 
 import { basename, join, dirname } from 'node:path';
 import { assertValidManifest, describeEntry, ManifestError } from './validate.mjs';
 import { installMcpPackages, writeMcpConfig } from './mcp.mjs';
+import { installClaude, writeJson } from './claude.mjs';
 import { fetchBySha, repoUrl, copyTree, pathInCheckout, DEFAULT_GIT_BASE } from './fetch.mjs';
 
 export const SYSTEM_PATHS = {
@@ -13,6 +14,12 @@ export const SYSTEM_PATHS = {
   claudeMcp: '/etc/claude-code/managed-mcp.json',
   codexConfig: '/etc/codex/config.toml',
   secretsOut: '/etc/dev-setup/mcp-secrets',
+  // Claude plugins and hooks: policy template in, managed settings out, generated marketplaces and hook scripts.
+  claudePolicy: '/opt/dev-setup/claude-policy.json',
+  claudeSettings: '/etc/claude-code/managed-settings.json',
+  claudeDropin: '/etc/claude-code/managed-settings.d/50-project.json',
+  marketplaces: '/opt/dev-setup/marketplaces',
+  hooks: '/opt/dev-setup/hooks',
 };
 
 /** Read and validate a manifest file. Problems are prefixed with the file path. */
@@ -82,16 +89,13 @@ export function renderAllowlist(domains, sources = []) {
 
 /**
  * Install every skill entry into the Agent skill directories its `agents` name.
- * Each pinned commit is fetched once. Other kinds are not implemented yet.
+ * Other kinds are skipped here (see installLayerExtensions).
  */
 export function installSkills(extensions, { claudeSkills, codexSkills, gitBase = DEFAULT_GIT_BASE, overwrite = false }) {
   const targets = { claude: claudeSkills, codex: codexSkills };
   const installed = [];
   extensions.forEach((entry, i) => {
-    if (entry.kind === 'mcp' || entry.kind === 'mcp-remote') return; // installMcpPackages / writeMcpConfig
-    if (entry.kind !== 'skill') {
-      throw new ManifestError([`${entry.layer}: ${describeEntry(entry, i)}: kind "${entry.kind}" is not installable yet`]);
-    }
+    if (entry.kind !== 'skill') return; // other kinds have their own installers
     const name = skillName(entry);
     let checkout;
     try {
@@ -156,8 +160,12 @@ export function installBuild({ manifests, gitBase, ...paths }) {
   const skills = installSkills(merged.extensions, { claudeSkills: out.claudeSkills, codexSkills: out.codexSkills, gitBase });
   const mcp = installMcpPackages(merged.extensions, { mcpRoot: out.mcpRoot });
   writeMcpConfig(merged.extensions, out);
+  // The image layer's plugins and hooks are rendered into the managed settings base file, on top of the policy template.
+  const claude = installClaude(merged.extensions, { layer: 'image', marketplaces: out.marketplaces, hooks: out.hooks, gitBase });
+  const policy = JSON.parse(readFileSync(out.claudePolicy, 'utf8'));
+  writeJson(out.claudeSettings, { ...policy, ...claude.settings });
   writeAllowlist(out.egressOut, merged.egress, manifests);
-  return { skills, mcp, egress: merged.egress };
+  return { skills, mcp, plugins: claude.plugins, hooks: claude.hooks, egress: merged.egress };
 }
 
 /**
@@ -176,6 +184,9 @@ export function installStart({ manifests, project, gitBase, ...paths }) {
   const skills = installSkills(mine, { claudeSkills: out.claudeSkills, codexSkills: out.codexSkills, gitBase, overwrite: true });
   const mcp = installMcpPackages(mine, { mcpRoot: out.mcpRoot, overwrite: true });
   writeMcpConfig(merged.extensions, out); // all layers: the rendered files are regenerated whole
+  // The project layer's plugins and hooks go into a drop-in that Claude merges over the image's base file.
+  const claude = installClaude(mine, { layer: 'project', marketplaces: out.marketplaces, hooks: out.hooks, gitBase });
+  writeJson(out.claudeDropin, claude.settings);
   writeAllowlist(out.egressOut, merged.egress, files);
-  return { skills, mcp, egress: merged.egress };
+  return { skills, mcp, plugins: claude.plugins, hooks: claude.hooks, egress: merged.egress };
 }

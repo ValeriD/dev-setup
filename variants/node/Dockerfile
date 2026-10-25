@@ -24,7 +24,8 @@ RUN npm install -g --ignore-scripts \
 
 # Base material: root-owned policy files and wrappers at fixed system paths.
 COPY base/bin/ /usr/local/bin/
-COPY base/claude/managed-settings.json /etc/claude-code/managed-settings.json
+# Claude policy template; the installer renders /etc/claude-code/managed-settings.json from it.
+COPY base/claude/managed-settings.json /opt/dev-setup/claude-policy.json
 COPY base/codex/config.toml /etc/codex/config.toml
 COPY base/egress/ /usr/local/share/egress/
 COPY base/mcp/check-secrets.sh /usr/local/share/dev-setup/check-secrets.sh
@@ -63,14 +64,14 @@ RUN mkdir -p /opt/dev-setup/mcp /etc/dev-setup \
       --manifest /opt/dev-setup/manifests/base.json \
       --manifest /opt/dev-setup/manifests/node.json \
  && rm -rf /root/.local/share/pnpm /root/.cache \
- && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /etc/dev-setup /usr/local/share/egress /opt/dev-setup/mcp
+ && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /etc/dev-setup /usr/local/share/egress /opt/dev-setup/mcp /opt/dev-setup/marketplaces /opt/dev-setup/hooks
 
 # Login-volume mount points exist and belong to node, so new named volumes
 # inherit that ownership.
 RUN mkdir -p /home/node/.claude /home/node/.codex \
  && chown node:node /home/node/.claude /home/node/.codex \
  && chmod 755 /usr/local/bin/claude-yolo /usr/local/bin/codex-yolo /usr/local/share/dev-setup/check-secrets.sh \
- && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /usr/local/share/egress \
+ && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /usr/local/share/egress /opt/dev-setup/marketplaces /opt/dev-setup/hooks \
  && chmod 755 /usr/local/share/egress/*.sh \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod a-s {} + \
  && ! find / -xdev -type f \( -perm -4000 -o -perm -2000 \) | grep -q .

@@ -3,3 +3,4 @@ export { schema, AGENTS, CAPABILITIES, ManifestError, describeEntry, checkPinned
 export { DEFAULT_GIT_BASE, repoUrl, fetchBySha, copyTree, pathInCheckout } from './fetch.mjs';
 export { SYSTEM_PATHS, loadManifest, skillName, mergeLayers, renderAllowlist, installSkills, installBuild, installStart } from './install.mjs';
 export { secretNames, installMcpPackages, renderClaudeMcp, renderCodexMcp, withCodexMcpBlock, writeMcpConfig } from './mcp.mjs';
+export { installClaude } from './claude.mjs';
