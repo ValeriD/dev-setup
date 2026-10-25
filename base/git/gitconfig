@@ -1,0 +1,5 @@
+# Image-owned, read-only. GIT_CONFIG_GLOBAL points here, so neither VS Code nor
+# the user can add credential helpers. Identity comes from GIT_AUTHOR_* and
+# GIT_COMMITTER_* env vars passed through from the host.
+[credential]
+	helper = /usr/local/bin/git-credential-dev-setup

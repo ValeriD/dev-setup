@@ -120,7 +120,7 @@ test('SC-18: .git/hooks, .git/config, .devcontainer/ and .vscode/ are read-only;
     assert.notEqual(sh(a, w).code, 0, `should be read-only: ${w}`);
   }
   assert.deepEqual(run("ls", [join(a.dir, ".git/hooks")]).out.split("\n").filter((f) => f && !f.endsWith(".sample")), [], 'host hooks dir untouched');
-  ok(a, 'echo "console.log(1)" > /workspace/index.js && git add index.js && git -c user.name=t -c user.email=t@example.com commit -qm init && git log --oneline | wc -l');
+  ok(a, 'echo "console.log(1)" > /workspace/index.js && git add index.js && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com git commit -qm init && git log --oneline | wc -l');
   assert.ok(existsSync(join(a.dir, 'index.js')));
 });
 

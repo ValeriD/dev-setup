@@ -27,6 +27,15 @@ COPY base/bin/ /usr/local/bin/
 COPY base/claude/managed-settings.json /etc/claude-code/managed-settings.json
 COPY base/codex/config.toml /etc/codex/config.toml
 
+# Host-credential isolation: VS Code bridge scrubber (profile.d + bash.bashrc
+# hook + postStartCommand), read-only git config and the PAT-only credential helper.
+COPY base/vscode/dev-setup-scrub.sh /etc/profile.d/dev-setup-scrub.sh
+COPY base/git/gitconfig /etc/dev-setup/gitconfig
+COPY base/bin/git-credential-dev-setup /usr/local/bin/git-credential-dev-setup
+RUN chmod 755 /usr/local/bin/git-credential-dev-setup \
+ && chmod 644 /etc/profile.d/dev-setup-scrub.sh /etc/dev-setup/gitconfig \
+ && sed -i '1i . /etc/profile.d/dev-setup-scrub.sh' /etc/bash.bashrc
+
 # Login-volume mount points exist and belong to node, so new named volumes
 # inherit that ownership.
 RUN mkdir -p /home/node/.claude /home/node/.codex \

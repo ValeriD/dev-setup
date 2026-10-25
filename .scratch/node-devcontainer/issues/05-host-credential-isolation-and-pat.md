@@ -8,7 +8,7 @@
 
 **Blocked by:** 02 (Walking skeleton)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -26,9 +26,13 @@
   - SC-19 (automated helper probe; a real push is manual).
   - SC-02 (manual VS Code checklist in the repo docs).
 
-- [ ] `ssh-add -l` fails, and no `vscode-*.sock` remains after start, with simulated VS Code env and sockets
-- [ ] `git config --show-origin --get-all credential.helper` shows only the image helper, and VS Code cannot add its own
-- [ ] Host `~/.ssh`, `~/.npmrc`, `~/.aws`, the home directory and the Docker socket are absent
-- [ ] With a PAT env var set, the helper returns it for github.com and nothing for other hosts; without one it returns nothing
-- [ ] Commits use the name and email from host env vars
-- [ ] A manual checklist for VS Code "Reopen in Container" exists and covers SC-02 and the VS Code half of SC-03
+- [x] `ssh-add -l` fails, and no `vscode-*.sock` remains after start, with simulated VS Code env and sockets
+- [x] `git config --show-origin --get-all credential.helper` shows only the image helper, and VS Code cannot add its own
+- [x] Host `~/.ssh`, `~/.npmrc`, `~/.aws`, the home directory and the Docker socket are absent
+- [x] With a PAT env var set, the helper returns it for github.com and nothing for other hosts; without one it returns nothing
+- [x] Commits use the name and email from host env vars
+- [x] A manual checklist for VS Code "Reopen in Container" exists and covers SC-02 and the VS Code half of SC-03
+
+## Comments
+
+Git identity is passed as GIT_AUTHOR_*/GIT_COMMITTER_* env vars from host GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL; if unset on the host, they are empty and commits fail until identity is set. The last checklist item is satisfied by docs/manual/vscode-reopen-in-container.md; the real VS Code run and a real push remain manual. Automated tests: tests/credentials.test.mjs.
