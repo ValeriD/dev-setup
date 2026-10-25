@@ -281,6 +281,63 @@ test('validate rejects a skill name declared twice, e.g. by two adopted Presets'
   assert.match(twice.doc.problems.join(), /skill name "fmt" is already declared/);
 });
 
+// ---------- Egress and secrets (SC-07) ----------
+
+/** Adds remoteEnv lines to the rendered devcontainer.json as the agent would: a text edit that keeps the comments. */
+function addRemoteEnv(p, lines) {
+  const file = join(p, '.devcontainer/devcontainer.json');
+  const text = readFileSync(file, 'utf8');
+  assert.match(text, /"remoteEnv": \{\n/);
+  writeFileSync(file, text.replace('"remoteEnv": {\n', `"remoteEnv": {\n${lines.map((l) => `    ${l},\n`).join('')}`));
+  return readFileSync(file, 'utf8');
+}
+const stdioMcp = (name, env) => ({ kind: 'mcp', agents: ['claude', 'codex'], name, source: { npm: `@acme/${name}`, version: '1.2.3' }, env });
+
+test('a domain allowed in the project manifest is reported by validate; a URL is not a domain', () => {
+  const ok = h(['validate', project([], ['api.example.com'])]);
+  assert.equal(ok.code, 0, ok.out);
+  assert.deepEqual(ok.doc.egress, ['api.example.com']);
+
+  const url = h(['validate', project([], ['https://api.example.com/v1'])]);
+  assert.equal(url.code, 1);
+  assert.match(url.doc.problems.join(), /egress/);
+});
+
+test('validate passes a named secret with a ${localEnv:} remoteEnv entry and keeps the Template comments', () => {
+  const p = project([stdioMcp('search', ['FOO']), { ...remoteMcp('docs', 'docs.example.com'), bearerTokenEnv: 'DOCS_TOKEN' }]);
+  const text = addRemoteEnv(p, ['"FOO": "${localEnv:FOO}"', '"DOCS_TOKEN": "${localEnv:MY_DOCS_TOKEN}"']);
+  assert.match(text, /\/\/ MCP secrets:/);
+  const r = h(['validate', p]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.doc.secrets, [
+    { name: 'FOO', neededBy: ['extensions[0] (mcp "search")'], hostEnv: 'FOO' },
+    { name: 'DOCS_TOKEN', neededBy: ['extensions[1] (mcp-remote "docs")'], hostEnv: 'MY_DOCS_TOKEN' },
+  ]);
+});
+
+test('validate flags a named secret without a remoteEnv entry, or with a value instead of a host reference, never printing the value', () => {
+  const missing = h(['validate', project([stdioMcp('search', ['FOO'])])]);
+  assert.equal(missing.code, 1);
+  assert.match(missing.doc.problems.join(), /secret FOO \(named by extensions\[0\] \(mcp "search"\)\) has no remoteEnv entry; add "FOO": "\$\{localEnv:FOO\}"/);
+  assert.deepEqual(missing.doc.secrets, [{ name: 'FOO', neededBy: ['extensions[0] (mcp "search")'], hostEnv: null }]);
+
+  for (const value of ['s3cr3t-value', '${localEnv:FOO:s3cr3t-value}', '${containerEnv:FOO}']) {
+    const p = project([stdioMcp('search', ['FOO'])]);
+    addRemoteEnv(p, [`"FOO": ${JSON.stringify(value)}`]);
+    const r = h(['validate', p]);
+    assert.equal(r.code, 1, value);
+    assert.match(r.doc.problems.join(), /remoteEnv FOO must be a host reference/);
+    assert.doesNotMatch(r.out + r.err, /s3cr3t/, 'a value is never echoed');
+  }
+
+  // Without a remoteEnv object at all, every named secret is reported.
+  const bare = dir({
+    '.devcontainer/devcontainer.json': `{ "image": "${IMAGE}" }`,
+    '.devcontainer/extensions.json': JSON.stringify({ extensions: [stdioMcp('a', ['ONE', 'TWO'])] }),
+  });
+  assert.equal(h(['validate', bare]).doc.problems.filter((x) => /has no remoteEnv entry/.test(x)).length, 2);
+});
+
 test('plan-remove-preset drops exactly the tagged entries and the egress nothing else needs, and writes nothing', () => {
   const c = checkout({ 'web-app.json': WEB, 'api.json': API });
   const apiDocs = remoteMcp('api-docs', 'api.example.com');
