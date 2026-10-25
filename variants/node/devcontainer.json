@@ -46,7 +46,7 @@
     "VSCODE_IPC_HOOK_CLI": "",
     "VSCODE_GIT_IPC_HANDLE": ""
   },
-  "postStartCommand": "sh /usr/local/share/egress/wait-ready.sh && sh /etc/profile.d/dev-setup-scrub.sh",
+  "postStartCommand": "sh /usr/local/share/egress/wait-ready.sh && sh /etc/profile.d/dev-setup-scrub.sh && sh /usr/local/share/dev-setup/check-secrets.sh",
   "mounts": [
     "source=claude-${devcontainerId},target=/home/node/.claude,type=volume",
     "source=codex-${devcontainerId},target=/home/node/.codex,type=volume"

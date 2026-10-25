@@ -9,7 +9,7 @@
 
 **Blocked by:** 07 (Consuming Project layer installed at container start)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -27,7 +27,16 @@
 - **Validation seam:** container acceptance with a fixture stdio MCP package served from the local registry stub, and Agents' MCP listing commands.
 - **Coverage:** SC-17.
 
-- [ ] A stdio MCP server entry appears in both Agents' MCP listings, running from the pre-installed path
-- [ ] An `mcp-remote` entry without `egress` is rejected; with `egress`, its domain is reachable
-- [ ] A secret set in the host env reaches the MCP server's environment; `docker history` and a repo grep show no value
-- [ ] A named but missing secret prints a warning at attach
+- [x] A stdio MCP server entry appears in both Agents' MCP listings, running from the pre-installed path
+- [x] An `mcp-remote` entry without `egress` is rejected; with `egress`, its domain is reachable
+- [x] A secret set in the host env reaches the MCP server's environment; `docker history` and a repo grep show no value
+- [x] A named but missing secret prints a warning at attach
+
+## Comments
+
+- Implemented: `installer/src/mcp.mjs` (pnpm install of stdio servers into `/opt/dev-setup/mcp/<name>` under the pnpm policy, which the installer sets in the child env itself; rendering for Claude and Codex; secret-name list), hooks in `installBuild`/`installStart` (start mode renders from all layers, installs only project packages), `base/mcp/check-secrets.sh` run by the image `postStartCommand`, Template comment on `remoteEnv`, `tests/mcp.test.mjs`, and `smol-toml@1.9.1`.
+- Deviation 1: Claude has no non-exclusive managed MCP file. `managed-settings.d` has no MCP key (`managedMcpServers` and `mcpServers` there were ignored, verified with `claude mcp list`); only `/etc/claude-code/managed-mcp.json` works, and it gives the policy exclusive control: `claude mcp add` is refused. It is written only when some layer declares an MCP server, so projects without MCP are unaffected. Product owner: confirm that locking MCP to the manifest is wanted.
+- Deviation 2: schema for `mcp-remote` drops `env` and adds optional `bearerTokenEnv` (one host env var name), since a remote server needs a header mapping, not a process env. Rendered as Claude `Authorization: Bearer ${NAME}` and Codex `bearer_token_env_var`. Remote servers use each Agent native HTTP transport, not the `mcp-remote` npm bridge.
+- Deviation 3: Codex block is a marker-delimited generated section appended to `/etc/codex/config.toml` (hand-written defaults and comments untouched, rewritten whole on each run); `smol-toml` only serialises the table. Codex stdio servers receive secrets through `env_vars` (names only). Codex listing is verified at config level; the secret reaching a running Codex server is not exercised (no model call).
+- Duplicate MCP server names across layers are rejected. The kind `mcp` start-mode install needs the npm registry, which the Base allowlist already covers.
+- Belongs elsewhere: ticket 08 also edits `installBuild`/`installStart` and Claude managed settings; merge conflicts in `install.mjs` are expected (my lines: the `mcp` import, `SYSTEM_PATHS` additions, `installMcpPackages`/`writeMcpConfig` calls, the early `return` for MCP kinds in `installSkills`). The skill tickets may want to offer `mcp`/`mcp-remote` in add/remove and the secrets operation, using `bearerTokenEnv`/`env` and the Template `remoteEnv` pattern.
