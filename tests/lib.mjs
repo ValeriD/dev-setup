@@ -31,6 +31,7 @@ export function pins() {
 }
 
 export function buildImage() {
+  if (process.env.DEV_SETUP_TEST_SKIP_BUILD) return; // CI builds once and tests that image
   const dir = join(REPO, 'variants/node');
   must(cli(['build', '--workspace-folder', dir, '--config', join(dir, 'devcontainer.json'), '--image-name', IMAGE]), 'image build');
 }
