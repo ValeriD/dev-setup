@@ -123,7 +123,7 @@
               "agents": {},
               "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
               "url": { "type": "string", "pattern": "^https://" },
-              "env": { "$ref": "#/definitions/envNames" },
+              "bearerTokenEnv": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "description": "Name of the host env var holding a bearer token for the server. Only the name is declared, never the value." },
               "egress": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/domain" } }
             }
           }

@@ -2,12 +2,17 @@
 import { readFileSync, mkdirSync, writeFileSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, join, dirname } from 'node:path';
 import { assertValidManifest, describeEntry, ManifestError } from './validate.mjs';
+import { installMcpPackages, writeMcpConfig } from './mcp.mjs';
 import { fetchBySha, repoUrl, copyTree, pathInCheckout, DEFAULT_GIT_BASE } from './fetch.mjs';
 
 export const SYSTEM_PATHS = {
   claudeSkills: '/etc/claude-code/.claude/skills',
   codexSkills: '/etc/codex/skills',
   egressOut: '/usr/local/share/egress/allowlist.txt',
+  mcpRoot: '/opt/dev-setup/mcp',
+  claudeMcp: '/etc/claude-code/managed-mcp.json',
+  codexConfig: '/etc/codex/config.toml',
+  secretsOut: '/etc/dev-setup/mcp-secrets',
 };
 
 /** Read and validate a manifest file. Problems are prefixed with the file path. */
@@ -36,6 +41,7 @@ export function mergeLayers(layers) {
   const extensions = [];
   const egress = [];
   const skills = new Map();
+  const servers = new Map();
   const problems = [];
   for (const { label, manifest } of layers) {
     manifest.extensions.forEach((entry, i) => {
@@ -46,6 +52,13 @@ export function mergeLayers(layers) {
           return;
         }
         skills.set(n, `${label} extensions[${i}]`);
+      }
+      if (entry.kind === 'mcp' || entry.kind === 'mcp-remote') {
+        if (servers.has(entry.name)) {
+          problems.push(`${label}: ${describeEntry(entry, i)}: MCP server name "${entry.name}" is already declared by ${servers.get(entry.name)}`);
+          return;
+        }
+        servers.set(entry.name, `${label} extensions[${i}]`);
       }
       extensions.push({ ...entry, layer: label });
       for (const d of entry.egress ?? []) egress.push(d);
@@ -75,6 +88,7 @@ export function installSkills(extensions, { claudeSkills, codexSkills, gitBase =
   const targets = { claude: claudeSkills, codex: codexSkills };
   const installed = [];
   extensions.forEach((entry, i) => {
+    if (entry.kind === 'mcp' || entry.kind === 'mcp-remote') return; // installMcpPackages / writeMcpConfig
     if (entry.kind !== 'skill') {
       throw new ManifestError([`${entry.layer}: ${describeEntry(entry, i)}: kind "${entry.kind}" is not installable yet`]);
     }
@@ -140,8 +154,10 @@ export function installBuild({ manifests, gitBase, ...paths }) {
   const merged = mergeLayers(loadLayers(manifests));
   // Validation and fetching come before any write to the allowlist, so a bad entry leaves nothing half-installed there.
   const skills = installSkills(merged.extensions, { claudeSkills: out.claudeSkills, codexSkills: out.codexSkills, gitBase });
+  const mcp = installMcpPackages(merged.extensions, { mcpRoot: out.mcpRoot });
+  writeMcpConfig(merged.extensions, out);
   writeAllowlist(out.egressOut, merged.egress, manifests);
-  return { skills, egress: merged.egress };
+  return { skills, mcp, egress: merged.egress };
 }
 
 /**
@@ -158,6 +174,8 @@ export function installStart({ manifests, project, gitBase, ...paths }) {
   const merged = mergeLayers(loadLayers(files));
   const mine = merged.extensions.filter((e) => e.layer === project);
   const skills = installSkills(mine, { claudeSkills: out.claudeSkills, codexSkills: out.codexSkills, gitBase, overwrite: true });
+  const mcp = installMcpPackages(mine, { mcpRoot: out.mcpRoot, overwrite: true });
+  writeMcpConfig(merged.extensions, out); // all layers: the rendered files are regenerated whole
   writeAllowlist(out.egressOut, merged.egress, files);
-  return { skills, egress: merged.egress };
+  return { skills, mcp, egress: merged.egress };
 }

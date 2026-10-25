@@ -1,7 +1,7 @@
 // Minimal npm registry stub for the pnpm policy tests. Zero dependencies, so it
 // runs inside the container on loopback (compatible with the egress firewall).
 // Usage: node registry-stub.mjs <port>   (spec JSON on stdin or $STUB_SPEC)
-// Spec: { "<name>": { "<version>": { "ageDays": 30, "scripts": { "postinstall": "..." } } } }
+// Spec: { "<name>": { "<version>": { "ageDays": 30, "scripts": { "postinstall": "..." }, "bin": { "x": "x.mjs" }, "files": { "x.mjs": "..." } } } }
 // Publish times are fully controlled via ageDays, which is the point.
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -15,10 +15,11 @@ const spec = JSON.parse(process.env.STUB_SPEC ?? readFileSync(0, 'utf8'));
 const base = `http://127.0.0.1:${port}`;
 const tarballs = new Map(); // "name/version" -> Buffer
 
-function pack(name, version, scripts) {
+function pack(name, version, scripts, bin, files = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'stub-pkg-'));
   mkdirSync(join(dir, 'package'));
-  writeFileSync(join(dir, 'package/package.json'), JSON.stringify({ name, version, scripts }));
+  writeFileSync(join(dir, 'package/package.json'), JSON.stringify({ name, version, scripts, bin }));
+  for (const [f, content] of Object.entries(files)) writeFileSync(join(dir, "package", f), content);
   const r = spawnSync('tar', ['-czf', '-', '-C', dir, 'package'], { maxBuffer: 1 << 24 });
   if (r.status !== 0) throw new Error(`tar failed: ${r.stderr}`);
   return r.stdout;
@@ -29,7 +30,7 @@ for (const [name, versions] of Object.entries(spec)) {
   const p = { name, versions: {}, time: {}, 'dist-tags': {} };
   let latest;
   for (const [version, v] of Object.entries(versions)) {
-    const tgz = pack(name, version, v.scripts);
+    const tgz = pack(name, version, v.scripts, v.bin, v.files);
     tarballs.set(`${name}/${version}`, tgz);
     p.versions[version] = {
       name,

@@ -27,6 +27,7 @@ COPY base/bin/ /usr/local/bin/
 COPY base/claude/managed-settings.json /etc/claude-code/managed-settings.json
 COPY base/codex/config.toml /etc/codex/config.toml
 COPY base/egress/ /usr/local/share/egress/
+COPY base/mcp/check-secrets.sh /usr/local/share/dev-setup/check-secrets.sh
 
 # Host-credential isolation: VS Code bridge scrubber (profile.d + bash.bashrc
 # hook + postStartCommand), read-only git config and the PAT-only credential helper.
@@ -54,17 +55,21 @@ RUN cd /opt/dev-setup/installer \
 
 # Build step 5: validate the Base and Variant manifests (a bad entry fails the
 # build, naming the entry), install their skills for both Agents into the native
-# system skill directories, and assemble the Egress Allowlist the start-up step reads.
-RUN node /opt/dev-setup/installer/src/cli.mjs install --mode build \
+# system skill directories, pre-install stdio MCP servers (pnpm, exact versions) under
+# /opt/dev-setup/mcp and render the Agents' MCP config, and assemble the Egress
+# Allowlist the start-up step reads.
+RUN mkdir -p /opt/dev-setup/mcp /etc/dev-setup \
+ && node /opt/dev-setup/installer/src/cli.mjs install --mode build \
       --manifest /opt/dev-setup/manifests/base.json \
       --manifest /opt/dev-setup/manifests/node.json \
- && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /usr/local/share/egress
+ && rm -rf /root/.local/share/pnpm /root/.cache \
+ && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /etc/dev-setup /usr/local/share/egress /opt/dev-setup/mcp
 
 # Login-volume mount points exist and belong to node, so new named volumes
 # inherit that ownership.
 RUN mkdir -p /home/node/.claude /home/node/.codex \
  && chown node:node /home/node/.claude /home/node/.codex \
- && chmod 755 /usr/local/bin/claude-yolo /usr/local/bin/codex-yolo \
+ && chmod 755 /usr/local/bin/claude-yolo /usr/local/bin/codex-yolo /usr/local/share/dev-setup/check-secrets.sh \
  && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /usr/local/share/egress \
  && chmod 755 /usr/local/share/egress/*.sh \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod a-s {} + \
