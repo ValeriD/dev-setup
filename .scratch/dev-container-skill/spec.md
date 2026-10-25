@@ -65,7 +65,7 @@ It never commits (apart from creating the migration branch), never handles secre
 - **Schema addition:** an optional `preset` string field on manifest entries (ADR 0005). It needs to be added to the schema owned by the Node feature's installer (ticket 06 of `node-devcontainer`).
 - **Presets are copied, not referenced** (ADR 0005).
 - **Pinned Ref rule:** every entry the skill writes carries a Pinned Ref, except `mcp-remote` entries, which declare egress domains instead (Node design D2). Codex `plugin` entries are never written (Node design D3).
-- **Project wiring:** onboarding uses the published Node Template (`ghcr.io/valerid/dev-setup/node`, with its `imageDigest` option) once node-devcontainer ticket 10 lands, and the local Template path until then.
+- **Project wiring:** onboarding always renders the Template from the local checkout of this repository, with the image digest fetched and verified from the registry. (Amended during design, decision D1.)
 - **Image updates:** require successful `cosign verify` and `gh attestation verify` of the new digest before it is written.
 - **Secrets:** only as `remoteEnv` entries with `${localEnv:NAME}` plus named-secret references in the manifest. Values are never requested, read or written.
 - **Git:** no commits, except creating the `chore/dev-container` branch during migration. `gh repo create` only with explicit confirmation, and private by default.
