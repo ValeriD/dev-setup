@@ -1,0 +1,11 @@
+{
+  "name": "@dev-setup/dev-container-skill-helper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic helper for the dev-container skill. Imports the installer library by relative path.",
+  "bin": { "dev-container": "dev-container.mjs" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "dependencies": { "jsonc-parser": "3.3.1" },
+  "engines": { "node": ">=24" }
+}

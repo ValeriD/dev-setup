@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test:installer": "node --test installer/test/*.test.mjs",
+    "test:skill": "node --test skills/dev-container/scripts/test/*.test.mjs",
     "test":"node --test --test-concurrency=1 --test-timeout=900000 tests/*.test.mjs"
   }
 }

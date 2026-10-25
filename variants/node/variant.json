@@ -1,0 +1,4 @@
+{
+  "description": "Node 24 with pnpm enforced (ADR 0001), Claude Code and Codex.",
+  "detect": ["package.json", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", ".nvmrc", ".node-version", "tsconfig.json"]
+}

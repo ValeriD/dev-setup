@@ -43,6 +43,10 @@ jobs:
       - run: npx -y pnpm@11.0.0 install --frozen-lockfile
         working-directory: installer
       - run: npm run test:installer
+      # dev-container skill helper: temp dirs only, no Docker.
+      - run: npx -y pnpm@11.0.0 install --frozen-lockfile
+        working-directory: skills/dev-container/scripts
+      - run: npm run test:skill
 
   # Builds the image once, runs the acceptance suite against exactly that
   # image, and hands the same image to the publish job as a tarball.
@@ -63,6 +67,10 @@ jobs:
             --config variants/node/devcontainer.json \
             --platform "$PLATFORM" \
             --image-name "$TEST_IMAGE"
+      - name: Host deps for the skill helper test
+        run: |
+          (cd installer && npx -y pnpm@11.0.0 install --frozen-lockfile)
+          (cd skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile)
       - name: Acceptance suite
         env:
           DEV_SETUP_TEST_IMAGE: ${{ env.TEST_IMAGE }}
