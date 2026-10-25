@@ -95,6 +95,12 @@ test('name overrides the directory name', () => {
   assert.ok(existsSync(join(r.dirs.claude, 'linter/SKILL.md')));
 });
 
+test('a Preset tag and a description are accepted and do not change what is installed', () => {
+  const r = install({ description: 'Linting.', extensions: [skill({ preset: 'web-app' })] });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(existsSync(join(r.dirs.claude, 'lint/SKILL.md')));
+});
+
 const rejected = [
   ['a branch', { ...skill(), source: { github: 'acme/skills', path: 'skills/lint', ref: 'main' } }, /floating ref "ref"/],
   ['a branch in the sha field', skill({}, 'skills/lint', 'main'), /"main" is not a full 40-character commit SHA/],
@@ -115,6 +121,7 @@ const rejected = [
   ['an unknown property', skill({ extra: 1 }), /must NOT have additional properties \("extra"\)/],
   ['a path that escapes', skill({}, '../etc'), /source\/path must match pattern/],
   ['an absolute path', skill({}, '/etc'), /source\/path must match pattern/],
+  ['a Preset tag that is not a Preset name', skill({ preset: 'Web App' }), /preset must match pattern/],
   ['a remote MCP without egress', { kind: 'mcp-remote', agents: ['claude'], name: 'r', url: 'https://x.example.com' }, /must have required property 'egress'/],
 ];
 for (const [what, entry, message] of rejected) {

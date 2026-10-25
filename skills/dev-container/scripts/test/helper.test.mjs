@@ -168,6 +168,125 @@ test('first-lockfile refuses a project that already has a lockfile', () => {
   assert.deepEqual(snapshot(p), ['package-lock.json']);
 });
 
+// ---------- Presets ----------
+
+/** A dev-setups checkout whose presets/ the test controls; everything else links to this one. */
+function checkout(presetFiles) {
+  const c = join(root, `checkout${n++}`);
+  for (const d of ['variants', 'templates', 'installer']) {
+    mkdirSync(c, { recursive: true });
+    symlinkSync(join(REPO, d), join(c, d));
+  }
+  cpSync(SKILL, join(c, 'skills/dev-container'), { recursive: true });
+  mkdirSync(join(c, 'presets'));
+  for (const [f, v] of Object.entries(presetFiles)) writeFileSync(join(c, 'presets', f), typeof v === 'string' ? v : JSON.stringify(v));
+  return { dir: c, h: (args) => h(args, { via: join(c, 'skills/dev-container/scripts/dev-container.mjs') }) };
+}
+
+const sha = (c) => c.repeat(40);
+const skillEntry = (path, s = sha('a')) => ({ kind: 'skill', agents: ['claude'], source: { github: 'acme/skills', path, sha: s } });
+const remoteMcp = (name, domain) => ({ kind: 'mcp-remote', agents: ['claude'], name, url: `https://${domain}/mcp`, egress: [domain] });
+const WEB = { description: 'Web app work.', extensions: [skillEntry('skills/lint'), skillEntry('skills/fmt'), remoteMcp('docs', 'docs.example.com')], egress: ['cdn.example.com', 'shared.example.com'] };
+const API = { description: 'API work.', extensions: [skillEntry('skills/fmt')], egress: ['shared.example.com'] };
+
+test('presets lists every Preset with its description and reports invalid Preset files', () => {
+  const c = checkout({
+    'web-app.json': WEB,
+    'api.json': API,
+    'README.md': 'not a Preset',
+    'no-description.json': { extensions: [] },
+    'tagged.json': { description: 'x', extensions: [{ ...skillEntry('s'), preset: 'web-app' }] },
+    'floating.json': { description: 'x', extensions: [skillEntry('s', 'main')] },
+    'broken.json': '{',
+    'Bad Name.json': { description: 'x', extensions: [] },
+  });
+  const r = c.h(['presets']);
+  assert.equal(r.code, 0, r.err);
+  const by = Object.fromEntries(r.doc.presets.map((p) => [p.name, p]));
+  assert.deepEqual(Object.keys(by).sort(), ['Bad Name', 'api', 'broken', 'floating', 'no-description', 'tagged', 'web-app']);
+  assert.deepEqual(by['web-app'].problems, []);
+  assert.equal(by['web-app'].description, 'Web app work.');
+  assert.deepEqual(by['web-app'].extensions, WEB.extensions);
+  assert.deepEqual(by['web-app'].egress, WEB.egress);
+  assert.match(by['no-description'].problems.join(), /"description" is required/);
+  assert.match(by.tagged.problems.join(), /carry no "preset" tag/);
+  assert.match(by.floating.problems.join(), /not a full 40-character commit SHA/);
+  assert.match(by.broken.problems.join(), /not valid JSON/);
+  assert.match(by['Bad Name'].problems.join(), /not a Preset name/);
+  assert.equal(by.floating.extensions, undefined, 'an invalid Preset offers nothing to copy');
+
+  assert.equal(c.h(['presets', '--name', 'web-app']).code, 0);
+  assert.equal(c.h(['presets', '--name', 'floating']).code, 1);
+  assert.match(c.h(['presets', '--name', 'nope']).doc.error, /no Preset "nope"/);
+});
+
+test('this checkout has a presets/ directory whose Presets are all valid', () => {
+  const r = h(['presets']);
+  assert.equal(r.code, 0, r.err);
+  for (const p of r.doc.presets) assert.deepEqual(p.problems, [], p.name);
+});
+
+/** A rendered project whose manifest holds the given entries and egress. */
+function project(extensions, egress) {
+  const p = dir();
+  assert.equal(h(['render-template', 'node', p, '--image', IMAGE]).code, 0);
+  const file = join(p, '.devcontainer/extensions.json');
+  const mf = JSON.parse(readFileSync(file, 'utf8'));
+  writeFileSync(file, JSON.stringify({ ...mf, extensions, ...(egress ? { egress } : {}) }, null, 2));
+  return p;
+}
+const tag = (preset, entries) => entries.map((e) => ({ ...e, preset }));
+
+test('validate accepts Preset-tagged entries and counts them per Preset', () => {
+  const p = project([...tag('web-app', WEB.extensions), skillEntry('skills/own')], ['cdn.example.com', 'shared.example.com']);
+  const r = h(['validate', p]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.doc.presets, { 'web-app': 3 });
+});
+
+test('validate rejects a bad Preset tag and a skill name declared twice (e.g. by two Presets)', () => {
+  const bad = h(['validate', project(tag('Web App', [skillEntry('skills/lint')]))]);
+  assert.equal(bad.code, 1);
+  assert.match(bad.doc.problems.join(), /preset must match pattern/);
+
+  const twice = h(['validate', project([...tag('web-app', [skillEntry('skills/fmt')]), ...tag('api', [skillEntry('skills/fmt', sha('b'))])])]);
+  assert.equal(twice.code, 1);
+  assert.match(twice.doc.problems.join(), /skill name "fmt" is already declared/);
+});
+
+test('plan-remove-preset drops exactly the tagged entries and the egress nothing else needs, and writes nothing', () => {
+  const c = checkout({ 'web-app.json': WEB, 'api.json': API });
+  // web-app copied in full; api adopted too, sharing the fmt entry (kept once, tagged web-app).
+  const extensions = [
+    ...tag('web-app', WEB.extensions),
+    { ...remoteMcp('cdn-tools', 'cdn.example.com') },
+    skillEntry('skills/own'),
+  ];
+  const p = project(extensions, ['cdn.example.com', 'shared.example.com', 'mine.example.com']);
+  // Tag one api-only entry so api counts as adopted.
+  const file = join(p, '.devcontainer/extensions.json');
+  const mf = JSON.parse(readFileSync(file, 'utf8'));
+  mf.extensions.push({ ...remoteMcp('api-docs', 'api.example.com'), preset: 'api' });
+  writeFileSync(file, JSON.stringify(mf, null, 2));
+  const before = readFileSync(file, 'utf8');
+
+  const r = c.h(['plan-remove-preset', p, 'web-app']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.doc.remove.map((x) => x.index), [0, 2], 'lint and the docs MCP go');
+  assert.deepEqual(r.doc.retag, [{ index: 1, entry: r.doc.retag[0].entry, to: 'api' }], 'fmt stays for api');
+  assert.deepEqual(r.doc.egress, [], 'cdn is still needed by an own entry, shared by api');
+  assert.deepEqual(r.doc.keepEgress.map((k) => k.domain), ['cdn.example.com', 'shared.example.com']);
+  assert.equal(readFileSync(file, 'utf8'), before);
+
+  // Without the overlap, the Preset's egress goes.
+  const solo = project(tag('web-app', WEB.extensions), ['cdn.example.com', 'shared.example.com', 'mine.example.com']);
+  const s = c.h(['plan-remove-preset', solo, 'web-app']);
+  assert.deepEqual(s.doc.remove.map((x) => x.index), [0, 1, 2]);
+  assert.deepEqual(s.doc.egress, ['cdn.example.com', 'shared.example.com'], 'the user-added domain stays');
+
+  assert.match(c.h(['plan-remove-preset', solo, 'api']).doc.error, /no entry .* is tagged/);
+});
+
 test('a copy of the skill outside a dev-setups checkout exits with the re-link message and changes nothing', () => {
   const fake = join(root, 'fake-checkout/skills/dev-container');
   cpSync(SKILL, fake, { recursive: true, filter: (s) => !s.includes('node_modules') });

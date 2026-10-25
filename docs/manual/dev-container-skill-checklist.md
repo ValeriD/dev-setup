@@ -35,4 +35,16 @@ For a local image instead of the published one, tell the agent the image ref to 
 | 9 | `ln -sfn $T/nowhere $T/claude/skills/dev-container`, re-run 1 | The skill is gone or the agent reports the re-link instruction; nothing changes. Also copy the skill to `$T/copy/skills/dev-container` and link to that: the helper exits 3 with the re-link message. |
 | 10 | `c "/dev-container add the playwright MCP to $T/empty"` | Says the operation is not built yet; no edits. |
 
-Clean up: remove the started containers and their volumes, then `rm -rf $T`.
+## Presets (SC-01 Presets part, SC-06, SC-10)
+
+These write `presets/`, so run them against a throwaway checkout, not your own: `git worktree add $T/ds && (cd $T/ds/installer && npx -y pnpm@11.0.0 install --frozen-lockfile) && (cd $T/ds/skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile) && ln -sfn $T/ds/skills/dev-container $T/claude/skills/dev-container`. Seed two Presets in `$T/ds/presets/`: `web.json` (description, two skills, an `mcp-remote` with egress `docs.example.com`, top-level egress `cdn.example.com`) and `api.json` (description, one skill identical to one in `web`). Fake SHAs are fine; answer "no" to starting the container.
+
+| # | Prompt | Expect |
+| --- | --- | --- |
+| P1 | `c "/dev-container $T/p1"` after `mkdir $T/p1` | The Preset question lists `web` and `api` with their descriptions. Pick both: `extensions.json` holds every entry once, tagged `web` or `api` (the shared skill once, the agent says it is shared); `cdn.example.com` in `egress`; `validate` ran. |
+| P2 | Add `"broken"` as `$T/ds/presets/bad.json`, repeat P1 | `bad` is not offered; the agent names its problem. |
+| P3 | `c "/dev-container remove the web preset from $T/p1"` | Shows the plan and asks once. After yes: no `web` tags remain; the shared skill is tagged `api`; `cdn.example.com` gone; `api` entries unchanged. |
+| P4 | `c "/dev-container save the extensions of $T/p1 as preset solo"` | Asks for a description; `$T/ds/presets/solo.json` has it, no `preset` fields; `$T/p1` unchanged (`git -C $T/p1 diff` empty against before). |
+| P5 | `c "/dev-container change the description of preset api"` | Only `$T/ds/presets/api.json` changes; `$T/p1` unchanged; nothing committed in either. |
+
+Clean up: remove the started containers and their volumes, `git worktree remove --force $T/ds`, then `rm -rf $T`.

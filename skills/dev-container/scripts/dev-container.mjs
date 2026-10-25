@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SKILL_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(SKILL_DIR));
-const REQUIRED = ['variants', 'templates', 'installer/extensions.schema.json', 'installer/src/index.mjs', 'skills/dev-container/SKILL.md'];
+const REQUIRED = ['variants', 'templates', 'presets','installer/extensions.schema.json', 'installer/src/index.mjs', 'skills/dev-container/SKILL.md'];
 
 const relinkMessage = (why) =>
   `${why}\nRe-link the skill to a dev-setups checkout:\n  ln -sfn <path-to-dev-setups>/skills/dev-container ${linkPath()}`;
