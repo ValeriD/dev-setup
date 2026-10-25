@@ -13,6 +13,6 @@ We first planned OpenAI's `docker exec --user root` from the host. It was droppe
 ## Consequences
 
 - Reaching a new destination means editing an Extension Manifest's egress entries and recreating the container.
-- The container keeps `NET_ADMIN`/`NET_RAW` for its root process only. If the dev user ever gains root, the firewall can be bypassed, so "no path to root" is itself a tested invariant.
+- The container keeps `NET_ADMIN`/`NET_RAW` (and `DAC_READ_SEARCH`, so root can read the project manifest in an owner-only project directory) for its root process only. If the dev user ever gains root, the firewall can be bypassed, so "no path to root" is itself a tested invariant.
 - If any start-up step fails, the container stops instead of running with open egress.
 - Allowlisting is by name but enforced by IP, so other sites sharing an allowlisted CDN IP are reachable. This is accepted residual risk.

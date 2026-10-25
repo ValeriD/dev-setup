@@ -193,8 +193,8 @@ test('the assembled allowlist is accepted by the start-up renderer format (plain
   assert.match(r.err, /manifest\/egress\/0 must match pattern/);
 });
 
-test('only build mode exists, and usage errors exit non-zero', () => {
-  const r = spawnSync('node', [CLI, 'install', '--mode', 'start', '--manifest', 'x.json'], { encoding: 'utf8' });
+test('only build and start modes exist, and usage errors exit non-zero', () => {
+  const r = spawnSync('node', [CLI, 'install', '--mode', 'watch', '--manifest', 'x.json'], { encoding: 'utf8' });
   assert.equal(r.status, 1);
   assert.match(r.err ?? r.stderr, /unsupported --mode/);
 });
@@ -212,4 +212,40 @@ test('the library entry point exports the core functions for host-side reuse', a
   cleanup();
   const s = JSON.parse(readFileSync(SCHEMA, 'utf8'));
   assert.equal(s.$id, lib.schema.$id);
+});
+
+/** Start mode: build layers are validated and contribute egress; only the project layer is installed. */
+function start(build, project, d = join(root, `start${n++}`)) {
+  mkdirSync(d, { recursive: true });
+  const write = (name, m) => { const f = join(d, name); writeFileSync(f, JSON.stringify(m)); return f; };
+  const dirs = { claude: join(d, 'claude'), codex: join(d, 'codex'), egress: join(d, 'out/allowlist.txt') };
+  const r = spawnSync('node', [CLI, 'install', '--mode', 'start', '--git-base', gitBase, '--claude-skills', dirs.claude, '--codex-skills', dirs.codex,
+    '--egress-out', dirs.egress, '--manifest', write('build.json', build), '--project', write('project.json', project)], { encoding: 'utf8' });
+  return { code: r.status, err: r.stderr, dirs, d };
+}
+
+test('start mode installs only the project layer and writes the union of egress lists', () => {
+  const r = start({ extensions: [skill({}, 'skills/lint')], egress: ['base.example.org'] }, { extensions: [skill({}, 'skills/fmt')], egress: ['proj.example.org'] });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(existsSync(join(r.dirs.claude, 'fmt/SKILL.md')) && existsSync(join(r.dirs.codex, 'fmt/SKILL.md')));
+  assert.ok(!existsSync(join(r.dirs.claude, 'lint')), 'build-layer skills are not re-installed');
+  const lines = readFileSync(r.dirs.egress, 'utf8').split('\n').filter((l) => l && !l.startsWith('#'));
+  assert.deepEqual(lines, ['base.example.org', 'proj.example.org']);
+});
+
+test('start mode rejects an invalid project entry naming it, and writes nothing', () => {
+  const r = start({ extensions: [] }, { extensions: [skill({}, 'skills/lint', 'main')] });
+  assert.notEqual(r.code, 0);
+  assert.match(r.err, /project\.json.*extensions\[0\].*not a full 40-character commit SHA/);
+  assert.ok(!existsSync(r.dirs.egress) && !existsSync(r.dirs.claude));
+});
+
+test('start mode rejects a project skill that collides with a build-layer skill, and re-running overwrites', () => {
+  const r = start({ extensions: [skill()] }, { extensions: [skill()] });
+  assert.notEqual(r.code, 0);
+  assert.match(r.err, /skill name "lint" is already declared/);
+  const first = start({ extensions: [] }, { extensions: [skill()] });
+  assert.equal(first.code, 0, first.err);
+  const again = start({ extensions: [] }, { extensions: [skill()] }, first.d);
+  assert.equal(again.code, 0, again.err);
 });

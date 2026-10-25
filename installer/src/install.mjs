@@ -1,5 +1,5 @@
 // Layer merge, skill rendering for both Agents, and Egress Allowlist assembly.
-import { readFileSync, mkdirSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, join, dirname } from 'node:path';
 import { assertValidManifest, describeEntry, ManifestError } from './validate.mjs';
 import { fetchBySha, repoUrl, copyTree, pathInCheckout, DEFAULT_GIT_BASE } from './fetch.mjs';
@@ -71,7 +71,7 @@ export function renderAllowlist(domains, sources = []) {
  * Install every skill entry into the Agent skill directories its `agents` name.
  * Each pinned commit is fetched once. Other kinds are not implemented yet.
  */
-export function installSkills(extensions, { claudeSkills, codexSkills, gitBase = DEFAULT_GIT_BASE }) {
+export function installSkills(extensions, { claudeSkills, codexSkills, gitBase = DEFAULT_GIT_BASE, overwrite = false }) {
   const targets = { claude: claudeSkills, codex: codexSkills };
   const installed = [];
   extensions.forEach((entry, i) => {
@@ -87,7 +87,11 @@ export function installSkills(extensions, { claudeSkills, codexSkills, gitBase =
       if (!existsSync(join(src, 'SKILL.md'))) throw new Error(`no SKILL.md at "${entry.source.path}"`);
       for (const agent of entry.agents) {
         const dest = join(targets[agent], name);
-        if (existsSync(dest)) throw new Error(`${dest} already exists`);
+        if (existsSync(dest)) {
+          // Start mode only: a restarted container re-runs the start-up step on its old filesystem.
+          if (!overwrite) throw new Error(`${dest} already exists`);
+          rmSync(dest, { recursive: true, force: true });
+        }
         mkdirSync(dirname(dest), { recursive: true });
         copyTree(src, dest);
       }
@@ -101,17 +105,10 @@ export function installSkills(extensions, { claudeSkills, codexSkills, gitBase =
   return installed;
 }
 
-/**
- * Build-mode install: validate and merge the layer manifests, install skills for
- * both Agents, and write the assembled Egress Allowlist.
- * @param {{manifests: string[], gitBase?: string, claudeSkills?: string, codexSkills?: string, egressOut?: string}} opts
- */
-export function installBuild({ manifests, gitBase, ...paths }) {
-  gitBase ??= DEFAULT_GIT_BASE;
-  const out = { ...SYSTEM_PATHS, ...Object.fromEntries(Object.entries(paths).filter(([, v]) => v !== undefined)) };
+function loadLayers(files) {
   const problems = [];
   const layers = [];
-  for (const file of manifests) {
+  for (const file of files) {
     try {
       layers.push({ label: file, manifest: loadManifest(file) });
     } catch (err) {
@@ -120,12 +117,47 @@ export function installBuild({ manifests, gitBase, ...paths }) {
     }
   }
   if (problems.length) throw new ManifestError(problems);
-  const merged = mergeLayers(layers);
+  return layers;
+}
+
+function writeAllowlist(file, egress, sources) {
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, renderAllowlist(egress, sources));
+  renameSync(tmp, file);
+}
+
+const resolvePaths = (paths) => ({ ...SYSTEM_PATHS, ...Object.fromEntries(Object.entries(paths).filter(([, v]) => v !== undefined)) });
+
+/**
+ * Build-mode install: validate and merge the layer manifests, install skills for
+ * both Agents, and write the assembled Egress Allowlist.
+ * @param {{manifests: string[], gitBase?: string, claudeSkills?: string, codexSkills?: string, egressOut?: string}} opts
+ */
+export function installBuild({ manifests, gitBase, ...paths }) {
+  gitBase ??= DEFAULT_GIT_BASE;
+  const out = resolvePaths(paths);
+  const merged = mergeLayers(loadLayers(manifests));
   // Validation and fetching come before any write to the allowlist, so a bad entry leaves nothing half-installed there.
   const skills = installSkills(merged.extensions, { claudeSkills: out.claudeSkills, codexSkills: out.codexSkills, gitBase });
-  mkdirSync(dirname(out.egressOut), { recursive: true });
-  const tmp = `${out.egressOut}.tmp`;
-  writeFileSync(tmp, renderAllowlist(merged.egress, manifests));
-  renameSync(tmp, out.egressOut);
+  writeAllowlist(out.egressOut, merged.egress, manifests);
+  return { skills, egress: merged.egress };
+}
+
+/**
+ * Start-mode install: validate all layers together (the build layers, already
+ * installed in the image, plus the Consuming Project layer), install only the
+ * project layer's entries, and write the full Egress Allowlist. Nothing is
+ * recorded: the container filesystem is the state, so recreating it uninstalls.
+ * @param {{manifests: string[], project: string, gitBase?: string, claudeSkills?: string, codexSkills?: string, egressOut?: string}} opts
+ */
+export function installStart({ manifests, project, gitBase, ...paths }) {
+  gitBase ??= DEFAULT_GIT_BASE;
+  const out = resolvePaths(paths);
+  const files = [...manifests, project];
+  const merged = mergeLayers(loadLayers(files));
+  const mine = merged.extensions.filter((e) => e.layer === project);
+  const skills = installSkills(mine, { claudeSkills: out.claudeSkills, codexSkills: out.codexSkills, gitBase, overwrite: true });
+  writeAllowlist(out.egressOut, merged.egress, files);
   return { skills, egress: merged.egress };
 }
