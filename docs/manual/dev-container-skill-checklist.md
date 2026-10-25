@@ -1,6 +1,6 @@
 # dev-container skill: conversational checklist
 
-The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
+The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration, SC-08 for image updates). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
 
 ## Sandbox
 
@@ -18,7 +18,7 @@ claude   # /login once, then exit
 c() { claude -p --allowedTools 'Bash Read Edit Write' "$@"; }   # follow-ups: c --continue "yes"
 ```
 
-For a local image instead of the published one, tell the agent the image ref to use (e.g. a local registry tag), since `image-digest` reads the Template default otherwise.
+Onboarding and updates accept only an image that `verify-image` verified, so checks 1 to 8 and 11 need the published, signed `ghcr.io/valerid/dev-setup/node:latest` (CI on `main` has run and the package is public). Before that, check 1 must end at the verification failure with nothing written.
 
 ## Checks
 
@@ -34,6 +34,22 @@ For a local image instead of the published one, tell the agent the image ref to 
 | 8 | `c "/dev-container brand-new"` | `git init` under the projects root; asks before creating a GitHub repo. "no": `$T/gh.log` absent. "yes": `$T/gh.log` has `repo create brand-new --private ...`. |
 | 9 | `ln -sfn $T/nowhere $T/claude/skills/dev-container`, re-run 1 | The skill is gone or the agent reports the re-link instruction; nothing changes. Also copy the skill to `$T/copy/skills/dev-container` and link to that: the helper exits 3 with the re-link message. |
 | 10 | `c "/dev-container add the playwright MCP to $T/empty"` | Says the operation is not built yet; no edits. |
+| 11 | In the web-app clone, set `"image"` to an older published digest (from the `sha-<12>` tags), then `c "/dev-container update my dev container in <dir>"` | Shows old and new digest, the Claude Code/Codex/pnpm changes and the `git log` lines; asks once. "no": `devcontainer.json` unchanged. "yes": `image` is the new digest, `validate` ran, then one recreate question. |
+| 12 | Push any image to a local registry (`localhost:5000/dev-setup/node:latest`), point the `image` default in this checkout's `templates/node/devcontainer-template.json` at it (revert afterwards), then ask for an update | `verify-image` fails with `failed: signature`; the agent reports it, offers no workaround, and `devcontainer.json` is unchanged. |
+
+## Verifying a real signed image (SC-08 success path)
+
+Once CI has published from `main`, check the helper directly, from the dev-setups checkout:
+
+```sh
+H="node skills/dev-container/scripts/dev-container.mjs"
+$H verify-image node     # ok: true, verified: true, a 40-hex revision equal to the run's commit, the Dockerfile's versions
+OLD=ghcr.io/valerid/dev-setup/node@sha256:<digest of an older sha-<12> tag>
+$H verify-image node --current $OLD   # changes.versions and changes.log between the two revisions
+$H verify-image node --ref ghcr.io/sigstore/cosign/cosign:v3.1.3   # signed, but by another identity: failed "signature"
+```
+
+If `verify-image node` fails with `failed: provenance` while CI's own `gh attestation verify` passed, cosign is not finding the registry-pushed attestation (the risky integration point named in the design): note the `detail`, and compare with `cosign verify-attestation --type slsaprovenance1` run by hand in the same container. A 403 from ghcr.io for a public image usually means a stale `docker login ghcr.io`.
 
 ## Presets (SC-01 Presets part, SC-06, SC-10)
 
@@ -52,6 +68,8 @@ Clean up: remove the started containers and their volumes, `git worktree remove 
 
 ## Migration (SC-03)
 
+Rows M1–M3 (skill ticket 05 calls them rows 11–13).
+
 An npm fixture with its own dev container, committed on `main`. Its dependencies come from the registry stub on container loopback, so start the stub in the container before answering the conversion question: `devcontainer exec --workspace-folder <dir> sh -c 'cat > /tmp/s.mjs' < $REPO/tests/fixtures/registry-stub.mjs`, then run it as in `tests/dev-container-skill.test.mjs`. Create `package-lock.json` the same way, with `npm install --package-lock-only` inside the container.
 
 ```sh
@@ -62,8 +80,8 @@ git init -q -b main $T/legacy && cd $T/legacy && mkdir .devcontainer && echo '{ 
 
 | # | Prompt | Expect |
 | --- | --- | --- |
-| 11 | `c "/dev-container migrate $T/legacy"` | Creates `chore/dev-container`; replaces `.devcontainer/` (names the deleted file); `validate` ran; starts with `up --recreate` after asking. `git -C $T/legacy log --all --oneline` still shows one commit. |
-| 12 | Answer "yes" to the conversion | `pnpm-lock.yaml` exists, `package-lock.json` is gone, `package.json` has `packageManager: pnpm@<image pin>`; the frozen install ran and the agent lists `scripty@1.0.0` as blocked, explaining `allowBuilds`. No `pnpm` process ran on the host. |
-| 13 | Repeat 11 on a fresh copy, answer "no" | `package-lock.json` unchanged (`git diff --quiet -- package-lock.json`), no `pnpm-lock.yaml`; the agent says installs fail until the project is converted. |
+| M1 | `c "/dev-container migrate $T/legacy"` | Creates `chore/dev-container`; replaces `.devcontainer/` (names the deleted file); `validate` ran; starts with `up --recreate` after asking. `git -C $T/legacy log --all --oneline` still shows one commit. |
+| M2 | Answer "yes" to the conversion | `pnpm-lock.yaml` exists, `package-lock.json` is gone, `package.json` has `packageManager: pnpm@<image pin>`; the frozen install ran and the agent lists `scripty@1.0.0` as blocked, explaining `allowBuilds`. No `pnpm` process ran on the host. |
+| M3 | Repeat M1 on a fresh copy, answer "no" | `package-lock.json` unchanged (`git diff --quiet -- package-lock.json`), no `pnpm-lock.yaml`; the agent says installs fail until the project is converted. |
 
 Clean up: remove the started containers and their volumes, then `rm -rf $T`.

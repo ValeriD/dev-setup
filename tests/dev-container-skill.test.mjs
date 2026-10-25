@@ -4,22 +4,29 @@
 // `devcontainer up`, and the first lockfile created inside the container. The
 // migration test replaces an old dev container in an npm fixture project and
 // converts its lockfile against a registry stub on container loopback.
+// verify-image (SC-08 failure path) runs cosign against the same registry: an
+// unsigned image and one signed by a foreign key both fail closed.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { COSIGN_IMAGE } from '../skills/dev-container/scripts/commands.mjs';
 import { REPO, IMAGE, run, pins, buildImage, startTemplateRegistry, containerFor, exec, removeProject } from './lib.mjs';
 
 const HELPER = join(REPO, 'skills/dev-container/scripts/dev-container.mjs');
 const cfg = mkdtempSync(join(tmpdir(), 'dc-skill-cfg-')); // empty Claude config: no skill link to check
 let registry, pushed, dir, legacy;
 
-function h(...args) {
+function helper(...args) {
   const r = spawnSync('node', [HELPER, ...args], { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: cfg } });
-  assert.equal(r.status, 0, `${args.join(' ')}\n${r.stdout}\n${r.stderr}`);
-  return JSON.parse(r.stdout);
+  return { code: r.status, doc: JSON.parse(r.stdout), log: `${args.join(' ')}\n${r.stdout}\n${r.stderr}` };
+}
+function h(...args) {
+  const r = helper(...args);
+  assert.equal(r.code, 0, r.log);
+  return r.doc;
 }
 
 function hFails(...args) {
@@ -129,4 +136,35 @@ test('migrate: an npm project with its own dev container moves to the Template o
 
   assert.equal(git('branch', '--show-current'), 'chore/dev-container');
   assert.equal(git('rev-list', '--all', '--count'), '1', 'the branch is the only git write');
+});
+
+test('verify-image fails closed for an unsigned image and a foreign signature; the project is untouched', () => {
+  const config = readFileSync(join(dir, '.devcontainer/devcontainer.json'), 'utf8');
+
+  const unsigned = helper('verify-image', 'node', '--ref', pushed);
+  assert.equal(unsigned.code, 1, unsigned.log);
+  assert.equal(unsigned.doc.verified, false);
+  assert.equal(unsigned.doc.failed, 'signature', unsigned.log);
+  assert.match(unsigned.doc.detail, /no signatures found/);
+
+  // Sign the same digest with a throwaway key pair (no transparency log): a
+  // signature exists, but not from the release workflow's keyless identity.
+  const keys = mkdtempSync(join(tmpdir(), 'dc-cosign-keys-'));
+  try {
+    const cosign = (...a) => run('docker', ['run', '--rm', '--network', 'host', '--user', String(process.getuid()), '-e', 'COSIGN_PASSWORD=',
+      '-v', `${keys}:/k`, '-w', '/k', COSIGN_IMAGE, ...a]);
+    const gen = cosign('generate-key-pair');
+    assert.equal(gen.code, 0, gen.err);
+    const sign = cosign('sign', '--yes', '--key', '/k/cosign.key', '--tlog-upload=false', '--use-signing-config=false', unsigned.doc.image);
+    assert.equal(sign.code, 0, sign.err);
+  } finally {
+    rmSync(keys, { recursive: true, force: true });
+  }
+  const foreign = helper('verify-image', 'node', '--ref', unsigned.doc.image, '--current', unsigned.doc.image);
+  assert.equal(foreign.code, 1, foreign.log);
+  assert.equal(foreign.doc.failed, 'signature', foreign.log);
+  assert.doesNotMatch(foreign.doc.detail, /no signatures found/, 'cosign found the foreign signature and rejected it');
+  assert.equal(foreign.doc.changes, undefined, 'nothing about the update is reported');
+
+  assert.equal(readFileSync(join(dir, '.devcontainer/devcontainer.json'), 'utf8'), config, 'the project config is unchanged');
 });

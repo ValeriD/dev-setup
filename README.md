@@ -71,6 +71,8 @@ npx -y @devcontainers/cli@0.89.0 templates apply -w /tmp/proj -t ghcr.io/valerid
 grep image /tmp/proj/.devcontainer/devcontainer.json   # must show @sha256:...
 ```
 
+The dev-container skill runs the same checks with a stricter identity (`ci.yml` on `refs/heads/main` only) through `verify-image`; its success-path check is in `docs/manual/dev-container-skill-checklist.md`.
+
 ## Updates (Renovate) and weekly rebuild
 
 `renovate.json` makes Renovate open PRs for the base image digest, GitHub Action SHAs, the pinned pnpm, Claude Code, Codex and devcontainers CLI versions, `installer/` npm dependencies, and the Pinned Ref `sha` of every Extension Manifest entry (`github` skill/plugin sources and plugin marketplaces; git-refs datasource, tracks `HEAD`). npm updates wait 7 days (`minimumReleaseAge`) to match the pnpm policy. Nothing is auto-merged; Pinned Ref and Agent version PRs are explicitly excluded from any future auto-merge rule. `tests/renovate.test.mjs` checks the managers against the repo files.

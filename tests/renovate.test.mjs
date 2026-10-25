@@ -33,6 +33,16 @@ test('regex managers match the workflow pins', () => {
   }
 });
 
+test('the cosign container pin in the skill helper is tracked with its tag and digest', () => {
+  const file = 'skills/dev-container/scripts/commands.mjs';
+  const m = config.customManagers.find((x) => x.datasourceTemplate === 'docker' && patternMatches(x, file));
+  const hits = run(m, read(file));
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].depName, 'ghcr.io/sigstore/cosign/cosign');
+  assert.match(hits[0].currentValue, /^v\d+\.\d+\.\d+$/);
+  assert.match(hits[0].currentDigest, /^sha256:[0-9a-f]{64}$/);
+});
+
 test('manifest manager extracts Pinned Ref SHAs and ignores other keys', () => {
   const m = manager('git-refs');
   const a = 'a'.repeat(40), b = 'b'.repeat(40);
