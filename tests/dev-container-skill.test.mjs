@@ -22,6 +22,12 @@ function h(...args) {
   return JSON.parse(r.stdout);
 }
 
+function hFails(...args) {
+  const r = spawnSync('node', [HELPER, ...args], { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: cfg } });
+  assert.equal(r.status, 1, `${args.join(' ')}\n${r.stdout}\n${r.stderr}`);
+  return JSON.parse(r.stdout);
+}
+
 before(() => {
   buildImage();
   registry = startTemplateRegistry();
@@ -94,11 +100,21 @@ test('migrate: an npm project with its own dev container moves to the Template o
   const stub = readFileSync(join(REPO, 'tests/fixtures/registry-stub.mjs'), 'utf8');
   assert.equal(exec(legacy, 'cat > /tmp/registry-stub.mjs', { input: stub }).code, 0);
   const spec = { scripty: { '1.0.0': { ageDays: 30, scripts: { postinstall: 'echo built > built.txt' } } }, plain: { '1.0.0': { ageDays: 30 } } };
-  const started = exec(legacy, `STUB_SPEC='${JSON.stringify(spec)}' nohup node /tmp/registry-stub.mjs 4873 >/tmp/stub.log 2>&1 &
+  const started = exec(legacy, `STUB_SPEC='${JSON.stringify(spec)}' nohup node /tmp/registry-stub.mjs 4873 >/tmp/stub.log 2>&1 & echo $! > /tmp/stub.pid
     for i in $(seq 50); do node -e "fetch('http://127.0.0.1:4873/plain').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" && exit 0; sleep 0.2; done; cat /tmp/stub.log; exit 1`);
   assert.equal(started.code, 0, started.out + started.err);
   const npm = exec(legacy, 'npm install --package-lock-only');
   assert.equal(npm.code, 0, npm.out + npm.err);
+
+  // A failed import (registry gone) leaves package.json and the npm lockfile as they were.
+  const before = readFileSync(join(legacy, 'package.json'), 'utf8');
+  assert.equal(exec(legacy, 'kill $(cat /tmp/stub.pid)').code, 0);
+  hFails('import-lockfile', legacy);
+  assert.equal(readFileSync(join(legacy, 'package.json'), 'utf8'), before);
+  assert.ok(existsSync(join(legacy, 'package-lock.json')) && !existsSync(join(legacy, 'pnpm-lock.yaml')));
+  const restarted = exec(legacy, `STUB_SPEC='${JSON.stringify(spec)}' nohup node /tmp/registry-stub.mjs 4873 >/tmp/stub.log 2>&1 &
+    for i in $(seq 50); do node -e "fetch('http://127.0.0.1:4873/plain').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" && exit 0; sleep 0.2; done; exit 1`);
+  assert.equal(restarted.code, 0, restarted.out + restarted.err);
 
   const imported = h('import-lockfile', legacy);
   assert.deepEqual(imported.imported, ['package-lock.json']);

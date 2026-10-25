@@ -8,7 +8,7 @@ Run `H resolve-target <what the user gave you>`. A URL that is not cloned yet is
 
 Run `git -C <path> status --porcelain -- .devcontainer`. Any output means uncommitted work in the old dev container, which step 4 deletes: show it and ask once whether to go ahead. On no, stop.
 
-**Done when `path` is a git repository and the old `.devcontainer/` is either clean or the user accepted losing its changes.**
+**Done when `path` is a git repository and the old `.devcontainer/` is either clean or the user accepted losing its changes.** Keep the `resolve-target` JSON: later steps use its `lockfiles`.
 
 ## 2. Create the branch
 
@@ -34,19 +34,16 @@ Onboard step 4.
 
 ## 6. Start the container
 
-Ask once: "Start the dev container now? Starting it ends any agent sessions running in a container for this project." On yes, run `H up <path> --recreate`: a container built from the old configuration may still exist, and a plain `up` would reuse it. On no, skip to step 8; the lockfile step then waits for the container, so say so in the summary.
+Ask the start question from onboard step 5. On yes, run `H up <path> --recreate`: a container built from the old configuration may still exist, and a plain `up` would reuse it. On no, skip to step 8 and say in the summary that the lockfile conversion and the frozen install wait for the container (run the migration again once it runs).
 
 **Done when the container started or the user declined.**
 
 ## 7. Lockfile and frozen install
 
-Branch on the `lockfiles` from step 1:
+Follow onboard step 5's branches on `lockfiles`, with one change: for an npm or yarn lockfile, ask once: "Convert `<lockfile>` to `pnpm-lock.yaml` with `pnpm import` inside the container? It also sets `packageManager` in `package.json` and removes `<lockfile>`."
 
-- `package-lock.json`, `npm-shrinkwrap.json` or `yarn.lock`: ask once: "Convert `<lockfile>` to `pnpm-lock.yaml` with `pnpm import` inside the container? It also sets `packageManager` in `package.json` and removes `<lockfile>`."
-  - On yes, run `H import-lockfile <path>`. Report `imported` and `packageManager`.
-  - On no, leave the lockfile as it is and tell the user that installs inside the container fail until the project is converted (run the migration again to convert). Skip the frozen install.
-- None: `H first-lockfile <path>`, as in onboard step 5.
-- Only `pnpm-lock.yaml`: nothing to convert.
+- On yes, run `H import-lockfile <path>`. Report `imported` and `packageManager`.
+- On no, leave the lockfile as it is and tell the user that installs inside the container fail until the project is converted (run the migration again to convert). Skip the frozen install.
 
 When `pnpm-lock.yaml` now exists, run `H frozen-install <path>`. List `blockedBuilds` by package and version, with the `note` on how to allow or skip each. The user decides; edit `pnpm-workspace.yaml` only for the packages they name.
 

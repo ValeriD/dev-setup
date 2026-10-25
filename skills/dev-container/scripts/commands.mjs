@@ -340,7 +340,7 @@ function firstLockfile([dir]) {
   return { doc: { ok: true, dir: project, lockfile: 'pnpm-lock.yaml', createdPackageJson: !before.hasPackageJson } };
 }
 
-const FOREIGN_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock'];
+const FOREIGN_LOCKFILES = LOCKFILES.filter((f) => f !== 'pnpm-lock.yaml');
 
 function importLockfile([dir]) {
   const project = resolve(dir);
@@ -348,16 +348,20 @@ function importLockfile([dir]) {
   const from = before.lockfiles.filter((f) => FOREIGN_LOCKFILES.includes(f));
   if (before.lockfiles.includes('pnpm-lock.yaml')) return { doc: { ok: false, dir: project, error: 'project already has pnpm-lock.yaml; nothing to convert' } };
   if (!from.length) return { doc: { ok: false, dir: project, error: `no ${FOREIGN_LOCKFILES.join(', ')} to convert` } };
+  const packageJson = join(project, 'package.json');
+  const original = existsSync(packageJson) ? readFileSync(packageJson, 'utf8') : null;
   // packageManager first: pnpm refuses to run in a project that declares another package manager.
   // `pnpm import` honours the image's frozen-lockfile policy, so it opts out for this one run.
   const script = 'npm pkg set "packageManager=pnpm@$(pnpm --version)" && pnpm_config_frozen_lockfile=false pnpm import' +
     ` && rm -f ${from.join(' ')} && npm pkg get packageManager`;
   const r = devcontainer(['exec', '--workspace-folder', project, 'sh', '-c', script]);
   if (r.code !== 0 || !existsSync(join(project, 'pnpm-lock.yaml'))) {
-    return { doc: { ok: false, dir: project, error: 'pnpm import inside the container failed; package.json may already carry the new packageManager, the old lockfile is kept', log: tail(r.err + '\n' + r.out) } };
+    if (original !== null) writeFileSync(packageJson, original); // leave no half-converted project behind
+    rmSync(join(project, 'pnpm-lock.yaml'), { force: true });
+    return { doc: { ok: false, dir: project, error: 'pnpm import inside the container failed; package.json and the old lockfile are unchanged', log: tail(r.err + '\n' + r.out) } };
   }
-  const packageManager = JSON.parse(readFileSync(join(project, 'package.json'), 'utf8')).packageManager;
-  return { doc: { ok: true, dir: project, imported: from, removed: from, lockfile: 'pnpm-lock.yaml', packageManager } };
+  const packageManager = JSON.parse(readFileSync(packageJson, 'utf8')).packageManager;
+  return { doc: { ok: true, dir: project, imported: from, lockfile: 'pnpm-lock.yaml', packageManager } };
 }
 
 /** `pkg@1.2.3` or `@scope/pkg@1.2.3` -> { name, version }. */
@@ -373,15 +377,15 @@ function frozenInstall([dir]) {
   }
   const r = devcontainer(['exec', '--workspace-folder', project, 'pnpm', 'install', '--frozen-lockfile']);
   const output = r.out + '\n' + r.err;
-  if (r.code === 0) return { doc: { ok: true, dir: project, installed: true, blockedBuilds: [] } };
-  // strictDepBuilds: the dependencies are installed, but pnpm fails naming the build scripts it did not run.
-  const m = output.match(/ERR_PNPM_IGNORED_BUILDS\s+Ignored build scripts: ([^\n]+?)\.?\s*$/m);
-  if (!m) return { doc: { ok: false, dir: project, error: 'pnpm install --frozen-lockfile inside the container failed', log: tail(output) } };
+  // With the image's strictDepBuilds the dependencies are installed but pnpm exits non-zero
+  // (ERR_PNPM_IGNORED_BUILDS) naming the build scripts it did not run; without it, it only warns.
+  const m = output.match(/Ignored build scripts: ([^\n]+?)\.?\s*$/m);
+  if (r.code === 0 && !m) return { doc: { ok: true, dir: project, blockedBuilds: [] } };
+  if (!m || (r.code !== 0 && !/ERR_PNPM_IGNORED_BUILDS/.test(output))) return { doc: { ok: false, dir: project, error: 'pnpm install --frozen-lockfile inside the container failed', log: tail(output) } };
   return {
     doc: {
       ok: true,
       dir: project,
-      installed: true,
       blockedBuilds: m[1].split(/,\s*/).map(parsePackageId),
       note: 'Installs fail until each blocked package is decided in pnpm-workspace.yaml under allowBuilds (true runs its script, false skips it); then run pnpm rebuild in the container.',
     },
