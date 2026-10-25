@@ -8,3 +8,4 @@ Agent Extensions are declared in our own JSON format, with a schema, rather than
 
 - Every Agent feature we want to support needs translator code. A new kind of extension is not usable until the installer knows about it.
 - A project that needs a hook must declare it in its Extension Manifest, not in `.claude/settings.json`.
+- Claude's only managed MCP file, `managed-mcp.json`, is exclusive. So once any layer declares an MCP server, `claude mcp add` is refused in that container, and every MCP server has to come from a manifest. We accepted this lock. Containers whose layers declare no MCP server are unaffected.
