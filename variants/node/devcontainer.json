@@ -15,7 +15,22 @@
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
     "CODEX_HOME": "/home/node/.codex",
     "DISABLE_AUTOUPDATER": "1",
-    "GIT_CONFIG_GLOBAL": "/etc/dev-setup/gitconfig"
+    "GIT_CONFIG_GLOBAL": "/etc/dev-setup/gitconfig",
+    // pnpm supply-chain policy (ADR 0001). pnpm 11 honours only some keys from
+    // its global config.yaml (not trustPolicy, strictDepBuilds, frozenLockfile),
+    // so the policy is set through pnpm_config_* env, which covers every key.
+    // A project can still allow one build via allowBuilds in pnpm-workspace.yaml.
+    "pnpm_config_minimum_release_age": "10080",
+    "pnpm_config_minimum_release_age_strict": "true",
+    "pnpm_config_trust_policy": "no-downgrade",
+    "pnpm_config_strict_dep_builds": "true",
+    "pnpm_config_block_exotic_subdeps": "true",
+    "pnpm_config_frozen_lockfile": "true",
+    // Ad-hoc npm / npx: no lifecycle scripts, 7-day cooldown, exact pins.
+    "NPM_CONFIG_IGNORE_SCRIPTS": "true",
+    "NPM_CONFIG_MIN_RELEASE_AGE": "7",
+    "NPM_CONFIG_SAVE_EXACT": "true",
+    "NPM_CONFIG_UPDATE_NOTIFIER": "false"
   },
   // Blank the host-credential bridges VS Code injects; the scrubber re-clears
   // them in every shell and removes the sockets after start.
