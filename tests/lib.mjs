@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
-export const IMAGE = 'dev-setup-node:test';
+export const IMAGE = process.env.DEV_SETUP_TEST_IMAGE ?? 'dev-setup-node:test';
 const CLI = ['npx', '-y', '@devcontainers/cli@0.89.0'];
 const REGISTRY_IMAGE = 'registry:2.8.3';
 
