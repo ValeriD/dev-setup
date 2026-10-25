@@ -27,7 +27,7 @@ Run `H variants --dir <path>`.
 
 ## 3. Render the Template
 
-1. `H image-digest <variant>` gives `image`, a digest-pinned reference read from the registry. Tell the user the digest is **unverified**: signature and provenance checks are not built yet.
+1. `H verify-image <variant>` resolves the Variant's published image to a digest and verifies its signature and provenance. On `ok: false`, report `failed`, `error` and `detail`, and stop: nothing is rendered without a verified image. On success, `image` is the reference to use.
 2. `H render-template <variant> <path> --image <image>`. Add `--option patEnvVar=<NAME>` only if the user names a different host variable for their repository PAT.
 
 This writes `.devcontainer/devcontainer.json` and an empty Extension Manifest `.devcontainer/extensions.json`. Presets are not built yet, so the manifest starts with no entries.
@@ -58,7 +58,7 @@ On yes, run `H up <path>`. Then branch on the `lockfiles` from step 1:
 
 Print:
 
-- the project path, the Variant, and the image digest (marked unverified);
+- the project path, the Variant, and the verified image digest with its `revision`;
 - every file created or changed (including `package.json` and `pnpm-lock.yaml` from step 5), all uncommitted, for the user to review and commit;
 - the GitHub repository created, if any;
 - anything declined or still missing (VS Code settings, container not started, lockfile conversion).

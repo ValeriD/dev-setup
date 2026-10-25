@@ -61,6 +61,8 @@ jobs:
         with:
           node-version: 24
       - name: Build image (loaded into the local daemon)
+        env:
+          DEV_SETUP_REVISION: ${{ github.sha }}  # image label org.opencontainers.image.revision
         run: |
           npx -y "@devcontainers/cli@${CLI_VERSION}" build \
             --workspace-folder variants/node \

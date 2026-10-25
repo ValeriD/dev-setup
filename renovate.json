@@ -46,6 +46,13 @@
       "depNameTemplate": "@devcontainers/cli"
     },
     {
+      "description": "cosign container (tag plus digest) used by the dev-container skill's verify-image",
+      "customType": "regex",
+      "managerFilePatterns": ["/^skills/dev-container/scripts/commands\\.mjs$/"],
+      "matchStrings": ["'(?<depName>ghcr\\.io/sigstore/cosign/cosign):(?<currentValue>v\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[0-9a-f]{64})'"],
+      "datasourceTemplate": "docker"
+    },
+    {
       "description": "Extension Manifest Pinned Refs: a github source or plugin marketplace followed by its 40-char sha",
       "customType": "regex",
       "managerFilePatterns": ["/^extensions/[^/]+\\.json$/", "/^variants/[^/]+/extensions\\.json$/"],

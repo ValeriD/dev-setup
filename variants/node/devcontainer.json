@@ -2,7 +2,8 @@
 // image's devcontainer.metadata label, so the hardening travels with the digest.
 {
   "name": "dev-setup node",
-  "build": { "dockerfile": "Dockerfile", "context": "../.." },
+  // REVISION becomes the image's org.opencontainers.image.revision label.
+  "build": { "dockerfile": "Dockerfile", "context": "../..", "args": { "REVISION": "${localEnv:DEV_SETUP_REVISION}" } },
   "remoteUser": "node",
   // Root only for the start-up entrypoint; every dev-user process runs as `node`
   // (remoteUser). Template adds --cap-drop=ALL, so root holds just these caps.

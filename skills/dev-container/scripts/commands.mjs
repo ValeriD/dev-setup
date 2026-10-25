@@ -3,8 +3,8 @@
 // the Template into `.devcontainer/` and drives the devcontainer CLI; every
 // other project edit is the agent's, followed by `validate`.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
@@ -16,6 +16,20 @@ export const LOCKFILES = ['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap
 /** Host VS Code user settings that ADR 0003's mitigations rely on. */
 export const VSCODE_SETTINGS = { 'dev.containers.copyGitConfig': false, 'dev.containers.dockerCredentialHelper': false };
 const DIGEST_REF = /@sha256:[0-9a-f]{64}$/;
+/** cosign, run through host Docker (no host install). Tag and digest are both kept current by renovate.json. */
+export const COSIGN_IMAGE = 'ghcr.io/sigstore/cosign/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8';
+/** The only accepted signer: keyless, from this repository's release workflow on main (.github/workflows/ci.yml). */
+export const SIGNER = {
+  identityRegexp: '^https://github\\.com/(?i:valerid/dev-setup)/\\.github/workflows/ci\\.yml@refs/heads/main$',
+  issuer: 'https://token.actions.githubusercontent.com',
+};
+/** Image labels set by variants/<name>/Dockerfile. */
+export const IMAGE_LABELS = {
+  revision: 'org.opencontainers.image.revision',
+  claudeCode: 'io.github.valerid.dev-setup.claude-code.version',
+  codex: 'io.github.valerid.dev-setup.codex.version',
+  pnpm: 'io.github.valerid.dev-setup.pnpm.version',
+};
 const PLACEHOLDER = /\$\{templateOption:([A-Za-z0-9_-]+)\}/g;
 
 export class UsageError extends Error {}
@@ -24,7 +38,10 @@ const USAGE = `usage: dev-container.mjs <command> [args]
   check                                         verify the skill link and checkout
   variants [--dir DIR]                          list Variants; with --dir, propose one
   resolve-target TARGET [--projects-root DIR]   URL, local folder or new name -> project path and facts
-  image-digest VARIANT [--ref IMAGE]            current registry digest of the Variant image (unverified)
+  image-digest VARIANT [--ref IMAGE]            registry digest of the Variant image, UNVERIFIED: never write it to a project
+  verify-image VARIANT [--ref IMAGE] [--current IMAGE]
+                                                resolve, verify signature + provenance, read labels; with
+                                                --current, the version and git-log changes since that image
   render-template VARIANT DIR --image REF@sha256:... [--option NAME=VALUE]...
   validate DIR                                  check .devcontainer/devcontainer.json and extensions.json
   vscode-settings [--settings FILE]             check the host VS Code settings ADR 0003 relies on
@@ -36,6 +53,7 @@ const COMMANDS = {
   variants: { positionals: 0, options: { dir: { type: 'string' } }, fn: variants },
   'resolve-target': { positionals: 1, options: { 'projects-root': { type: 'string' } }, fn: resolveTarget },
   'image-digest': { positionals: 1, options: { ref: { type: 'string' } }, fn: imageDigest },
+  'verify-image': { positionals: 1, options: { ref: { type: 'string' }, current: { type: 'string' } }, fn: verifyImage },
   'render-template': { positionals: 2, options: { image: { type: 'string' }, option: { type: 'string', multiple: true } }, fn: renderTemplate },
   validate: { positionals: 1, options: {}, fn: validate },
   'vscode-settings': { positionals: 0, options: { settings: { type: 'string' } }, fn: vscodeSettings },
@@ -148,24 +166,156 @@ function repositoryOf(ref) {
   return colon > slash ? noDigest.slice(0, colon) : noDigest;
 }
 
-function imageDigest([variant], { ref }, { repo }) {
+const STALE_LOGIN_HINT = 'If the registry answers 403 for a public image, a stale `docker login ghcr.io` is the usual cause (`docker logout ghcr.io`).';
+
+/** The Variant image the Template points at, or `ref`. */
+function variantSource(repo, variant, ref) {
   requireVariant(repo, variant);
   const source = ref ?? templateManifest(repo, variant).options?.image?.default;
   if (!source) throw new Error(`templates/${variant} has no default image option`);
-  const r = spawnSync('docker', ['buildx', 'imagetools', 'inspect', source, '--format', '{{json .Manifest}}'], { encoding: 'utf8' });
-  if (r.status !== 0) return { doc: { ok: false, ref: source, error: `cannot read ${source} from the registry: ${(r.stderr || r.error?.message || '').trim()}` } };
-  const digest = JSON.parse(r.stdout).digest;
-  if (!DIGEST_REF.test(`@${digest}`)) return { doc: { ok: false, ref: source, error: `unexpected manifest from ${source}` } };
+  return source;
+}
+
+function imagetools(ref, format) {
+  const r = spawnSync('docker', ['buildx', 'imagetools', 'inspect', ref, '--format', format], { encoding: 'utf8' });
+  if (r.status !== 0) return { error: `cannot read ${ref} from the registry: ${(r.stderr || r.error?.message || '').trim()}. ${STALE_LOGIN_HINT}` };
+  return { value: JSON.parse(r.stdout) };
+}
+
+/** `{ digest, image }` for a tag or digest reference, read from the registry. */
+function resolveDigest(source) {
+  const m = imagetools(source, '{{json .Manifest}}');
+  if (m.error) return m;
+  const digest = m.value.digest;
+  if (!DIGEST_REF.test(`@${digest}`)) return { error: `unexpected manifest from ${source}` };
+  return { digest, image: `${repositoryOf(source)}@${digest}` };
+}
+
+function imageDigest([variant], { ref }, { repo }) {
+  const source = variantSource(repo, variant, ref);
+  const r = resolveDigest(source);
+  if (r.error) return { doc: { ok: false, ref: source, error: r.error } };
   return {
     doc: {
       ok: true,
       ref: source,
-      digest,
-      image: `${repositoryOf(source)}@${digest}`,
+      ...r,
       verified: false,
-      note: 'Digest read from the registry; its signature and provenance are NOT verified yet (verify-image is not built). Tell the user it is unverified.',
+      note: 'Digest read from the registry, signature and provenance NOT verified. Only a digest from verify-image may be written to a project.',
     },
   };
+}
+
+// ---------- Image verification ----------
+
+/** Labels of a digest-pinned image (single manifest, or linux/amd64 of an index). */
+export function imageLabels(image) {
+  const r = imagetools(image, '{{json .Image}}');
+  if (r.error) return r;
+  const config = r.value?.config ? r.value : r.value?.['linux/amd64'] ?? Object.values(r.value ?? {})[0];
+  const labels = config?.config?.Labels ?? {};
+  const pick = (k) => labels[IMAGE_LABELS[k]] || null;
+  return { revision: pick('revision'), versions: { claudeCode: pick('claudeCode'), codex: pick('codex'), pnpm: pick('pnpm') } };
+}
+
+function cosign(args) {
+  // Host network: the registry may be on the host's loopback (tests). No Docker
+  // config is mounted, so cosign reads the public image anonymously.
+  const r = spawnSync('docker', ['run', '--rm', '--network', 'host', COSIGN_IMAGE, ...args], { encoding: 'utf8', maxBuffer: 64 << 20 });
+  return { code: r.status, out: r.stdout ?? '', err: (r.stderr || r.error?.message || '').trim() };
+}
+
+/**
+ * Pulls the public, digest-pinned cosign image anonymously: an empty Docker
+ * config, so a stale registry login cannot block it, on the current context's daemon.
+ */
+function cosignAvailable() {
+  if (spawnSync('docker', ['image', 'inspect', COSIGN_IMAGE], { stdio: 'ignore' }).status === 0) return null;
+  const host = process.env.DOCKER_HOST
+    || spawnSync('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'], { encoding: 'utf8' }).stdout?.trim();
+  const config = mkdtempSync(join(tmpdir(), 'dc-docker-config-'));
+  try {
+    writeFileSync(join(config, 'config.json'), '{}');
+    const env = { ...process.env, DOCKER_CONFIG: config, ...(host ? { DOCKER_HOST: host } : {}) };
+    const r = spawnSync('docker', ['pull', '-q', COSIGN_IMAGE], { encoding: 'utf8', env });
+    return r.status === 0 ? null : `cannot pull ${COSIGN_IMAGE}: ${(r.stderr || r.error?.message || '').trim()}`;
+  } finally {
+    rmSync(config, { recursive: true, force: true });
+  }
+}
+
+const SIGNER_ARGS = ['--certificate-identity-regexp', SIGNER.identityRegexp, '--certificate-oidc-issuer', SIGNER.issuer];
+
+/**
+ * Fails closed: any resolve error, missing tool, missing or foreign signature,
+ * or missing provenance is `ok: false`. There is deliberately no option to skip a check.
+ */
+function verifyImage([variant], { ref, current }, { repo }) {
+  const source = variantSource(repo, variant, ref);
+  const fail = (failed, error, extra = {}) => ({ doc: { ok: false, verified: false, variant, ref: source, failed, error, ...extra } });
+
+  const resolved = resolveDigest(source);
+  if (resolved.error) return fail('resolve', resolved.error);
+  const { digest, image } = resolved;
+  const unavailable = cosignAvailable();
+  if (unavailable) return fail('cosign', unavailable, { image });
+
+  const sig = cosign(['verify', image, ...SIGNER_ARGS, '--output', 'json']);
+  let payloads = [];
+  try {
+    payloads = JSON.parse(sig.out);
+  } catch { /* no JSON: treated as no signature */ }
+  if (sig.code !== 0 || !Array.isArray(payloads) || !payloads.length) {
+    return fail('signature', `${image} has no valid signature from this repository's release workflow`, { image, detail: tail(sig.err, 5) });
+  }
+  if (!payloads.every((p) => p?.critical?.image?.['docker-manifest-digest'] === digest)) {
+    return fail('signature', `the signature does not cover ${digest}`, { image });
+  }
+  const prov = cosign(['verify-attestation', '--type', 'slsaprovenance1', image, ...SIGNER_ARGS]);
+  if (prov.code !== 0 || !prov.out.trim()) {
+    return fail('provenance', `${image} has no valid SLSA provenance attestation from this repository's release workflow`, { image, detail: tail(prov.err, 5) });
+  }
+
+  const labels = imageLabels(image);
+  if (labels.error) return fail('labels', labels.error, { image });
+  const doc = { ok: true, verified: true, variant, ref: source, image, digest, ...labels, signer: SIGNER };
+  if (current) {
+    const cur = DIGEST_REF.test(current) ? { image: current, digest: current.split('@').pop() } : resolveDigest(current);
+    const curLabels = cur.error ? cur : imageLabels(cur.image);
+    if (curLabels.error) return { doc: { ...doc, current: { image: current, error: curLabels.error } } };
+    doc.current = { image: cur.image, ...curLabels };
+    doc.upToDate = cur.digest === digest;
+    doc.changes = imageChanges(repo, variant, doc.current, labels);
+  }
+  return { doc };
+}
+
+/** Paths an image of `variant` is built from: what "Base-layer and Variant changes" means. */
+export const imagePaths = (variant) => ['base', 'installer', 'extensions', `variants/${variant}`];
+
+/** Agent/pnpm version changes and the image-relevant git log between two labelled images. */
+export function imageChanges(repo, variant, from, to) {
+  const versions = Object.keys(to.versions)
+    .filter((k) => from.versions?.[k] !== to.versions[k])
+    .map((name) => ({ name, from: from.versions?.[name] ?? null, to: to.versions[name] }));
+  const changes = { versions, log: null };
+  if (!from.revision || !to.revision) {
+    changes.logNote = 'an image has no revision label (built before labels existed); no git log';
+    return changes;
+  }
+  const missing = [from.revision, to.revision].filter((rev) =>
+    spawnSync('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', `${rev}^0`], { stdio: 'ignore' }).status !== 0);
+  if (missing.length) {
+    changes.logNote = `revision ${missing.join(', ')} is not in the dev-setups checkout at ${repo}; run \`git -C ${repo} fetch\` and verify again`;
+    return changes;
+  }
+  const r = spawnSync('git', ['-C', repo, 'log', '--format=%h%x09%s', `${from.revision}..${to.revision}`, '--', ...imagePaths(variant)], { encoding: 'utf8' });
+  changes.log = r.stdout.split('\n').filter(Boolean).map((l) => {
+    const [sha, ...subject] = l.split('\t');
+    return { sha, subject: subject.join('\t') };
+  });
+  changes.logPaths = imagePaths(variant);
+  return changes;
 }
 
 // ---------- Template rendering ----------

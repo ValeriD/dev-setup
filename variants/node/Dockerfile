@@ -8,6 +8,12 @@ ARG PNPM_VERSION=11.0.0
 ARG CLAUDE_CODE_VERSION=2.1.310
 ARG CODEX_VERSION=0.164.0
 
+# Read by the dev-container skill's verify-image to show what an update changes
+# (the revision label is set at the end of this file).
+LABEL io.github.valerid.dev-setup.claude-code.version=${CLAUDE_CODE_VERSION} \
+      io.github.valerid.dev-setup.codex.version=${CODEX_VERSION} \
+      io.github.valerid.dev-setup.pnpm.version=${PNPM_VERSION}
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates dnsmasq-base nftables \
  && rm -rf /var/lib/apt/lists/*
@@ -72,3 +78,9 @@ RUN mkdir -p /home/node/.claude /home/node/.codex \
 
 USER node
 WORKDIR /workspace
+
+# The commit this image was built from (devcontainer.json passes it from the
+# host env DEV_SETUP_REVISION; CI and tests/lib.mjs set it). Last, so a new
+# commit does not invalidate the cached layers above.
+ARG REVISION=
+LABEL org.opencontainers.image.revision=${REVISION}

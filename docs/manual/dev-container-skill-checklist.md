@@ -1,6 +1,6 @@
 # dev-container skill: conversational checklist
 
-The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
+The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding; SC-08 for image updates). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
 
 ## Sandbox
 
@@ -18,7 +18,7 @@ claude   # /login once, then exit
 c() { claude -p --allowedTools 'Bash Read Edit Write' "$@"; }   # follow-ups: c --continue "yes"
 ```
 
-For a local image instead of the published one, tell the agent the image ref to use (e.g. a local registry tag), since `image-digest` reads the Template default otherwise.
+Onboarding and updates accept only an image that `verify-image` verified, so checks 1 to 8 and 11 need the published, signed `ghcr.io/valerid/dev-setup/node:latest` (CI on `main` has run and the package is public). Before that, check 1 must end at the verification failure with nothing written.
 
 ## Checks
 
@@ -34,5 +34,21 @@ For a local image instead of the published one, tell the agent the image ref to 
 | 8 | `c "/dev-container brand-new"` | `git init` under the projects root; asks before creating a GitHub repo. "no": `$T/gh.log` absent. "yes": `$T/gh.log` has `repo create brand-new --private ...`. |
 | 9 | `ln -sfn $T/nowhere $T/claude/skills/dev-container`, re-run 1 | The skill is gone or the agent reports the re-link instruction; nothing changes. Also copy the skill to `$T/copy/skills/dev-container` and link to that: the helper exits 3 with the re-link message. |
 | 10 | `c "/dev-container add the playwright MCP to $T/empty"` | Says the operation is not built yet; no edits. |
+| 11 | In the web-app clone, set `"image"` to an older published digest (from the `sha-<12>` tags), then `c "/dev-container update my dev container in <dir>"` | Shows old and new digest, the Claude Code/Codex/pnpm changes and the `git log` lines; asks once. "no": `devcontainer.json` unchanged. "yes": `image` is the new digest, `validate` ran, then one recreate question. |
+| 12 | Set `"image"` to an unsigned digest (any image pushed to a local registry, e.g. `localhost:5000/x/node@sha256:...`) and ask for an update with that ref | `verify-image` fails with `failed: signature`; the agent reports it, offers no workaround, and `devcontainer.json` is unchanged. |
+
+## Verifying a real signed image (SC-08 success path)
+
+Once CI has published from `main`, check the helper directly, from the dev-setups checkout:
+
+```sh
+H="node skills/dev-container/scripts/dev-container.mjs"
+$H verify-image node     # ok: true, verified: true, a 40-hex revision equal to the run's commit, the Dockerfile's versions
+OLD=ghcr.io/valerid/dev-setup/node@sha256:<digest of an older sha-<12> tag>
+$H verify-image node --current $OLD   # changes.versions and changes.log between the two revisions
+$H verify-image node --ref ghcr.io/sigstore/cosign/cosign:v3.1.3   # signed, but by another identity: failed "signature"
+```
+
+If `verify-image node` fails with `failed: provenance` while CI's own `gh attestation verify` passed, cosign is not finding the registry-pushed attestation (the risky integration point named in the design): note the `detail`, and compare with `cosign verify-attestation --type slsaprovenance1` run by hand in the same container. A 403 from ghcr.io for a public image usually means a stale `docker login ghcr.io`.
 
 Clean up: remove the started containers and their volumes, then `rm -rf $T`.

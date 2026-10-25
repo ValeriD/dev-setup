@@ -6,7 +6,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO, IMAGE, run, pins, buildImage, startTemplateRegistry, createProject, up, tryUp, containerFor, exec, removeProject } from './lib.mjs';
+import { REPO, IMAGE, run, pins, buildImage, headRevision, startTemplateRegistry, createProject, up, tryUp, containerFor, exec, removeProject } from './lib.mjs';
 import { writeFileSync } from 'node:fs';
 
 let registry;
@@ -73,6 +73,19 @@ test('SC-09: Agents are at the pinned versions with auto-update off', () => {
   assert.match(ok(a, 'cat /etc/claude-code/managed-settings.json'), /"DISABLE_AUTOUPDATER": "1"/);
   assert.match(ok(a, 'cat /etc/codex/config.toml'), /check_for_update_on_startup = false/);
   assert.notEqual(sh(a, 'test -w /etc/claude-code/managed-settings.json || test -w /etc/codex/config.toml').code, 0);
+});
+
+test('image labels carry the build revision and the pinned Agent and pnpm versions (read by verify-image)', () => {
+  const labels = JSON.parse(run('docker', ['image', 'inspect', IMAGE, '--format', '{{json .Config.Labels}}']).out);
+  const ns = 'io.github.valerid.dev-setup';
+  assert.equal(labels[`${ns}.claude-code.version`], pin.claude);
+  assert.equal(labels[`${ns}.codex.version`], pin.codex);
+  assert.equal(labels[`${ns}.pnpm.version`], pin.pnpm);
+  const revision = labels['org.opencontainers.image.revision'];
+  assert.match(revision ?? '', /^[0-9a-f]{40}$/);
+  // CI builds with GITHUB_SHA; the suite's own build with this checkout's HEAD.
+  const want = process.env.GITHUB_SHA ?? (process.env.DEV_SETUP_TEST_SKIP_BUILD ? undefined : headRevision());
+  if (want) assert.equal(revision, want);
 });
 
 const claudeMode = (p, bin) =>
