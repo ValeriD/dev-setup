@@ -6,16 +6,17 @@ The digest is the project's trust anchor. A digest reaches `devcontainer.json` o
 
 ## 1. Read the current image
 
-Run `H validate <dir>`. `image` is the current digest-pinned reference. The Variant is the one whose image repository `image` points at (`H variants` lists them; for `ghcr.io/valerid/dev-setup/node@…` it is `node`).
+Run `H validate <dir>`. `image` is the current digest-pinned reference and `variant` the Variant it belongs to.
 
-**Done when you hold the current `image` and the Variant name.** If `validate` reports problems, show them and stop: fix the project first.
+**Done when you hold `image` and `variant`.** If `validate` reports problems, or `variant` is null (the image is not one of this repository's Variants), show that and stop.
 
 ## 2. Verify the newest image
 
 Run `H verify-image <variant> --current <image>`. It resolves the Variant's published tag to a digest, checks the cosign keyless signature (only this repository's release workflow on `main` is accepted) and the SLSA provenance attestation, then reads the image labels and compares them with the current image.
 
-- `ok: false`: report `failed` (`resolve`, `cosign`, `signature`, `provenance` or `labels`), `error` and `detail`, say that nothing was changed, and stop. A failure is a finding, never an obstacle to route around: the helper has no option to skip a check, and no other source of a digest is acceptable (`image-digest` and hand-picked tags are unverified).
+- `ok: false`: report `failed` (`resolve`, `cosign`, `signature`, `provenance` or `labels`), `error` and `detail`, say that nothing was changed, and stop. The failure is the result of the update.
 - `upToDate: true`: tell the user the project already runs the newest verified image, and stop.
+- `changes.newer: false`: the verified image is older than the current one. Say so and stop; going back is a separate request the user makes explicitly.
 
 **Done when `verify-image` returned `verified: true` for a digest different from the current one.**
 
@@ -25,7 +26,7 @@ From the `verify-image` result, show:
 
 - the current and new digests, and the new `revision`;
 - each entry of `changes.versions` (Claude Code, Codex, pnpm: from → to);
-- `changes.log`: the commits between the two revisions that touch the image (`changes.logPaths`), one line each. If `log` is null, show `logNote`. When it asks for a fetch, run `git -C <dev-setups checkout> fetch` (the checkout is the `repo` from `H check`) and repeat step 2 once.
+- `changes.log`: the commits between the two revisions that touch the image (`changes.logPaths`), one line each. If `log` is null, show `logNote`. If `changes` is null, the current image could not be read: show `current.error` and say that no comparison is available. When it asks for a fetch, run `git -C <dev-setups checkout> fetch` (the checkout is the `repo` from `H check`) and repeat step 2 once.
 
 Then ask once: "Update `.devcontainer/devcontainer.json` to `<new image>`?"
 

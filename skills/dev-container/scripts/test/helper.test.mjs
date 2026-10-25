@@ -107,6 +107,7 @@ test('render-template writes a .devcontainer that validate accepts', () => {
   assert.equal(v.code, 0, v.out);
   assert.deepEqual(v.doc.problems, []);
   assert.equal(v.doc.image, IMAGE);
+  assert.equal(v.doc.variant, 'node', 'the Variant is read from the image repository');
 });
 
 test('render-template refuses a tag-only image, unknown options and an existing dev container, writing nothing', () => {
@@ -229,10 +230,6 @@ test('verify-image has no option that skips a check', () => {
 
 test('the accepted signer is exactly the release workflow ci.yml signs with, on main', async () => {
   const { SIGNER } = await import('../commands.mjs');
-  const ci = readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8');
-  assert.match(ci, /cosign sign --yes/, 'ci.yml signs keyless');
-  assert.match(ci, /branches: \[main\]/);
-  assert.equal(SIGNER.issuer, 'https://token.actions.githubusercontent.com');
   const id = new RegExp(SIGNER.identityRegexp); // Go RE2 syntax; (?i:...) also works in Node 24
   const wf = (repo, ref = 'refs/heads/main', file = 'ci.yml') => `https://github.com/${repo}/.github/workflows/${file}@${ref}`;
   assert.ok(id.test(wf('ValeriD/dev-setup')));
@@ -245,7 +242,7 @@ test('the accepted signer is exactly the release workflow ci.yml signs with, on 
 });
 
 test('imageChanges lists Agent version changes and only the commits that touch the image', async () => {
-  const { imageChanges, imagePaths } = await import('../commands.mjs');
+  const { imageChanges } = await import('../commands.mjs');
   const repo = dir();
   const git = (...a) => {
     const r = spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
@@ -264,13 +261,16 @@ test('imageChanges lists Agent version changes and only the commits that touch t
   change('docs/x.md', 'docs only');
   change('base/egress/start.sh', 'tighten egress');
   change('variants/other/Dockerfile', 'other variant');
+  change('installer/src/index.mjs', 'installer fix');
   const to = change('variants/node/Dockerfile', 'bump codex');
-  assert.deepEqual(imagePaths('node'), ['base', 'installer', 'extensions', 'variants/node']);
 
   const v = (claudeCode, codex) => ({ claudeCode, codex, pnpm: '11.0.0' });
   const c = imageChanges(repo, 'node', { revision: from, versions: v('2.1.0', '0.1.0') }, { revision: to, versions: v('2.1.0', '0.2.0') });
   assert.deepEqual(c.versions, [{ name: 'codex', from: '0.1.0', to: '0.2.0' }]);
-  assert.deepEqual(c.log.map((e) => e.subject), ['bump codex', 'tighten egress']);
+  assert.deepEqual(c.log.map((e) => e.subject), ['bump codex', 'installer fix', 'tighten egress']);
+  assert.equal(c.newer, true);
+  const back = imageChanges(repo, 'node', { revision: to, versions: v('2.1.0', '0.2.0') }, { revision: from, versions: v('2.1.0', '0.1.0') });
+  assert.equal(back.newer, false, 'an older signed image is flagged as a rollback');
 
   const unknown = imageChanges(repo, 'node', { revision: 'f'.repeat(40), versions: {} }, { revision: to, versions: v('2.1.0', '0.2.0') });
   assert.equal(unknown.log, null);

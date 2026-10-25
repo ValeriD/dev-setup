@@ -176,9 +176,12 @@ function variantSource(repo, variant, ref) {
   return source;
 }
 
+/** What a failed spawnSync said. */
+const failure = (r) => (r.stderr || r.error?.message || '').trim();
+
 function imagetools(ref, format) {
   const r = spawnSync('docker', ['buildx', 'imagetools', 'inspect', ref, '--format', format], { encoding: 'utf8' });
-  if (r.status !== 0) return { error: `cannot read ${ref} from the registry: ${(r.stderr || r.error?.message || '').trim()}. ${STALE_LOGIN_HINT}` };
+  if (r.status !== 0) return { error: `cannot read ${ref} from the registry: ${failure(r)}. ${STALE_LOGIN_HINT}` };
   return { value: JSON.parse(r.stdout) };
 }
 
@@ -208,28 +211,33 @@ function imageDigest([variant], { ref }, { repo }) {
 
 // ---------- Image verification ----------
 
-/** Labels of a digest-pinned image (single manifest, or linux/amd64 of an index). */
+/** Labels of a digest-pinned image (a single manifest, or linux/amd64 of an index). */
 export function imageLabels(image) {
   const r = imagetools(image, '{{json .Image}}');
   if (r.error) return r;
-  const config = r.value?.config ? r.value : r.value?.['linux/amd64'] ?? Object.values(r.value ?? {})[0];
-  const labels = config?.config?.Labels ?? {};
-  const pick = (k) => labels[IMAGE_LABELS[k]] || null;
-  return { revision: pick('revision'), versions: { claudeCode: pick('claudeCode'), codex: pick('codex'), pnpm: pick('pnpm') } };
+  const config = r.value?.config ? r.value : r.value?.['linux/amd64'];
+  if (!config) return { error: `${image} has no linux/amd64 image` };
+  const labels = config.config?.Labels ?? {};
+  const { revision, ...versionKeys } = IMAGE_LABELS;
+  return {
+    revision: labels[revision] || null,
+    versions: Object.fromEntries(Object.entries(versionKeys).map(([name, key]) => [name, labels[key] || null])),
+  };
 }
 
 function cosign(args) {
   // Host network: the registry may be on the host's loopback (tests). No Docker
   // config is mounted, so cosign reads the public image anonymously.
   const r = spawnSync('docker', ['run', '--rm', '--network', 'host', COSIGN_IMAGE, ...args], { encoding: 'utf8', maxBuffer: 64 << 20 });
-  return { code: r.status, out: r.stdout ?? '', err: (r.stderr || r.error?.message || '').trim() };
+  return { code: r.status, out: r.stdout ?? '', err: failure(r) };
 }
 
 /**
- * Pulls the public, digest-pinned cosign image anonymously: an empty Docker
- * config, so a stale registry login cannot block it, on the current context's daemon.
+ * Makes the cosign image present, pulling the public, digest-pinned image anonymously
+ * (an empty Docker config, so a stale registry login cannot block it) on the current
+ * context's daemon. Returns the error, or null when cosign is ready.
  */
-function cosignAvailable() {
+function pullCosignError() {
   if (spawnSync('docker', ['image', 'inspect', COSIGN_IMAGE], { stdio: 'ignore' }).status === 0) return null;
   const host = process.env.DOCKER_HOST
     || spawnSync('docker', ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'], { encoding: 'utf8' }).stdout?.trim();
@@ -238,7 +246,7 @@ function cosignAvailable() {
     writeFileSync(join(config, 'config.json'), '{}');
     const env = { ...process.env, DOCKER_CONFIG: config, ...(host ? { DOCKER_HOST: host } : {}) };
     const r = spawnSync('docker', ['pull', '-q', COSIGN_IMAGE], { encoding: 'utf8', env });
-    return r.status === 0 ? null : `cannot pull ${COSIGN_IMAGE}: ${(r.stderr || r.error?.message || '').trim()}`;
+    return r.status === 0 ? null : `cannot pull ${COSIGN_IMAGE}: ${failure(r)}`;
   } finally {
     rmSync(config, { recursive: true, force: true });
   }
@@ -257,8 +265,8 @@ function verifyImage([variant], { ref, current }, { repo }) {
   const resolved = resolveDigest(source);
   if (resolved.error) return fail('resolve', resolved.error);
   const { digest, image } = resolved;
-  const unavailable = cosignAvailable();
-  if (unavailable) return fail('cosign', unavailable, { image });
+  const pullError = pullCosignError();
+  if (pullError) return fail('cosign', pullError, { image });
 
   const sig = cosign(['verify', image, ...SIGNER_ARGS, '--output', 'json']);
   let payloads = [];
@@ -282,7 +290,7 @@ function verifyImage([variant], { ref, current }, { repo }) {
   if (current) {
     const cur = DIGEST_REF.test(current) ? { image: current, digest: current.split('@').pop() } : resolveDigest(current);
     const curLabels = cur.error ? cur : imageLabels(cur.image);
-    if (curLabels.error) return { doc: { ...doc, current: { image: current, error: curLabels.error } } };
+    if (curLabels.error) return { doc: { ...doc, current: { image: current, error: curLabels.error }, changes: null } };
     doc.current = { image: cur.image, ...curLabels };
     doc.upToDate = cur.digest === digest;
     doc.changes = imageChanges(repo, variant, doc.current, labels);
@@ -291,14 +299,14 @@ function verifyImage([variant], { ref, current }, { repo }) {
 }
 
 /** Paths an image of `variant` is built from: what "Base-layer and Variant changes" means. */
-export const imagePaths = (variant) => ['base', 'installer', 'extensions', `variants/${variant}`];
+const imagePaths = (variant) => ['base', 'installer', 'extensions', `variants/${variant}`];
 
 /** Agent/pnpm version changes and the image-relevant git log between two labelled images. */
 export function imageChanges(repo, variant, from, to) {
   const versions = Object.keys(to.versions)
     .filter((k) => from.versions?.[k] !== to.versions[k])
     .map((name) => ({ name, from: from.versions?.[name] ?? null, to: to.versions[name] }));
-  const changes = { versions, log: null };
+  const changes = { versions, newer: null, log: null, logPaths: imagePaths(variant) };
   if (!from.revision || !to.revision) {
     changes.logNote = 'an image has no revision label (built before labels existed); no git log';
     return changes;
@@ -309,12 +317,13 @@ export function imageChanges(repo, variant, from, to) {
     changes.logNote = `revision ${missing.join(', ')} is not in the dev-setups checkout at ${repo}; run \`git -C ${repo} fetch\` and verify again`;
     return changes;
   }
-  const r = spawnSync('git', ['-C', repo, 'log', '--format=%h%x09%s', `${from.revision}..${to.revision}`, '--', ...imagePaths(variant)], { encoding: 'utf8' });
+  // false: the "new" image is older than the current one (a rollback).
+  changes.newer = spawnSync('git', ['-C', repo, 'merge-base', '--is-ancestor', from.revision, to.revision], { stdio: 'ignore' }).status === 0;
+  const r = spawnSync('git', ['-C', repo, 'log', '--format=%h%x09%s', `${from.revision}..${to.revision}`, '--', ...changes.logPaths], { encoding: 'utf8' });
   changes.log = r.stdout.split('\n').filter(Boolean).map((l) => {
     const [sha, ...subject] = l.split('\t');
     return { sha, subject: subject.join('\t') };
   });
-  changes.logPaths = imagePaths(variant);
   return changes;
 }
 
@@ -376,7 +385,14 @@ function readJsonc(file) {
   return { value, errors: errors.map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`) };
 }
 
-function validate([dir]) {
+/** The Variant whose Template points at the same image repository, or null. */
+function variantOfImage(repo, image) {
+  if (typeof image !== 'string') return null;
+  const want = repositoryOf(image);
+  return listVariants(repo).find((v) => v.template && repositoryOf(templateManifest(repo, v.name).options?.image?.default ?? '') === want)?.name ?? null;
+}
+
+function validate([dir], _, { repo }) {
   const project = resolve(dir);
   const problems = [];
   const dcFile = join(project, '.devcontainer/devcontainer.json');
@@ -412,7 +428,7 @@ function validate([dir]) {
       entries = Array.isArray(manifest?.extensions) ? manifest.extensions.length : undefined;
     }
   }
-  return { doc: { ok: problems.length === 0, dir: project, image, entries, problems } };
+  return { doc: { ok: problems.length === 0, dir: project, image, variant: variantOfImage(repo, image), entries, problems } };
 }
 
 // ---------- Host VS Code settings ----------
