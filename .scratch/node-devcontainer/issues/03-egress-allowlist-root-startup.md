@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 (Walking skeleton)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -23,11 +23,11 @@
   - SC-06, firewall part: `nft` changes fail as `node`, and dnsmasq can't be signalled or replaced.
   - Extends the ticket 02 harness.
 
-- [ ] `https://example.com` fails; `registry.npmjs.org`, `api.github.com`, `api.anthropic.com` and `api.openai.com` succeed
-- [ ] IPv6 egress fails; DNS queries to an arbitrary resolver (e.g. `1.1.1.1`) fail; non-allowlisted names don't resolve
-- [ ] As `node`, attempts to list or change nftables rules, or to kill or restart dnsmasq, fail
-- [ ] A deliberately broken allowlist or ruleset makes `devcontainer up` fail instead of starting with open egress
-- [ ] OpenAI and Anthropic login hostnames are verified (not assumed) and documented next to the allowlist
+- [x] `https://example.com` fails; `registry.npmjs.org`, `api.github.com`, `api.anthropic.com` and `api.openai.com` succeed
+- [x] IPv6 egress fails; DNS queries to an arbitrary resolver (e.g. `1.1.1.1`) fail; non-allowlisted names don't resolve
+- [x] As `node`, attempts to list or change nftables rules, or to kill or restart dnsmasq, fail
+- [x] A deliberately broken allowlist or ruleset makes `devcontainer up` fail instead of starting with open egress
+- [x] OpenAI and Anthropic login hostnames are verified (not assumed) and documented next to the allowlist
 
 ## Spike findings to apply (from ticket 01 Answer)
 
@@ -35,3 +35,11 @@
 - **dnsmasq** can't drop privileges in this setup. Run it as root with `--no-daemon`, backgrounded.
 - **Upstream resolver:** read it from `/etc/resolv.conf` at start; on the default bridge it was the host's resolver, not `127.0.0.11`. Block `127.0.0.11` and the upstream for non-root.
 - **Shared CDN IPs:** an allowlisted name's CDN IP makes other sites on that IP reachable. Record this as a residual risk; it is already noted in ADR 0002.
+
+## Comments
+
+- Implemented in `base/egress/` plus a no-op local Feature at `variants/node/.devcontainer/features/egress/` (the devcontainer CLI only accepts local Features under `<workspace>/.devcontainer/`). The Dockerfile copies the scripts; the Feature only contributes the root `entrypoint`.
+- `node` now has `CapBnd` 3000 (NET_ADMIN|NET_RAW) with `CapEff`/`CapPrm` 0 and `no-new-privileges`; the SC-06 privilege test was updated from "bounding set 0" accordingly.
+- Login hosts verified by extracting URLs from the pinned Agent binaries (documented in `base/egress/allowlist.txt`). Real interactive logins were not run. `auth.api.openai.org` / `platform.api.openai.org` appear in the Codex binary and are not allowed; add `openai.org` if login needs it.
+- Residual risks: shared-CDN IPs (ADR 0002); a domain entry also allows its subdomains. VS Code itself was not run (CLI only).
+- Fail-closed test uses env `EGRESS_ALLOWLIST` pointing at an invalid and an empty allowlist.

@@ -4,7 +4,11 @@
   "name": "dev-setup node",
   "build": { "dockerfile": "Dockerfile", "context": "../.." },
   "remoteUser": "node",
-  "containerUser": "node",
+  // Root only for the start-up entrypoint; every dev-user process runs as `node`
+  // (remoteUser). Template adds --cap-drop=ALL, so root holds just these two caps.
+  "containerUser": "root",
+  "features": { "./.devcontainer/features/egress": {} },
+  "capAdd": ["NET_ADMIN", "NET_RAW"],
   "init": true,
   "securityOpt": ["no-new-privileges"],
   "containerEnv": {

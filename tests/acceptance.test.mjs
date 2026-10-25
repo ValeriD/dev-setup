@@ -6,7 +6,8 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO, IMAGE, run, pins, buildImage, startTemplateRegistry, createProject, up, exec, removeProject } from './lib.mjs';
+import { REPO, IMAGE, run, pins, buildImage, startTemplateRegistry, createProject, up, tryUp, containerFor, exec, removeProject } from './lib.mjs';
+import { writeFileSync } from 'node:fs';
 
 let registry;
 const projects = []; // { dir, containerId }
@@ -51,14 +52,17 @@ test('SC-06 (privilege): node has no sudo, no capabilities, no setuid path to ro
   assert.notEqual(sh(a, 'sudo -n true').code, 0);
   const status = ok(a, 'cat /proc/self/status');
   assert.match(status, /^CapEff:\s+0+$/m);
-  assert.match(status, /^CapBnd:\s+0+$/m);
+  // Bounding set keeps only what the root start-up step needed; no-new-privileges neutralises it for node.
+  assert.match(status, /^CapBnd:\s+0*3000$/m);
+  assert.match(status, /^CapPrm:\s+0+$/m);
   assert.match(status, /^NoNewPrivs:\s+1$/m);
   assert.equal(ok(a, 'find / -xdev -type f \\( -perm -4000 -o -perm -2000 \\) 2>/dev/null; true').trim(), '');
   assert.notEqual(sh(a, 'su root -c id < /dev/null').code, 0);
   const hc = JSON.parse(run('docker', ['inspect', a.containerId, '--format', '{{json .HostConfig}}']).out);
   assert.equal(hc.Privileged, false);
   assert.deepEqual(hc.CapDrop, ['ALL']);
-  assert.ok(!(hc.CapAdd ?? []).length);
+  // Root's start-up step holds exactly these two caps; node's CapEff is 0 (above).
+  assert.deepEqual([...(hc.CapAdd ?? [])].sort(), ['CAP_NET_ADMIN', 'CAP_NET_RAW']);
   assert.ok(!hc.Binds?.some((b) => b.includes('docker.sock')));
 });
 
@@ -122,6 +126,76 @@ test('SC-18: .git/hooks, .git/config, .devcontainer/ and .vscode/ are read-only;
   assert.deepEqual(run("ls", [join(a.dir, ".git/hooks")]).out.split("\n").filter((f) => f && !f.endsWith(".sample")), [], 'host hooks dir untouched');
   ok(a, 'echo "console.log(1)" > /workspace/index.js && git add index.js && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com git commit -qm init && git log --oneline | wc -l');
   assert.ok(existsSync(join(a.dir, 'index.js')));
+});
+
+// Probes run as `node` through `node -` (the image has no curl or dig).
+const probe = (p, code) => sh(p, 'node -', { input: code });
+const fetchStatus = (host) => `
+  require('https').get({host:${JSON.stringify(host)},path:'/',timeout:10000},r=>{console.log('HTTP',r.statusCode);r.resume()})
+    .on('error',e=>{console.log('ERR',e.code);process.exit(1)}).on('timeout',()=>{console.log('ERR timeout');process.exit(1)});`;
+const udpDns = (server) => `
+  const s=require('dgram').createSocket('udp4');
+  const q=Buffer.from('123401000001000000000000076578616d706c6503636f6d0000010001','hex');
+  s.on('message',()=>{console.log('ANSWERED');process.exit(0)});
+  s.on('error',e=>{console.log('ERR',e.code);process.exit(1)});
+  s.send(q,53,${JSON.stringify(server)});
+  setTimeout(()=>{console.log('NO REPLY');process.exit(1)},3000);`;
+
+test('SC-04: only the Base Egress Allowlist is reachable; IPv6 and foreign DNS are blocked', () => {
+  for (const host of ['registry.npmjs.org', 'api.github.com', 'api.anthropic.com', 'api.openai.com']) {
+    const r = probe(a, fetchStatus(host));
+    assert.equal(r.code, 0, `${host} should be reachable\n${r.out}${r.err}`);
+  }
+  // Login hosts for both Agents resolve through the allowlist.
+  for (const host of ['claude.ai', 'platform.claude.com', 'auth.openai.com', 'chatgpt.com', 'update.code.visualstudio.com', 'marketplace.visualstudio.com']) {
+    assert.equal(sh(a, `getent ahostsv4 ${host}`).code, 0, `${host} should resolve`);
+  }
+  assert.notEqual(probe(a, fetchStatus('example.com')).code, 0, 'example.com must fail');
+  assert.notEqual(sh(a, 'getent hosts example.com').code, 0, 'non-allowlisted name must not resolve');
+  assert.notEqual(probe(a, "const s=require('net').connect({host:'2606:4700:4700::1111',port:443,timeout:3000});s.on('connect',()=>{console.log('OPEN');process.exit(0)});s.on('error',()=>process.exit(1));s.on('timeout',()=>process.exit(1))").code, 0, 'IPv6 must fail');
+  assert.notEqual(probe(a, "const s=require('net').connect({host:'1.1.1.1',port:443,timeout:3000});s.on('connect',()=>process.exit(0));s.on('error',()=>process.exit(1));s.on('timeout',()=>process.exit(1))").code, 0, 'direct IP must fail');
+  const upstreams = ok(a, 'cat /run/egress/upstreams').trim().split('\n');
+  for (const server of ['1.1.1.1', '127.0.0.11', ...upstreams]) {
+    assert.notEqual(probe(a, udpDns(server)).code, 0, `DNS to ${server} must not be answered for node`);
+  }
+  assert.equal(probe(a, udpDns('127.0.0.1')).out.trim(), 'ANSWERED', 'local resolver answers (REFUSED counts)');
+});
+
+test('SC-06 (firewall): node cannot read or change the rules, nor signal or replace dnsmasq', () => {
+  assert.notEqual(sh(a, 'nft list ruleset').code, 0);
+  assert.notEqual(sh(a, 'nft flush ruleset').code, 0);
+  assert.notEqual(sh(a, 'nft add rule inet egress output accept').code, 0);
+  const pid = ok(a, "for p in /proc/[0-9]*; do grep -q '^Name:.dnsmasq' $p/status && basename $p; done; true").trim();
+  assert.match(pid, /^\d+$/, 'dnsmasq runs');
+  assert.equal(ok(a, `stat -c %U /proc/${pid}`).trim(), 'root');
+  assert.notEqual(sh(a, `kill -9 ${pid}`).code, 0);
+  assert.notEqual(sh(a, `kill -TERM ${pid}`).code, 0);
+  assert.notEqual(sh(a, 'echo nameserver 1.1.1.1 > /etc/resolv.conf').code, 0);
+  assert.notEqual(sh(a, 'test -w /usr/local/share/egress/allowlist.txt || test -w /run/egress/dnsmasq.conf || test -w /run/egress/ruleset.nft').code, 0);
+  assert.equal(ok(a, "grep -c '^nameserver 127.0.0.1$' /etc/resolv.conf").trim(), '1');
+});
+
+test('fail closed: a broken allowlist stops the container instead of starting with open egress', () => {
+  for (const [name, content] of [['invalid', 'registry.npmjs.org\nnot a domain!!\n'], ['empty', '# nothing\n']]) {
+    const dir = createProject(registry.templateId);
+    const p = { dir, containerId: null };
+    projects.push(p);
+    writeFileSync(join(dir, 'bad-allowlist.txt'), content);
+    const cfgPath = join(dir, '.devcontainer/devcontainer.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+    cfg.containerEnv = { EGRESS_ALLOWLIST: '/workspace/bad-allowlist.txt' };
+    writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    tryUp(dir); // `up` may still report success: assert on the container itself
+    p.containerId = containerFor(dir);
+    assert.ok(p.containerId, `${name}: container exists`);
+    let running = 'true';
+    for (let i = 0; i < 30 && running === 'true'; i++) {
+      running = run('docker', ['inspect', p.containerId, '--format', '{{.State.Running}}']).out.trim();
+      if (running === 'true') run('sleep', ['1']);
+    }
+    assert.equal(running, 'false', `${name}: container must have stopped`);
+    assert.notEqual(exec(dir, 'true').code, 0, `${name}: nothing can run in it`);
+  }
 });
 
 test('SC-10: login volumes persist across a rebuild and are separate per project', () => {

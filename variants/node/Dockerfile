@@ -9,7 +9,7 @@ ARG CLAUDE_CODE_VERSION=2.1.310
 ARG CODEX_VERSION=0.164.0
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
+ && apt-get install -y --no-install-recommends git ca-certificates dnsmasq-base nftables \
  && rm -rf /var/lib/apt/lists/*
 
 # Install scripts stay disabled globally. Codex needs none. Claude Code's
@@ -26,6 +26,7 @@ RUN npm install -g --ignore-scripts \
 COPY base/bin/ /usr/local/bin/
 COPY base/claude/managed-settings.json /etc/claude-code/managed-settings.json
 COPY base/codex/config.toml /etc/codex/config.toml
+COPY base/egress/ /usr/local/share/egress/
 
 # Host-credential isolation: VS Code bridge scrubber (profile.d + bash.bashrc
 # hook + postStartCommand), read-only git config and the PAT-only credential helper.
@@ -41,7 +42,8 @@ RUN chmod 755 /usr/local/bin/git-credential-dev-setup \
 RUN mkdir -p /home/node/.claude /home/node/.codex \
  && chown node:node /home/node/.claude /home/node/.codex \
  && chmod 755 /usr/local/bin/claude-yolo /usr/local/bin/codex-yolo \
- && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex \
+ && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /usr/local/share/egress \
+ && chmod 755 /usr/local/share/egress/*.sh \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod a-s {} + \
  && ! find / -xdev -type f \( -perm -4000 -o -perm -2000 \) | grep -q .
 

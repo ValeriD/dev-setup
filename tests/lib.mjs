@@ -76,6 +76,16 @@ export function volumeNames(containerId) {
   return m.filter((x) => x.Type === 'volume').map((x) => x.Name);
 }
 
+/** Container id for a project folder (running or not), found by the devcontainer label. */
+export function containerFor(dir) {
+  return run('docker', ['ps', '-aq', '--filter', `label=devcontainer.local_folder=${dir}`]).out.trim().split('\n')[0] || null;
+}
+
+/** `up` that reports instead of throwing, for fail-closed checks. */
+export function tryUp(dir) {
+  return cli(['up', '--workspace-folder', dir]);
+}
+
 export function removeProject(dir, containerId) {
   const vols = containerId ? volumeNames(containerId) : [];
   if (containerId) run('docker', ['rm', '-f', containerId]);
