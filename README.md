@@ -15,6 +15,18 @@ Hardened, reusable development containers with Claude Code and Codex preinstalle
 
 Integration tests of the extension installer CLI against local bare-repo fixtures. No network at test time.
 
+## `/dev-container` skill (host)
+
+Onboards a project (local folder, GitHub URL or new repo) to a Variant from your host Claude Code. Install once from this checkout:
+
+```sh
+(cd installer && npx -y pnpm@11.0.0 install --frozen-lockfile)
+(cd skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile)
+ln -s "$PWD/skills/dev-container" ~/.claude/skills/dev-container
+```
+
+The skill finds this repository through the symlink, so keep the checkout where it is; if you move it, re-link with `ln -sfn`. Helper tests (temp dirs only, no Docker): `npm run test:skill`. The container path is covered by `tests/dev-container-skill.test.mjs` in the acceptance suite. Conversational behaviour is checked by hand with `docs/manual/dev-container-skill-checklist.md`.
+
 ## Acceptance suite
 
 Needs Docker and Node 24 (the devcontainer CLI is fetched with `npx` at an exact version).

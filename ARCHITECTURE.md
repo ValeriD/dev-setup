@@ -18,3 +18,15 @@ Proposed design: `.scratch/node-devcontainer/design.md`. Implemented so far: ima
 Egress: the start-up step consumes an allowlist file (override with env `EGRESS_ALLOWLIST`) and knows nothing of manifests; the installer emits that file. Test seam: `tests/` probes as `node` and asserts the container stopped on a broken allowlist.
 
 Dependency direction: Template references the image; the image never references the Template; tests depend on everything.
+
+## dev-container host skill
+
+Proposed design: `.scratch/dev-container-skill/design.md`. Implemented so far: onboarding (no Presets, image digest unverified). Not yet: Presets, migrate, add/remove extensions, egress, secrets, verified image updates, status.
+
+| Module | Anchor | Owns |
+| --- | --- | --- |
+| Skill prompt | `skills/dev-container/SKILL.md`, `references/<operation>.md` | Conversation: routing, confirmation points, guardrails (no commits, `docs/agents/` and `.scratch/` left alone, `/setup-matt-pocock-skills` only reminded). Installed by symlinking the folder into `~/.claude/skills`. |
+| Skill helper | `skills/dev-container/scripts/` | Node ESM CLI, JSON on stdout. `dev-container.mjs` checks the checkout found through its real path (and the `~/.claude/skills/dev-container` link) before anything else, exit 3 = re-link. `commands.mjs`: `variants`, `resolve-target`, `image-digest` (`docker buildx imagetools`), `render-template` (fills `${templateOption:…}` from the local `templates/<variant>/`, adds an empty Extension Manifest), `validate` (`jsonc-parser` + installer `validateManifest`), `vscode-settings`, `up`, `first-lockfile` (devcontainer CLI via `npx`, same pin as `tests/lib.mjs`). Only `render-template` writes project files. Own `package.json`/lockfile (`jsonc-parser` exact). Tests: `scripts/test/` (`npm run test:skill`), `tests/dev-container-skill.test.mjs`, manual `docs/manual/dev-container-skill-checklist.md`. |
+| Variant metadata | `variants/<name>/variant.json` | Description and detection files, read by `variants`. |
+
+Dependency direction: prompt → helper → installer library (relative import) and repository data. The installer and images never reference the skill.

@@ -45,8 +45,19 @@ A broken install symlink makes it stop with a re-link message.
 - **Validation seam:** helper integration tests through its CLI (`node:test`, no network: local bare git, local `registry:2.8.3`), plus headless `claude -p` checklist entries for the conversational parts.
 - **Coverage:** SC-01 (without Presets), SC-02, SC-12, SC-13, SC-14, SC-15.
 
-- [ ] Symlinking `skills/dev-container` into `~/.claude/skills` makes `/dev-container` available. The install step is documented in the README.
-- [ ] `variants` proposes node for a folder with `package.json` and reports "ambiguous" for an empty folder
-- [ ] `render-template` produces a `.devcontainer/` that `validate` accepts and `devcontainer up` starts
-- [ ] A broken symlink, or one pointing outside a valid checkout, makes the helper exit with the re-link message and change nothing
+- [x] Symlinking `skills/dev-container` into `~/.claude/skills` makes `/dev-container` available. The install step is documented in the README.
+- [x] `variants` proposes node for a folder with `package.json` and reports "ambiguous" for an empty folder
+- [x] `render-template` produces a `.devcontainer/` that `validate` accepts and `devcontainer up` starts
+- [x] A broken symlink, or one pointing outside a valid checkout, makes the helper exit with the re-link message and change nothing
 - [ ] Checklist: URL clone, local folder and new-repo flows; repo creation only after confirmation and private; one recreate prompt; VS Code settings written only after confirmation (tested against a temporary settings file); no commits; the reminder appears; `docs/agents/` and `.scratch/` untouched
+
+## Comments
+
+**Implementation notes (agent, 2026-10-25):**
+
+- Helper subcommands beyond the design table, all small and deterministic: `check`, `resolve-target` (URL / local / new name -> path plus the facts the flow branches on), `image-digest` (registry digest via `docker buildx imagetools`, reported `verified: false`; ticket 06's `verify-image` replaces it in the flow), `vscode-settings` (report only; the agent edits after confirmation), `up` and `first-lockfile` (devcontainer CLI at the suite's pin; `first-lockfile` runs `pnpm init` when there is no `package.json`, then `pnpm install --no-frozen-lockfile` in the container).
+- `render-template` writes the empty Extension Manifest itself (with the schema `$id` as `$schema`) when the Template has no `extensions.json`, rather than the agent. If node-devcontainer 07 adds a starter `templates/node/.devcontainer/extensions.json`, it is copied as is. Ticket 02 makes the agent add Preset entries to it.
+- `render-template` refuses an existing `.devcontainer/devcontainer.json` (pointing at migrate); ticket 05 needs a replace path.
+- The checkout check requires `variants/`, `templates/`, the installer schema and library; `presets/` does not exist yet, so ticket 02 should add it to `REQUIRED` in `scripts/dev-container.mjs`.
+- Broken symlink: when `~/.claude/skills/dev-container` itself dangles, the skill cannot load at all, so the helper cannot speak. The helper exits 3 with the re-link message when its real path is outside a valid checkout, or when the `$CLAUDE_CONFIG_DIR`/`~/.claude` link is broken or points at another checkout; SKILL.md maps "Cannot find module" on the helper path to the same instruction.
+- Checklist: headless `claude -p` needs a login in a throwaway config dir, which was not available, so it is documented as manual in `docs/manual/dev-container-skill-checklist.md` (temp HOME, temp Claude config, `gh` stub, local bare repo) and its box stays unchecked.
