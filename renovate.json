@@ -1,0 +1,83 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigestsToSemver", "docker:pinDigests"],
+  "automerge": false,
+  "platformAutomerge": false,
+  "minimumReleaseAge": "7 days",
+  "customManagers": [
+    {
+      "description": "Claude Code version pinned as a Dockerfile ARG",
+      "customType": "regex",
+      "managerFilePatterns": ["/^variants/node/Dockerfile$/"],
+      "matchStrings": ["ARG CLAUDE_CODE_VERSION=(?<currentValue>\\S+)"],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "@anthropic-ai/claude-code"
+    },
+    {
+      "description": "Codex version pinned as a Dockerfile ARG",
+      "customType": "regex",
+      "managerFilePatterns": ["/^variants/node/Dockerfile$/"],
+      "matchStrings": ["ARG CODEX_VERSION=(?<currentValue>\\S+)"],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "@openai/codex"
+    },
+    {
+      "description": "pnpm version pinned as a Dockerfile ARG",
+      "customType": "regex",
+      "managerFilePatterns": ["/^variants/node/Dockerfile$/"],
+      "matchStrings": ["ARG PNPM_VERSION=(?<currentValue>\\S+)"],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "pnpm"
+    },
+    {
+      "description": "pnpm pinned in workflows (npx pnpm@x.y.z)",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["pnpm@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "pnpm"
+    },
+    {
+      "description": "devcontainers CLI version pinned in the workflow env",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["CLI_VERSION: (?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "@devcontainers/cli"
+    },
+    {
+      "description": "Extension Manifest Pinned Refs: a github source or plugin marketplace followed by its 40-char sha",
+      "customType": "regex",
+      "managerFilePatterns": ["/^extensions/[^/]+\\.json$/", "/^variants/[^/]+/extensions\\.json$/"],
+      "matchStrings": ["\"(?:github|marketplace)\"\\s*:\\s*\"(?<depName>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\"[^{}]*?\"sha\"\\s*:\\s*\"(?<currentDigest>[0-9a-f]{40})\""],
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/{{{depName}}}",
+      "currentValueTemplate": "HEAD"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "npm releases must be 7 days old, matching the pnpm minimumReleaseAge policy",
+      "matchDatasources": ["npm"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Pinned Refs and Agent versions are never auto-merged",
+      "matchManagers": ["custom.regex"],
+      "automerge": false,
+      "platformAutomerge": false
+    },
+    {
+      "description": "Agent CLIs are never auto-merged",
+      "matchPackageNames": ["@anthropic-ai/claude-code", "@openai/codex"],
+      "automerge": false,
+      "platformAutomerge": false
+    },
+    {
+      "description": "Pinned Ref (git-refs) updates are never auto-merged",
+      "matchDatasources": ["git-refs"],
+      "automerge": false,
+      "platformAutomerge": false
+    }
+  ]
+}
