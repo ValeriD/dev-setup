@@ -7,6 +7,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Weekly rebuild (as a push to main: test, publish, sign) so OS security
+  # patches reach the image without a code change.
+  schedule:
+    - cron: '17 4 * * 1'
 
 permissions:
   contents: read

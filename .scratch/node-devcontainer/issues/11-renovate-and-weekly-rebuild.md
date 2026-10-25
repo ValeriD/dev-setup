@@ -7,7 +7,7 @@
 
 **Blocked by:** 06 (Extension installer tracer), 10 (CI release pipeline)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -20,8 +20,8 @@
 - **Validation seam:** `renovate-config-validator` and a config test that asserts the no-auto-merge rules. The schedule is checked in the workflow file. Real PRs are observed after the user installs the Renovate GitHub App (human step, listed in the README).
 - **Coverage:** SC-21.
 
-- [ ] `renovate-config-validator` passes
-- [ ] A test asserts that Pinned Ref and Agent version updates have auto-merge disabled
-- [ ] The regex managers match the actual pin locations, with a test running them against the repo files
-- [ ] The release workflow has a weekly schedule
-- [ ] The README lists the Renovate App installation step
+- [x] `renovate-config-validator` passes
+- [x] A test asserts that Pinned Ref and Agent version updates have auto-merge disabled
+- [x] The regex managers match the actual pin locations, with a test running them against the repo files
+- [x] The release workflow has a weekly schedule
+- [x] The README lists the Renovate App installation step

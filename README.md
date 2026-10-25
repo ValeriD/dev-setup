@@ -58,3 +58,14 @@ cosign verify-attestation --type slsaprovenance1 $IMG \
 npx -y @devcontainers/cli@0.89.0 templates apply -w /tmp/proj -t ghcr.io/valerid/dev-setup/node:0.1.1
 grep image /tmp/proj/.devcontainer/devcontainer.json   # must show @sha256:...
 ```
+
+## Updates (Renovate) and weekly rebuild
+
+`renovate.json` makes Renovate open PRs for the base image digest, GitHub Action SHAs, the pinned pnpm, Claude Code, Codex and devcontainers CLI versions, `installer/` npm dependencies, and the Pinned Ref `sha` of every Extension Manifest entry (`github` skill/plugin sources and plugin marketplaces; git-refs datasource, tracks `HEAD`). npm updates wait 7 days (`minimumReleaseAge`) to match the pnpm policy. Nothing is auto-merged; Pinned Ref and Agent version PRs are explicitly excluded from any future auto-merge rule. `tests/renovate.test.mjs` checks the managers against the repo files.
+
+The `ci` workflow also runs weekly (Mondays 04:17 UTC, default branch) as a full build, acceptance run and publish, so OS security patches (`apt-get install` runs uncached) reach the image without a code change.
+
+### Manual steps
+
+5. Install the Renovate GitHub App (https://github.com/apps/renovate) on `ValeriD/dev-setup` (repository access: only this repo). It picks up `renovate.json`, opens an onboarding-free first batch of PRs, and the Dependency Dashboard issue.
+6. Validate the config locally any time: `npx -y -p renovate@44.181.6 renovate-config-validator --strict renovate.json`.
