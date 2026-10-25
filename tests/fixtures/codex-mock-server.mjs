@@ -2,6 +2,7 @@
 // shell command. Follow-up request: finish. Lets the suite prove Codex runs a
 // shell command without any login.
 import http from 'node:http';
+import { writeFileSync } from 'node:fs';
 
 const sse = (res, events) => {
   res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -10,11 +11,13 @@ const sse = (res, events) => {
 };
 const usage = { input_tokens: 1, input_tokens_details: null, output_tokens: 1, output_tokens_details: null, total_tokens: 2 };
 const command = process.argv[2];
+const dump = process.argv[3]; // optional: write the first request body here
 
 http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
+    if (dump && !body.includes('function_call_output')) writeFileSync(dump, body);
     if (!body.includes('function_call_output')) {
       sse(res, [
         { type: 'response.created', response: { id: 'r1' } },

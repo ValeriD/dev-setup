@@ -7,6 +7,14 @@ Hardened, reusable development containers with Claude Code and Codex preinstalle
 - Image: `variants/node/` (build config), Template: `templates/node/`.
 - Tool versions and the base image digest are pinned in `variants/node/Dockerfile`.
 
+## Installer tests
+
+```sh
+(cd installer && pnpm install --frozen-lockfile) && npm run test:installer
+```
+
+Integration tests of the extension installer CLI against local bare-repo fixtures. No network at test time.
+
 ## Acceptance suite
 
 Needs Docker and Node 24 (the devcontainer CLI is fetched with `npx` at an exact version).

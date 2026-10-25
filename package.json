@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --test-concurrency=1 --test-timeout=900000 tests/*.test.mjs"
+    "test:installer": "node --test installer/test/*.test.mjs",
+    "test":"node --test --test-concurrency=1 --test-timeout=900000 tests/*.test.mjs"
   }
 }

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/valerid/dev-setup/main/installer/extensions.schema.json",
+  "notes": [
+    "Base Extension Layer. Its egress list is the Base Egress Allowlist; the installer assembles the allowlist file the start-up step consumes (base/egress/start.sh).",
+    "A domain also covers all its subdomains. The first domain is used by the start-up self-test, so keep a reliably reachable host first.",
+    "Anthropic (anthropic.com, claude.ai, claude.com): verified 2026-10-25 by extracting the URLs embedded in the pinned @anthropic-ai/claude-code@2.1.310 binary: api.anthropic.com, claude.ai and platform.claude.com (OAuth), downloads.claude.ai, mcp-proxy.anthropic.com and docs/status hosts. Re-check when bumping the pin.",
+    "OpenAI (openai.com, chatgpt.com): verified the same way against the pinned @openai/codex@0.164.0 binary: api.openai.com, auth.openai.com (login), chatgpt.com (ChatGPT backend). It also embeds auth.api.openai.org and platform.api.openai.org, which are NOT allowed: add openai.org only if login is found to need it.",
+    "GitHub: git, API, raw, release assets. VS Code: updates, Marketplace, extension CDN, server download, experiments."
+  ],
+  "extensions": [],
+  "egress": [
+    "registry.npmjs.org",
+    "github.com",
+    "githubusercontent.com",
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "openai.com",
+    "chatgpt.com",
+    "visualstudio.com",
+    "vsassets.io",
+    "vscode-cdn.net",
+    "vscode.blob.core.windows.net",
+    "vscode.download.prss.microsoft.com",
+    "default.exp-tas.com"
+  ]
+}

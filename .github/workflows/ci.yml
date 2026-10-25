@@ -35,6 +35,10 @@ jobs:
           node-version: 24
       - run: node scripts/check-pins.mjs
       - run: node --test tests/pins.test.mjs
+      # Installer tests use local fixtures; only its two pinned deps come from the registry.
+      - run: npx -y pnpm@11.0.0 install --frozen-lockfile
+        working-directory: installer
+      - run: npm run test:installer
 
   # Builds the image once, runs the acceptance suite against exactly that
   # image, and hands the same image to the publish job as a tarball.

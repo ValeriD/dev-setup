@@ -1,0 +1,13 @@
+{
+  "name": "@dev-setup/installer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Extension installer: validates Extension Manifests and renders them for Claude Code and Codex.",
+  "main": "src/index.mjs",
+  "exports": { ".": "./src/index.mjs", "./schema": "./extensions.schema.json" },
+  "bin": { "dev-setup-installer": "src/cli.mjs" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "dependencies": { "ajv": "8.18.0" },
+  "engines": { "node": ">=24" }
+}
