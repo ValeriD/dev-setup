@@ -244,11 +244,7 @@ test('validate accepts Preset-tagged entries and counts them per Preset', () => 
   assert.deepEqual(r.doc.presets, { 'web-app': 3 });
 });
 
-test('validate rejects a bad Preset tag and a skill name declared twice (e.g. by two Presets)', () => {
-  const bad = h(['validate', project(tag('Web App', [skillEntry('skills/lint')]))]);
-  assert.equal(bad.code, 1);
-  assert.match(bad.doc.problems.join(), /preset must match pattern/);
-
+test('validate rejects a skill name declared twice, e.g. by two adopted Presets', () => {
   const twice = h(['validate', project([...tag('web-app', [skillEntry('skills/fmt')]), ...tag('api', [skillEntry('skills/fmt', sha('b'))])])]);
   assert.equal(twice.code, 1);
   assert.match(twice.doc.problems.join(), /skill name "fmt" is already declared/);
@@ -256,35 +252,52 @@ test('validate rejects a bad Preset tag and a skill name declared twice (e.g. by
 
 test('plan-remove-preset drops exactly the tagged entries and the egress nothing else needs, and writes nothing', () => {
   const c = checkout({ 'web-app.json': WEB, 'api.json': API });
-  // web-app copied in full; api adopted too, sharing the fmt entry (kept once, tagged web-app).
-  const extensions = [
-    ...tag('web-app', WEB.extensions),
-    { ...remoteMcp('cdn-tools', 'cdn.example.com') },
-    skillEntry('skills/own'),
-  ];
-  const p = project(extensions, ['cdn.example.com', 'shared.example.com', 'mine.example.com']);
-  // Tag one api-only entry so api counts as adopted.
+  const apiDocs = remoteMcp('api-docs', 'api.example.com');
+  const own = remoteMcp('cdn-tools', 'cdn.example.com');
+  // web-app and api adopted (copied by different paths: fmt only once), plus the project's own entry.
+  const p = project(
+    [...tag('web-app', WEB.extensions), ...tag('api', [apiDocs]), own],
+    ['cdn.example.com', 'shared.example.com', 'mine.example.com'],
+  );
   const file = join(p, '.devcontainer/extensions.json');
-  const mf = JSON.parse(readFileSync(file, 'utf8'));
-  mf.extensions.push({ ...remoteMcp('api-docs', 'api.example.com'), preset: 'api' });
-  writeFileSync(file, JSON.stringify(mf, null, 2));
   const before = readFileSync(file, 'utf8');
 
   const r = c.h(['plan-remove-preset', p, 'web-app']);
   assert.equal(r.code, 0, r.out);
-  assert.deepEqual(r.doc.remove.map((x) => x.index), [0, 2], 'lint and the docs MCP go');
-  assert.deepEqual(r.doc.retag, [{ index: 1, entry: r.doc.retag[0].entry, to: 'api' }], 'fmt stays for api');
-  assert.deepEqual(r.doc.egress, [], 'cdn is still needed by an own entry, shared by api');
+  assert.deepEqual(r.doc.remove.map((x) => x.index), [0, 1, 2], 'every web-app entry, nothing else');
+  assert.deepEqual(r.doc.egress, [], 'cdn is needed by the own entry, shared by api');
   assert.deepEqual(r.doc.keepEgress.map((k) => k.domain), ['cdn.example.com', 'shared.example.com']);
-  assert.equal(readFileSync(file, 'utf8'), before);
+  assert.match(r.doc.keepEgress[0].neededBy.join(), /^extensions\[4\] \(mcp-remote "cdn-tools"\)$/);
+  assert.deepEqual(r.doc.keepEgress[1].neededBy, ['Preset "api"']);
+  assert.equal(readFileSync(file, 'utf8'), before, 'the plan writes nothing');
 
-  // Without the overlap, the Preset's egress goes.
+  // Applying the plan as the agent would leaves a valid manifest without the tag.
+  const mf = JSON.parse(before);
+  mf.extensions = mf.extensions.filter((_, i) => !r.doc.remove.some((x) => x.index === i));
+  writeFileSync(file, JSON.stringify(mf));
+  const after = h(['validate', p]);
+  assert.equal(after.code, 0, after.out);
+  assert.deepEqual(after.doc.presets, { api: 1 });
+
+  // Without the overlap, the Preset's egress goes; a domain it never listed stays.
   const solo = project(tag('web-app', WEB.extensions), ['cdn.example.com', 'shared.example.com', 'mine.example.com']);
-  const s = c.h(['plan-remove-preset', solo, 'web-app']);
-  assert.deepEqual(s.doc.remove.map((x) => x.index), [0, 1, 2]);
-  assert.deepEqual(s.doc.egress, ['cdn.example.com', 'shared.example.com'], 'the user-added domain stays');
-
+  assert.deepEqual(c.h(['plan-remove-preset', solo, 'web-app']).doc.egress, ['cdn.example.com', 'shared.example.com']);
   assert.match(c.h(['plan-remove-preset', solo, 'api']).doc.error, /no entry .* is tagged/);
+});
+
+test('a project manifest saved as a Preset (tags removed, description added) passes presets', () => {
+  const p = project([...tag('web-app', WEB.extensions), skillEntry('skills/own')], ['cdn.example.com']);
+  const mf = JSON.parse(readFileSync(join(p, '.devcontainer/extensions.json'), 'utf8'));
+  const c = checkout({});
+  const asIs = { ...mf, description: 'Saved.' };
+  writeFileSync(join(c.dir, 'presets/saved.json'), JSON.stringify(asIs));
+  assert.match(c.h(['presets', '--name', 'saved']).doc.preset.problems.join(), /carry no "preset" tag/, 'tags must be stripped');
+
+  const saved = { ...asIs, extensions: mf.extensions.map(({ preset, ...e }) => e) };
+  writeFileSync(join(c.dir, 'presets/saved.json'), JSON.stringify(saved));
+  const r = c.h(['presets', '--name', 'saved']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.doc.preset.extensions.length, 4);
 });
 
 test('a copy of the skill outside a dev-setups checkout exits with the re-link message and changes nothing', () => {

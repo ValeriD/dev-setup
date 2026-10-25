@@ -37,13 +37,14 @@ For a local image instead of the published one, tell the agent the image ref to 
 
 ## Presets (SC-01 Presets part, SC-06, SC-10)
 
-These write `presets/`, so run them against a throwaway checkout, not your own: `git worktree add $T/ds && (cd $T/ds/installer && npx -y pnpm@11.0.0 install --frozen-lockfile) && (cd $T/ds/skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile) && ln -sfn $T/ds/skills/dev-container $T/claude/skills/dev-container`. Seed two Presets in `$T/ds/presets/`: `web.json` (description, two skills, an `mcp-remote` with egress `docs.example.com`, top-level egress `cdn.example.com`) and `api.json` (description, one skill identical to one in `web`). Fake SHAs are fine; answer "no" to starting the container.
+These write `presets/`, so run them against a throwaway checkout, not your own: `git worktree add $T/ds && (cd $T/ds/installer && npx -y pnpm@11.0.0 install --frozen-lockfile) && (cd $T/ds/skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile) && ln -sfn $T/ds/skills/dev-container $T/claude/skills/dev-container`. Seed two Presets in `$T/ds/presets/`: `web.json` (description, two skills, an `mcp-remote` with egress `docs.example.com`, top-level egress `cdn.example.com`) , `api.json` (description, one other skill, top-level egress `cdn.example.com` and `api.example.com`) and `dup.json` (description, one skill with the same directory name as one in `web`). Fake SHAs are fine; answer "no" to starting the container.
 
 | # | Prompt | Expect |
 | --- | --- | --- |
-| P1 | `c "/dev-container $T/p1"` after `mkdir $T/p1` | The Preset question lists `web` and `api` with their descriptions. Pick both: `extensions.json` holds every entry once, tagged `web` or `api` (the shared skill once, the agent says it is shared); `cdn.example.com` in `egress`; `validate` ran. |
+| P1 | `c "/dev-container $T/p1"` after `mkdir $T/p1` | The Preset question lists `web`, `api` and `dup` with their descriptions. Pick `web` and `api`: `extensions.json` holds all four entries, tagged `web` or `api`; `egress` holds `cdn.example.com` once and `api.example.com`; `validate` ran. |
+| P1b | Repeat P1 on a fresh folder, pick `web` and `dup` | `validate` reports the skill name declared twice; the agent asks which Preset to leave out. |
 | P2 | Add `"broken"` as `$T/ds/presets/bad.json`, repeat P1 | `bad` is not offered; the agent names its problem. |
-| P3 | `c "/dev-container remove the web preset from $T/p1"` | Shows the plan and asks once. After yes: no `web` tags remain; the shared skill is tagged `api`; `cdn.example.com` gone; `api` entries unchanged. |
+| P3 | `c "/dev-container remove the web preset from $T/p1"` | Shows the plan, names the domains it proposes to drop, asks once. After yes: no `web` entries remain; `cdn.example.com` stays (api needs it); `api` entries and `api.example.com` unchanged. |
 | P4 | `c "/dev-container save the extensions of $T/p1 as preset solo"` | Asks for a description; `$T/ds/presets/solo.json` has it, no `preset` fields; `$T/p1` unchanged (`git -C $T/p1 diff` empty against before). |
 | P5 | `c "/dev-container change the description of preset api"` | Only `$T/ds/presets/api.json` changes; `$T/p1` unchanged; nothing committed in either. |
 

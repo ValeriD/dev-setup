@@ -255,13 +255,9 @@ function validate([dir]) {
   let entries, presetTags;
   if (!existsSync(mfFile)) problems.push(`${relative(project, mfFile)} (Extension Manifest) is missing`);
   else {
-    let manifest;
-    try {
-      manifest = JSON.parse(readFileSync(mfFile, 'utf8'));
-    } catch (err) {
-      problems.push(`.devcontainer/extensions.json: not valid JSON: ${err.message}`);
-    }
-    if (manifest !== undefined) {
+    const { value: manifest, error } = readJson(mfFile);
+    if (error) problems.push(`.devcontainer/extensions.json: ${error}`);
+    else {
       const found = manifestProblems(manifest);
       for (const p of found) problems.push(`.devcontainer/extensions.json: ${p}`);
       if (!found.length) {
@@ -273,15 +269,26 @@ function validate([dir]) {
   return { doc: { ok: problems.length === 0, dir: project, image, entries, presets: presetTags, problems } };
 }
 
+/** Strict JSON (Extension Manifests and Presets are plain JSON): { value } or { error }. */
+function readJson(file) {
+  try {
+    return { value: JSON.parse(readFileSync(file, 'utf8')) };
+  } catch (err) {
+    return { error: `not valid JSON: ${err.message}` };
+  }
+}
+
+const LAYER = 'layer';
+
 /** Schema, Pinned Ref and kind x Agent rules, plus the installer's per-layer rules (unique skill names). */
 function manifestProblems(manifest) {
   const problems = validateManifest(manifest);
   if (problems.length) return problems;
   try {
-    mergeLayers([{ label: 'layer', manifest }]);
+    mergeLayers([{ label: LAYER, manifest }]);
   } catch (err) {
     if (!(err instanceof ManifestError)) throw err;
-    return err.problems.map((p) => p.replace(/^layer: /, ''));
+    return err.problems.map((p) => (p.startsWith(`${LAYER}: `) ? p.slice(LAYER.length + 2) : p));
   }
   return [];
 }
@@ -308,13 +315,9 @@ function listPresets(repo) {
       const file = join(root, f);
       const problems = [];
       if (!PRESET_NAME.test(name)) problems.push(`file name: "${name}" is not a Preset name (${PRESET_NAME.source})`);
-      let preset;
-      try {
-        preset = JSON.parse(readFileSync(file, 'utf8'));
-      } catch (err) {
-        problems.push(`not valid JSON: ${err.message}`);
-      }
-      if (preset !== undefined) {
+      const { value: preset, error } = readJson(file);
+      if (error) problems.push(error);
+      else {
         problems.push(...manifestProblems(preset));
         if (typeof preset?.description !== 'string' || !preset.description.trim()) problems.push('"description" is required: one line saying what the Preset is for');
         (Array.isArray(preset?.extensions) ? preset.extensions : []).forEach((e, i) => {
@@ -335,52 +338,29 @@ function presets(_, { name }, { repo }) {
   return { doc: { ok: one.problems.length === 0, preset: one } };
 }
 
-/** An entry's content without its Preset tag, for comparing a project entry with a Preset entry. */
-function untagged(entry) {
-  const { preset, ...rest } = entry;
-  const canonical = (v) => (v && typeof v === 'object' && !Array.isArray(v)
-    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]))
-    : Array.isArray(v) ? v.map(canonical) : v);
-  return JSON.stringify(canonical(rest));
-}
-
 function planRemovePreset([dir, name], _, { repo }) {
   const project = resolve(dir);
   const mfFile = join(project, '.devcontainer/extensions.json');
   if (!existsSync(mfFile)) return { doc: { ok: false, error: `${mfFile} (Extension Manifest) is missing` } };
-  let manifest;
-  try {
-    manifest = JSON.parse(readFileSync(mfFile, 'utf8'));
-  } catch (err) {
-    return { doc: { ok: false, error: `${mfFile}: not valid JSON: ${err.message}` } };
-  }
+  const { value: manifest, error } = readJson(mfFile);
+  if (error) return { doc: { ok: false, error: `${mfFile}: ${error}` } };
   const problems = manifestProblems(manifest);
   if (problems.length) return { doc: { ok: false, error: 'the Extension Manifest is invalid; fix it first', problems } };
 
-  const valid = new Map(listPresets(repo).filter((p) => !p.problems.length).map((p) => [p.name, p]));
   const entries = manifest.extensions;
   const tags = countTags(entries);
   if (!tags[name]) return { doc: { ok: false, error: `no entry in ${mfFile} is tagged "preset": "${name}"`, presets: tags } };
+  const remove = entries.flatMap((e, index) => (e.preset === name ? [{ index, entry: describeEntry(e, index) }] : []));
 
-  // An entry that another adopted Preset also declares stays, re-tagged to that Preset.
-  const others = Object.keys(tags).filter((t) => t !== name && valid.has(t));
-  const remove = [];
-  const retag = [];
-  entries.forEach((e, index) => {
-    if (e.preset !== name) return;
-    const owner = others.find((t) => valid.get(t).extensions.some((pe) => untagged(pe) === untagged(e)));
-    if (owner) retag.push({ index, entry: describeEntry(e, index), to: owner });
-    else remove.push({ index, entry: describeEntry(e, index) });
-  });
-
-  // Manifest-level egress the Preset brought in goes too, unless something that stays needs it.
-  const removed = new Set(remove.map((r) => r.index));
+  // Top-level egress carries no tag, so the domains the Preset file lists today are the
+  // candidates. One stays when an entry that stays, or another adopted Preset, needs it.
+  const valid = new Map(listPresets(repo).filter((p) => !p.problems.length).map((p) => [p.name, p]));
   const neededBy = new Map();
-  const need = (d, why) => neededBy.set(d, [...new Set([...(neededBy.get(d) ?? []), why])]);
+  const need = (d, why) => neededBy.set(d, [...(neededBy.get(d) ?? []), why]);
   entries.forEach((e, i) => {
-    if (!removed.has(i)) for (const d of e.egress ?? []) need(d, describeEntry(e, i));
+    if (e.preset !== name) for (const d of e.egress ?? []) need(d, describeEntry(e, i));
   });
-  for (const t of others) for (const d of valid.get(t).egress) need(d, `Preset "${t}"`);
+  for (const t of Object.keys(tags)) if (t !== name && valid.has(t)) for (const d of valid.get(t).egress) need(d, `Preset "${t}"`);
   const preset = valid.get(name);
   const candidates = (preset?.egress ?? []).filter((d) => (manifest.egress ?? []).includes(d));
 
@@ -390,10 +370,9 @@ function planRemovePreset([dir, name], _, { repo }) {
       dir: project,
       preset: name,
       remove,
-      retag,
       egress: candidates.filter((d) => !neededBy.has(d)),
-      keepEgress: candidates.filter((d) => neededBy.has(d)).map((d) => ({ domain: d, neededBy: neededBy.get(d) })),
-      ...(preset ? {} : { note: `presets/${name}.json is missing or invalid, so which manifest-level egress domains it brought in is unknown` }),
+      keepEgress: candidates.filter((d) => neededBy.has(d)).map((d) => ({ domain: d, neededBy: [...new Set(neededBy.get(d))] })),
+      ...(preset ? {} : { note: `presets/${name}.json is missing or invalid, so which top-level egress domains it brought in is unknown` }),
     },
   };
 }
