@@ -300,7 +300,7 @@ test('a domain allowed in the project manifest is reported by validate; a URL is
 
   const url = h(['validate', project([], ['https://api.example.com/v1'])]);
   assert.equal(url.code, 1);
-  assert.match(url.doc.problems.join(), /egress/);
+  assert.match(url.doc.problems.join(), /egress\/0 must match pattern/);
 });
 
 test('validate passes a named secret with a ${localEnv:} remoteEnv entry and keeps the Template comments', () => {

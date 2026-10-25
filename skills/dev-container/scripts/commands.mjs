@@ -448,7 +448,7 @@ function validate([dir], _, { repo }) {
         presetTags = countTags(manifest.extensions);
         egress = manifest.egress ?? [];
         // Only once devcontainer.json is readable: otherwise its own problem is already reported.
-        if (dcRead) secrets = secretsProblems(manifest.extensions, remoteEnv, problems);
+        if (dcRead) secrets = checkSecrets(manifest.extensions, remoteEnv, problems);
       }
     }
   }
@@ -463,7 +463,7 @@ const LOCAL_ENV_REF = /^\$\{localEnv:([A-Za-z_][A-Za-z0-9_]*)\}$/;
  * the container through a `remoteEnv` entry that references a host variable. Pushes problems
  * (names only, never a value) and returns [{ name, neededBy, hostEnv }].
  */
-function secretsProblems(extensions, remoteEnv, problems) {
+function checkSecrets(extensions, remoteEnv, problems) {
   const env = remoteEnv !== null && typeof remoteEnv === 'object' && !Array.isArray(remoteEnv) ? remoteEnv : null;
   if (remoteEnv !== undefined && !env) problems.push('.devcontainer/devcontainer.json: "remoteEnv" must be an object');
   const neededBy = new Map();

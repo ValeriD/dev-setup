@@ -24,7 +24,7 @@ A secret is a host environment variable that an MCP server needs. Only its **nam
 
 **Done when `H validate <dir>` returns `ok: true` and its `secrets` lists the name with a `hostEnv`.** `validate` fails while any secret named in the manifest has no `remoteEnv` entry, or has a value instead of a `${localEnv:…}` reference.
 
-Then tell the user, with the name filled in and the value left to them:
+Then tell the user, with the `hostEnv` from `validate` filled in for `NAME` (it differs from the secret's name only when an existing `remoteEnv` line already mapped another host variable) and the value left to them:
 
 > Export `NAME` on the host before the container starts, e.g. in your shell profile: `export NAME=<your value>`. VS Code and `devcontainer up` read it from the environment they were started from. The value stays on your machine; only the reference is in the repository.
 
