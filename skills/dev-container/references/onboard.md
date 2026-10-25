@@ -30,9 +30,15 @@ Run `H variants --dir <path>`.
 1. `H image-digest <variant>` gives `image`, a digest-pinned reference read from the registry. Tell the user the digest is **unverified**: signature and provenance checks are not built yet.
 2. `H render-template <variant> <path> --image <image>`. Add `--option patEnvVar=<NAME>` only if the user names a different host variable for their repository PAT.
 
-This writes `.devcontainer/devcontainer.json` and an empty Extension Manifest `.devcontainer/extensions.json`. Presets are not built yet, so the manifest starts with no entries.
+This writes `.devcontainer/devcontainer.json` and an empty Extension Manifest `.devcontainer/extensions.json`.
 
 **Done when `H validate <path>` returns `ok: true`.** If it reports problems, show them and stop.
+
+## 3a. Adopt Presets
+
+Read [presets.md](presets.md) and follow its **Adopt** section for this project.
+
+**Done when the user picked Presets (or none) and `H validate <path>` returns `ok: true`.**
 
 ## 4. Host VS Code settings
 
@@ -60,6 +66,7 @@ Print:
 
 - the project path, the Variant, and the image digest (marked unverified);
 - every file created or changed (including `package.json` and `pnpm-lock.yaml` from step 5), all uncommitted, for the user to review and commit;
+- the Presets adopted, with their entry counts;
 - the GitHub repository created, if any;
 - anything declined or still missing (VS Code settings, container not started, lockfile conversion).
 

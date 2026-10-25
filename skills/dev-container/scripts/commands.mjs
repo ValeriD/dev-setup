@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
-import { schema, validateManifest } from '../../../installer/src/index.mjs';
+import { describeEntry, ManifestError, mergeLayers, schema, validateManifest } from '../../../installer/src/index.mjs';
 
 /** Same pin as the acceptance suite (tests/lib.mjs) and CI (CLI_VERSION). */
 export const DEVCONTAINER_CLI = '@devcontainers/cli@0.89.0';
@@ -27,6 +27,8 @@ const USAGE = `usage: dev-container.mjs <command> [args]
   image-digest VARIANT [--ref IMAGE]            current registry digest of the Variant image (unverified)
   render-template VARIANT DIR --image REF@sha256:... [--option NAME=VALUE]...
   validate DIR                                  check .devcontainer/devcontainer.json and extensions.json
+  presets [--name NAME]                         list Presets (presets/*.json) with descriptions and problems
+  plan-remove-preset DIR NAME                   which entries and egress domains removing a Preset drops (read-only)
   vscode-settings [--settings FILE]             check the host VS Code settings ADR 0003 relies on
   up DIR [--recreate]                           start (or recreate) the project's container
   first-lockfile DIR                            create the first pnpm lockfile inside the container`;
@@ -38,6 +40,8 @@ const COMMANDS = {
   'image-digest': { positionals: 1, options: { ref: { type: 'string' } }, fn: imageDigest },
   'render-template': { positionals: 2, options: { image: { type: 'string' }, option: { type: 'string', multiple: true } }, fn: renderTemplate },
   validate: { positionals: 1, options: {}, fn: validate },
+  presets: { positionals: 0, options: { name: { type: 'string' } }, fn: presets },
+  'plan-remove-preset': { positionals: 2, options: {}, fn: planRemovePreset },
   'vscode-settings': { positionals: 0, options: { settings: { type: 'string' } }, fn: vscodeSettings },
   up: { positionals: 1, options: { recreate: { type: 'boolean' } }, fn: up },
   'first-lockfile': { positionals: 1, options: {}, fn: firstLockfile },
@@ -248,21 +252,129 @@ function validate([dir]) {
     for (const m of text.matchAll(PLACEHOLDER)) problems.push(`.devcontainer/devcontainer.json: unrendered placeholder ${m[0]}`);
   }
 
-  let entries;
+  let entries, presetTags;
   if (!existsSync(mfFile)) problems.push(`${relative(project, mfFile)} (Extension Manifest) is missing`);
   else {
-    let manifest;
-    try {
-      manifest = JSON.parse(readFileSync(mfFile, 'utf8'));
-    } catch (err) {
-      problems.push(`.devcontainer/extensions.json: not valid JSON: ${err.message}`);
-    }
-    if (manifest !== undefined) {
-      for (const p of validateManifest(manifest)) problems.push(`.devcontainer/extensions.json: ${p}`);
-      entries = Array.isArray(manifest?.extensions) ? manifest.extensions.length : undefined;
+    const { value: manifest, error } = readJson(mfFile);
+    if (error) problems.push(`.devcontainer/extensions.json: ${error}`);
+    else {
+      const found = manifestProblems(manifest);
+      for (const p of found) problems.push(`.devcontainer/extensions.json: ${p}`);
+      if (!found.length) {
+        entries = manifest.extensions.length;
+        presetTags = countTags(manifest.extensions);
+      }
     }
   }
-  return { doc: { ok: problems.length === 0, dir: project, image, entries, problems } };
+  return { doc: { ok: problems.length === 0, dir: project, image, entries, presets: presetTags, problems } };
+}
+
+/** Strict JSON (Extension Manifests and Presets are plain JSON): { value } or { error }. */
+function readJson(file) {
+  try {
+    return { value: JSON.parse(readFileSync(file, 'utf8')) };
+  } catch (err) {
+    return { error: `not valid JSON: ${err.message}` };
+  }
+}
+
+const LAYER = 'layer';
+
+/** Schema, Pinned Ref and kind x Agent rules, plus the installer's per-layer rules (unique skill names). */
+function manifestProblems(manifest) {
+  const problems = validateManifest(manifest);
+  if (problems.length) return problems;
+  try {
+    mergeLayers([{ label: LAYER, manifest }]);
+  } catch (err) {
+    if (!(err instanceof ManifestError)) throw err;
+    return err.problems.map((p) => (p.startsWith(`${LAYER}: `) ? p.slice(LAYER.length + 2) : p));
+  }
+  return [];
+}
+
+/** { presetName: number of entries tagged with it } */
+function countTags(entries) {
+  const tags = {};
+  for (const e of entries) if (e.preset) tags[e.preset] = (tags[e.preset] ?? 0) + 1;
+  return tags;
+}
+
+// ---------- Presets ----------
+
+const PRESET_NAME = new RegExp(schema.definitions.presetName.pattern);
+
+/** Every presets/*.json, parsed and checked. A Preset with problems carries no `extensions`/`egress`. */
+function listPresets(repo) {
+  const root = join(repo, 'presets');
+  return readdirSync(root)
+    .filter((f) => f.endsWith('.json'))
+    .sort()
+    .map((f) => {
+      const name = f.slice(0, -'.json'.length);
+      const file = join(root, f);
+      const problems = [];
+      if (!PRESET_NAME.test(name)) problems.push(`file name: "${name}" is not a Preset name (${PRESET_NAME.source})`);
+      const { value: preset, error } = readJson(file);
+      if (error) problems.push(error);
+      else {
+        problems.push(...manifestProblems(preset));
+        if (typeof preset?.description !== 'string' || !preset.description.trim()) problems.push('"description" is required: one line saying what the Preset is for');
+        (Array.isArray(preset?.extensions) ? preset.extensions : []).forEach((e, i) => {
+          if (e && typeof e === 'object' && 'preset' in e) problems.push(`${describeEntry(e, i)}: a Preset's own entries carry no "preset" tag; the tag is added when they are copied into a project`);
+        });
+      }
+      const doc = { name, file, description: typeof preset?.description === 'string' ? preset.description : null, problems };
+      if (!problems.length) Object.assign(doc, { extensions: preset.extensions, egress: preset.egress ?? [] });
+      return doc;
+    });
+}
+
+function presets(_, { name }, { repo }) {
+  const all = listPresets(repo);
+  if (!name) return { doc: { ok: true, dir: join(repo, 'presets'), presets: all } };
+  const one = all.find((p) => p.name === name);
+  if (!one) return { doc: { ok: false, error: `no Preset "${name}" (presets/${name}.json); known: ${all.map((p) => p.name).join(', ') || 'none'}` } };
+  return { doc: { ok: one.problems.length === 0, preset: one } };
+}
+
+function planRemovePreset([dir, name], _, { repo }) {
+  const project = resolve(dir);
+  const mfFile = join(project, '.devcontainer/extensions.json');
+  if (!existsSync(mfFile)) return { doc: { ok: false, error: `${mfFile} (Extension Manifest) is missing` } };
+  const { value: manifest, error } = readJson(mfFile);
+  if (error) return { doc: { ok: false, error: `${mfFile}: ${error}` } };
+  const problems = manifestProblems(manifest);
+  if (problems.length) return { doc: { ok: false, error: 'the Extension Manifest is invalid; fix it first', problems } };
+
+  const entries = manifest.extensions;
+  const tags = countTags(entries);
+  if (!tags[name]) return { doc: { ok: false, error: `no entry in ${mfFile} is tagged "preset": "${name}"`, presets: tags } };
+  const remove = entries.flatMap((e, index) => (e.preset === name ? [{ index, entry: describeEntry(e, index) }] : []));
+
+  // Top-level egress carries no tag, so the domains the Preset file lists today are the
+  // candidates. One stays when an entry that stays, or another adopted Preset, needs it.
+  const valid = new Map(listPresets(repo).filter((p) => !p.problems.length).map((p) => [p.name, p]));
+  const neededBy = new Map();
+  const need = (d, why) => neededBy.set(d, [...(neededBy.get(d) ?? []), why]);
+  entries.forEach((e, i) => {
+    if (e.preset !== name) for (const d of e.egress ?? []) need(d, describeEntry(e, i));
+  });
+  for (const t of Object.keys(tags)) if (t !== name && valid.has(t)) for (const d of valid.get(t).egress) need(d, `Preset "${t}"`);
+  const preset = valid.get(name);
+  const candidates = (preset?.egress ?? []).filter((d) => (manifest.egress ?? []).includes(d));
+
+  return {
+    doc: {
+      ok: true,
+      dir: project,
+      preset: name,
+      remove,
+      egress: candidates.filter((d) => !neededBy.has(d)),
+      keepEgress: candidates.filter((d) => neededBy.has(d)).map((d) => ({ domain: d, neededBy: [...new Set(neededBy.get(d))] })),
+      ...(preset ? {} : { note: `presets/${name}.json is missing or invalid, so which top-level egress domains it brought in is unknown` }),
+    },
+  };
 }
 
 // ---------- Host VS Code settings ----------

@@ -8,6 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "$schema": { "type": "string" },
+    "description": { "type": "string", "minLength": 1, "description": "One line saying what the set is for. Required in a Preset file (presets/<name>.json); ignored by the installer." },
     "notes": { "type": "array", "items": { "type": "string" }, "description": "Free-form notes; ignored by the installer." },
     "extensions": { "type": "array", "items": { "$ref": "#/definitions/entry" } },
     "egress": { "$ref": "#/definitions/domains" }
@@ -42,13 +43,15 @@
         "sha": { "$ref": "#/definitions/sha" }
       }
     },
+    "presetName": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$", "description": "A Preset's name: its file name in presets/ without .json." },
     "envNames": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" } },
     "entry": {
       "type": "object",
       "required": ["kind", "agents"],
       "properties": {
         "kind": { "enum": ["skill", "plugin", "mcp", "mcp-remote", "hook"] },
-        "agents": { "$ref": "#/definitions/agents" }
+        "agents": { "$ref": "#/definitions/agents" },
+        "preset": { "$ref": "#/definitions/presetName", "description": "The Preset this entry was copied from (ADR 0005). Ignored by the installer." }
       },
       "allOf": [
         {
@@ -59,6 +62,7 @@
             "properties": {
               "kind": {},
               "agents": {},
+              "preset": {},
               "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$", "description": "Skill directory name. Defaults to the last segment of source.path." },
               "source": { "$ref": "#/definitions/githubSource" }
             }
@@ -72,6 +76,7 @@
             "properties": {
               "kind": {},
               "agents": {},
+              "preset": {},
               "source": {
                 "oneOf": [
                   { "$ref": "#/definitions/githubSource" },
@@ -98,6 +103,7 @@
             "properties": {
               "kind": {},
               "agents": {},
+              "preset": {},
               "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
               "source": {
                 "type": "object",
@@ -121,6 +127,7 @@
             "properties": {
               "kind": {},
               "agents": {},
+              "preset": {},
               "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
               "url": { "type": "string", "pattern": "^https://" },
               "bearerTokenEnv": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "description": "Name of the host env var holding a bearer token for the server. Only the name is declared, never the value." },
@@ -136,6 +143,7 @@
             "properties": {
               "kind": {},
               "agents": {},
+              "preset": {},
               "event": { "type": "string", "minLength": 1 },
               "matcher": { "type": "string" },
               "source": { "$ref": "#/definitions/githubSource" }
