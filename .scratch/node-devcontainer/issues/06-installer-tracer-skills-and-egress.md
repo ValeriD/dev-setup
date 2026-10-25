@@ -8,7 +8,7 @@
 
 **Blocked by:** 03 (Egress Allowlist enforced by the root start-up step)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -31,13 +31,22 @@
   - SC-13, skill-for-both-Agents part (acceptance).
   - Keeps SC-04 green.
 
-- [ ] A skill entry targeting both Agents appears in Claude's and Codex's skill listings in the built image
-- [ ] Entries with a branch, a tag, no ref, or an unsupported kind × Agent are rejected with an error naming the entry
-- [ ] Manifests reference the schema via `$schema`, and VS Code validates them
-- [ ] The Base allowlist now comes from `extensions/base.json`; the egress acceptance tests still pass
-- [ ] The installer's tests run with `node --test` without network access
+- [x] A skill entry targeting both Agents appears in Claude's and Codex's skill listings in the built image
+- [x] Entries with a branch, a tag, no ref, or an unsupported kind × Agent are rejected with an error naming the entry
+- [x] Manifests reference the schema via `$schema`, and VS Code validates them
+- [x] The Base allowlist now comes from `extensions/base.json`; the egress acceptance tests still pass
+- [x] The installer's tests run with `node --test` without network access
 
 ## Spike findings to apply (from ticket 01 Answer)
 
 - Codex config goes in `/etc/codex/config.toml`; `mcp_servers` is unioned across the system, user and managed layers. Codex admin skills go in `/etc/codex/skills`.
 - Codex `plugin` is **unsupported** in the kind × Agent table. Codex installs plugins only into `$CODEX_HOME` (the login volume), which the design forbids. Confirmed by the user (design decision D3).
+
+## Comments
+
+- Built `installer/` (library entry `src/index.mjs`, thin `src/cli.mjs`, published `extensions.schema.json`), `extensions/base.json`, `variants/node/extensions.json`, Dockerfile build step 5. Only dependency is `ajv@8.18.0`; `smol-toml` is not needed yet (no Codex TOML rendering until MCP, ticket 09). Transitive `fast-uri` is overridden to 3.1.8 in `installer/pnpm-workspace.yaml` because 3.1.9 was under 7 days old. The image build installs with the full pnpm policy as inline env (image metadata env is not visible to build steps).
+- Verified: `npm run test:installer` (34 pass, `node --test`, local bare-repo fixtures, no network); full acceptance suite 26/26 with `DEV_SETUP_TEST_IMAGE=dev-setup-node:t06` (23 existing + 3 in `tests/extensions.test.mjs`). Claude's skill listing is read from the `init` stream-json event. Codex has no listing command, so the test reads the skill from Codex's model request against the mock endpoint.
+- The manifests' `$schema` URL (`raw.githubusercontent.com/valerid/dev-setup/main/installer/extensions.schema.json`) resolves only once this lands on that repo's main. The VS Code validation checkbox is ticked on the basis of the schema compiling and validating through Ajv (tests); the editor itself was not exercised.
+- Shipped manifests declare no skills; the skill path is exercised through derived images in the acceptance suite. Kinds other than `skill` validate but fail the build as "not installable yet" (tickets 08/09). Codex `plugin` and `hook` are rejected by the kind x Agent table (D3).
+- CLI option `--git-base` (default `https://github.com/`) lets tests point at local repos; it does not weaken the Pinned Ref rule.
+- `base/egress/allowlist.txt` was removed; its verification notes moved to `notes` in `extensions/base.json`.

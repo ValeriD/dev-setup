@@ -37,6 +37,29 @@ RUN chmod 755 /usr/local/bin/git-credential-dev-setup \
  && chmod 644 /etc/profile.d/dev-setup-scrub.sh /etc/dev-setup/gitconfig \
  && sed -i '1i . /etc/profile.d/dev-setup-scrub.sh' /etc/bash.bashrc
 
+# Extension installer (Base + Variant layers). Its own dependencies install under
+# the same pnpm policy the container enforces at runtime (the pnpm_config_* env
+# lives in image metadata, which a build step does not see): frozen lockfile,
+# 7-day release age, scripts blocked.
+COPY installer/ /opt/dev-setup/installer/
+COPY extensions/base.json /opt/dev-setup/manifests/base.json
+COPY variants/node/extensions.json /opt/dev-setup/manifests/node.json
+RUN cd /opt/dev-setup/installer \
+ && pnpm_config_minimum_release_age=10080 pnpm_config_minimum_release_age_strict=true \
+    pnpm_config_trust_policy=no-downgrade pnpm_config_strict_dep_builds=true \
+    pnpm_config_block_exotic_subdeps=true pnpm_config_frozen_lockfile=true \
+    pnpm install --prod \
+ && rm -rf /root/.local/share/pnpm /root/.cache \
+ && chmod -R go-w,a+rX /opt/dev-setup
+
+# Build step 5: validate the Base and Variant manifests (a bad entry fails the
+# build, naming the entry), install their skills for both Agents into the native
+# system skill directories, and assemble the Egress Allowlist the start-up step reads.
+RUN node /opt/dev-setup/installer/src/cli.mjs install --mode build \
+      --manifest /opt/dev-setup/manifests/base.json \
+      --manifest /opt/dev-setup/manifests/node.json \
+ && chmod -R u=rwX,go=rX /etc/claude-code /etc/codex /usr/local/share/egress
+
 # Login-volume mount points exist and belong to node, so new named volumes
 # inherit that ownership.
 RUN mkdir -p /home/node/.claude /home/node/.codex \

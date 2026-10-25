@@ -1,2 +1,6 @@
 *
 !base/
+!installer/
+!extensions/
+!variants/node/extensions.json
+installer/node_modules
