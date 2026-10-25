@@ -4,7 +4,7 @@ Current-state index. Details for each area live in `docs/architecture/<area>.md`
 
 ## Node devcontainer (walking skeleton)
 
-Proposed design: `.scratch/node-devcontainer/design.md`. Implemented so far: image, Template, acceptance suite. Not yet: egress start-up step, pnpm policy, credential scrubbing, installer, CI.
+Proposed design: `.scratch/node-devcontainer/design.md`. Implemented so far: image, Template, acceptance suite. Not yet: egress start-up step, pnpm policy, credential scrubbing, installer, Renovate.
 
 | Module | Anchor | Owns |
 | --- | --- | --- |
@@ -12,5 +12,6 @@ Proposed design: `.scratch/node-devcontainer/design.md`. Implemented so far: ima
 | Node Variant | `variants/node/` | `Dockerfile` (the one place for the base digest and pinned pnpm/Claude Code/Codex versions); `devcontainer.json` is build-time only and becomes the image's `devcontainer.metadata` (user, `no-new-privileges`, init, env, login volumes). Build context is the repo root, filtered by `.dockerignore`. |
 | Node Template | `templates/node/` | Only what image metadata cannot carry: `--cap-drop=ALL`, limits, `initializeCommand`, read-only mounts of `.git/hooks`, `.git/config`, `.devcontainer`, `.vscode`. Option `image` selects the image. |
 | Acceptance suite | `tests/` | `npm test`: builds the image, publishes the Template to a throwaway local registry, applies and starts it with the devcontainer CLI, probes as `node`. |
+| CI/release | `.github/workflows/ci.yml`, `scripts/check-pins.mjs` | PR pin check and acceptance run; on `main`: build and push, cosign keyless sign, SBOM and provenance attestations (pushed to the registry), Template publish with the `image` option default rewritten to the digest. |
 
 Dependency direction: Template references the image; the image never references the Template; tests depend on everything.

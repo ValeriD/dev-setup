@@ -1,0 +1,163 @@
+name: ci
+
+# PRs: pin check + acceptance suite. Push to main: also publish, sign, attest
+# and publish the Template. Nothing is pushed unless acceptance passes.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/valerid/dev-setup/node
+  TEMPLATE_NAMESPACE: valerid/dev-setup
+  # Add linux/arm64 here (and a QEMU step) once it is verified to build.
+  PLATFORM: linux/amd64
+  CLI_VERSION: 0.89.0
+
+jobs:
+  pins:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: node scripts/check-pins.mjs
+      - run: node --test tests/pins.test.mjs
+
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: npm test
+
+  publish:
+    needs: [pins, acceptance]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write     # cosign keyless and attestations
+      attestations: write
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Build and push
+        run: |
+          npx -y "@devcontainers/cli@${CLI_VERSION}" build \
+            --workspace-folder variants/node \
+            --config variants/node/devcontainer.json \
+            --platform "$PLATFORM" \
+            --push \
+            --image-name "${IMAGE}:sha-${GITHUB_SHA::12}" \
+            --image-name "${IMAGE}:latest"
+
+      - name: Resolve digest
+        id: digest
+        run: |
+          d=$(docker buildx imagetools inspect "${IMAGE}:sha-${GITHUB_SHA::12}" --format '{{.Manifest.Digest}}')
+          [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bad digest: $d"; exit 1; }
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+
+      - name: Sign (cosign keyless)
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.digest.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      # push-to-registry stores the attestations next to the image so a host
+      # can run `cosign verify-attestation` without the gh CLI.
+      - name: Attest provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+      - name: Verify what was just pushed
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          cosign verify "${IMAGE}@${DIGEST}" \
+            --certificate-identity-regexp "^https://github.com/${REPO}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "$REPO"
+
+  template:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Template's `image` option default becomes the exact image digest,
+      # so applying the Template pins the project to what CI verified.
+      - name: Fill in image digest and bump version
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          f=templates/node/devcontainer-template.json
+          jq --arg ref "${IMAGE}@${DIGEST}" --arg v "0.1.${GITHUB_RUN_NUMBER}" \
+            '.options.image.default = $ref | .version = $v' "$f" > "$f.tmp"
+          mv "$f.tmp" "$f"
+          jq '{version, image: .options.image.default}' "$f"
+      - uses: devcontainers/action@bef2cf2d1a019b00b45e184f83035e01bd1972f3 # v1.4.4
+        with:
+          publish-templates: "true"
+          base-path-to-templates: ./templates
+          templates-namespace: ${{ env.TEMPLATE_NAMESPACE }}
+          generate-docs: "false"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
