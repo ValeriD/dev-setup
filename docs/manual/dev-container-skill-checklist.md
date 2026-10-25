@@ -1,6 +1,6 @@
 # dev-container skill: conversational checklist
 
-The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
+The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
 
 ## Sandbox
 
@@ -49,3 +49,21 @@ These write `presets/`, so run them against a throwaway checkout, not your own: 
 | P5 | `c "/dev-container change the description of preset api"` | Only `$T/ds/presets/api.json` changes; `$T/p1` unchanged; nothing committed in either. |
 
 Clean up: remove the started containers and their volumes, `git worktree remove --force $T/ds`, then `rm -rf $T`.
+
+## Migration (SC-03)
+
+An npm fixture with its own dev container, committed on `main`. Its dependencies come from the registry stub on container loopback, so start the stub in the container before answering the conversion question: `devcontainer exec --workspace-folder <dir> sh -c 'cat > /tmp/s.mjs' < $REPO/tests/fixtures/registry-stub.mjs`, then run it as in `tests/dev-container-skill.test.mjs`. Create `package-lock.json` the same way, with `npm install --package-lock-only` inside the container.
+
+```sh
+git init -q -b main $T/legacy && cd $T/legacy && mkdir .devcontainer && echo '{ "image": "node:24" }' > .devcontainer/devcontainer.json \
+  && echo 'registry=http://127.0.0.1:4873/' > .npmrc && echo '{"name":"legacy","version":"1.0.0","dependencies":{"scripty":"^1.0.0","plain":"^1.0.0"}}' > package.json \
+  && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && cd -
+```
+
+| # | Prompt | Expect |
+| --- | --- | --- |
+| 11 | `c "/dev-container migrate $T/legacy"` | Creates `chore/dev-container`; replaces `.devcontainer/` (names the deleted file); `validate` ran; starts with `up --recreate` after asking. `git -C $T/legacy log --all --oneline` still shows one commit. |
+| 12 | Answer "yes" to the conversion | `pnpm-lock.yaml` exists, `package-lock.json` is gone, `package.json` has `packageManager: pnpm@<image pin>`; the frozen install ran and the agent lists `scripty@1.0.0` as blocked, explaining `allowBuilds`. No `pnpm` process ran on the host. |
+| 13 | Repeat 11 on a fresh copy, answer "no" | `package-lock.json` unchanged (`git diff --quiet -- package-lock.json`), no `pnpm-lock.yaml`; the agent says installs fail until the project is converted. |
+
+Clean up: remove the started containers and their volumes, then `rm -rf $T`.
