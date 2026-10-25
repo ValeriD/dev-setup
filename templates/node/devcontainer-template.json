@@ -9,6 +9,11 @@
       "type": "string",
       "description": "Image reference. Release CI rewrites this default to the published image digest.",
       "default": "ghcr.io/valerid/dev-setup/node:latest"
+    },
+    "patEnvVar": {
+      "type": "string",
+      "description": "Name of the HOST env var holding a fine-grained PAT scoped to this one repository. Unset means no GitHub credentials in the container.",
+      "default": "DEV_SETUP_GITHUB_PAT"
     }
   },
   "platforms": ["Any"]
