@@ -1,0 +1,3 @@
+#!/bin/sh
+# Full-autonomy Claude Code. The container is the sandbox.
+exec claude --dangerously-skip-permissions "$@"

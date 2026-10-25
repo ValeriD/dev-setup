@@ -1,0 +1,83 @@
+// Helpers for the container acceptance suite: build the image, publish and
+// apply the Template through a throwaway local OCI registry, start containers
+// with the devcontainer CLI, and probe them as `node`.
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
+export const IMAGE = 'dev-setup-node:test';
+const CLI = ['npx', '-y', '@devcontainers/cli@0.89.0'];
+const REGISTRY_IMAGE = 'registry:2.8.3';
+
+export function run(cmd, args, opts = {}) {
+  const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 << 20, ...opts });
+  return { code: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
+}
+const cli = (args, opts) => run(CLI[0], [...CLI.slice(1), ...args], opts);
+
+function must(r, what) {
+  if (r.code !== 0) throw new Error(`${what} failed (${r.code})\n${r.out}\n${r.err}`);
+  return r;
+}
+
+/** Pinned values, read from the one place they live. */
+export function pins() {
+  const df = readFileSync(join(REPO, 'variants/node/Dockerfile'), 'utf8');
+  const arg = (n) => df.match(new RegExp(`^ARG ${n}=(\\S+)`, 'm'))[1];
+  return { claude: arg('CLAUDE_CODE_VERSION'), codex: arg('CODEX_VERSION'), pnpm: arg('PNPM_VERSION') };
+}
+
+export function buildImage() {
+  const dir = join(REPO, 'variants/node');
+  must(cli(['build', '--workspace-folder', dir, '--config', join(dir, 'devcontainer.json'), '--image-name', IMAGE]), 'image build');
+}
+
+/** Throwaway local registry holding the published Template. */
+export function startTemplateRegistry() {
+  const id = must(run('docker', ['run', '-d', '--rm', '-p', '127.0.0.1::5000', REGISTRY_IMAGE]), 'registry start').out.trim();
+  const port = run('docker', ['port', id, '5000/tcp']).out.trim().split(':').pop();
+  const registry = `localhost:${port}`;
+  for (let i = 0; i < 50; i++) {
+    if (run('curl', ['-fs', `http://${registry}/v2/`]).code === 0) break;
+    run('sleep', ['0.2']);
+  }
+  must(cli(['templates', 'publish', '-r', registry, '-n', 'dev-setup', join(REPO, 'templates')]), 'template publish');
+  return {
+    templateId: `${registry}/dev-setup/node:0.1.0`,
+    stop: () => run('docker', ['rm', '-f', id]),
+  };
+}
+
+/** A fresh folder with a `.git` directory, the Template applied, ready for `up`. */
+export function createProject(templateId) {
+  const dir = mkdtempSync(join(tmpdir(), 'dev-setup-proj-'));
+  must(run('git', ['init', '-q', '-b', 'main'], { cwd: dir }), 'git init');
+  must(cli(['templates', 'apply', '-w', dir, '-t', templateId, '-a', JSON.stringify({ image: IMAGE })]), 'template apply');
+  return dir;
+}
+
+export function up(dir, extra = []) {
+  const r = must(cli(['up', '--workspace-folder', dir, ...extra]), 'devcontainer up');
+  const line = r.out.trim().split('\n').pop();
+  return JSON.parse(line);
+}
+
+/** Run a shell snippet inside the project's container as the remote user (`node`). */
+export function exec(dir, script, { input } = {}) {
+  return cli(['exec', '--workspace-folder', dir, 'sh', '-c', script], { input });
+}
+
+export function volumeNames(containerId) {
+  const m = JSON.parse(run('docker', ['inspect', containerId, '--format', '{{json .Mounts}}']).out);
+  return m.filter((x) => x.Type === 'volume').map((x) => x.Name);
+}
+
+export function removeProject(dir, containerId) {
+  const vols = containerId ? volumeNames(containerId) : [];
+  if (containerId) run('docker', ['rm', '-f', containerId]);
+  for (const v of vols) run('docker', ['volume', 'rm', '-f', v]);
+  rmSync(dir, { recursive: true, force: true });
+}

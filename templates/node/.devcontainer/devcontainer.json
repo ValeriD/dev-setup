@@ -1,0 +1,16 @@
+{
+  "name": "node",
+  "image": "${templateOption:image}",
+  // Only what image metadata cannot carry lives here.
+  "runArgs": ["--cap-drop=ALL", "--memory=8g", "--pids-limit=2048"],
+  "initializeCommand": "test -d .git || git init -q; mkdir -p .git/hooks .vscode .devcontainer; touch .git/config",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+  // Read-only overlays: block planting code that would run later on the host.
+  "mounts": [
+    "source=${localWorkspaceFolder}/.git/hooks,target=/workspace/.git/hooks,type=bind,readonly",
+    "source=${localWorkspaceFolder}/.git/config,target=/workspace/.git/config,type=bind,readonly",
+    "source=${localWorkspaceFolder}/.devcontainer,target=/workspace/.devcontainer,type=bind,readonly",
+    "source=${localWorkspaceFolder}/.vscode,target=/workspace/.vscode,type=bind,readonly"
+  ]
+}

@@ -1,0 +1,19 @@
+// Build-time config only. `devcontainer build` turns everything below into the
+// image's devcontainer.metadata label, so the hardening travels with the digest.
+{
+  "name": "dev-setup node",
+  "build": { "dockerfile": "Dockerfile", "context": "../.." },
+  "remoteUser": "node",
+  "containerUser": "node",
+  "init": true,
+  "securityOpt": ["no-new-privileges"],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+    "CODEX_HOME": "/home/node/.codex",
+    "DISABLE_AUTOUPDATER": "1"
+  },
+  "mounts": [
+    "source=claude-${devcontainerId},target=/home/node/.claude,type=volume",
+    "source=codex-${devcontainerId},target=/home/node/.codex,type=volume"
+  ]
+}

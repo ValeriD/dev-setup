@@ -1,0 +1,15 @@
+{
+  "id": "node",
+  "version": "0.1.0",
+  "name": "Hardened Node",
+  "description": "Hardened Node 24 dev container with Claude Code and Codex. Hardening comes from the image metadata.",
+  "documentationURL": "https://github.com/valerid/dev-setup",
+  "options": {
+    "image": {
+      "type": "string",
+      "description": "Image reference. Release CI rewrites this default to the published image digest.",
+      "default": "ghcr.io/valerid/dev-setup/node:latest"
+    }
+  },
+  "platforms": ["Any"]
+}

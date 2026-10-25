@@ -1,0 +1,5 @@
+# Lowest-precedence system layer. Deliberately NOT managed_config.toml: the
+# managed layer would override the flags that codex-yolo passes.
+sandbox_mode = "danger-full-access"
+approval_policy = "on-request"
+check_for_update_on_startup = false
