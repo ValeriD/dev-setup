@@ -10,8 +10,8 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CONTAINER_WIDE, describeEntry, schema } from '../../../installer/src/index.mjs';
 import {
-  allowing, countTags, covers, egressDeclarations, egressGoing, listPresets, LOCAL_ENV_REF, manifestProblems, readJson, readJsonc, readProjectManifest,
-  secretDeclarations, secretsGoing, secretsNeededBy,
+  allowing, countTags, covers, egressDeclarations, egressGoing, listPresets, LOCAL_ENV_REF, localEnvName, manifestProblems, readJson, readJsonc,
+  readProjectManifest, readRemoteEnv, secretDeclarations, secretsGoing, secretsNeededBy, TOP_LEVEL_EGRESS,
 } from './manifests.mjs';
 import { PROJECT, projectLayers } from './image-layers.mjs';
 import { inspect } from './inspect.mjs';
@@ -519,34 +519,20 @@ function presets(_, { name }, { repo }) {
 // `secrets`). The agent makes the edits; nothing here writes.
 
 /**
- * The project's `remoteEnv` keys, each with the host variable its `${localEnv:…}` reference
- * names (null for anything else). Never a value. Null when devcontainer.json cannot be read.
- * @returns {Map<string, string|null>|null}
- */
-function remoteEnvRefs(project) {
-  const file = join(project, '.devcontainer/devcontainer.json');
-  if (!existsSync(file)) return null;
-  const { value, errors } = readJsonc(file);
-  if (errors.length || value === null || typeof value !== 'object') return null;
-  const env = value.remoteEnv !== null && typeof value.remoteEnv === 'object' && !Array.isArray(value.remoteEnv) ? value.remoteEnv : {};
-  return new Map(Object.entries(env).map(([k, v]) => [k, (typeof v === 'string' && v.match(LOCAL_ENV_REF)?.[1]) || null]));
-}
-
-/**
  * What happens to a secret's `remoteEnv` line once a declaration goes: "keep" while something
  * still declares it, "delete" when this was the last declaration, "none" when there is no
  * line. On "delete", `unsetOnHost` names the host variable the user no longer needs to export.
  */
-function remoteEnvFate(refs, name, stillDeclared) {
-  if (!refs?.has(name)) return { remoteEnv: 'none' };
+function remoteEnvFate(remoteEnv, name, stillDeclared) {
+  if (!remoteEnv || !Object.hasOwn(remoteEnv, name)) return { remoteEnv: 'none' };
   if (stillDeclared) return { remoteEnv: 'keep' };
-  const hostEnv = refs.get(name);
+  const hostEnv = localEnvName(remoteEnv, name);
   return { remoteEnv: 'delete', ...(hostEnv ? { unsetOnHost: hostEnv } : {}) };
 }
 
 const secretsPlan = (project, manifest, indexes) => {
-  const refs = remoteEnvRefs(project);
-  return secretsGoing(manifest, indexes).map((s) => ({ ...s, ...remoteEnvFate(refs, s.name, s.stillDeclaredBy.length > 0) }));
+  const remoteEnv = readRemoteEnv(project);
+  return secretsGoing(manifest, indexes).map((s) => ({ ...s, ...remoteEnvFate(remoteEnv, s.name, s.stillDeclaredBy.length > 0) }));
 };
 
 function planRemovePreset([dir, name]) {
@@ -611,14 +597,14 @@ function planDisallow([dir, domain]) {
   const host = domain.toLowerCase();
   const { image, layers } = projectLayers(project, manifest);
   const declarations = egressDeclarations(layers);
-  const isThis = (d) => d.layer === PROJECT && d.neededBy === 'top-level egress' && d.domain === host;
+  const isThis = (d) => d.layer === PROJECT && d.neededBy === TOP_LEVEL_EGRESS && d.domain === host;
   const neededBy = allowing(declarations, host).filter((d) => !isThis(d));
-  const base = { dir: project, domain: host, layers: layersDoc(image) };
+  const head = { dir: project, domain: host, layers: layersDoc(image) };
 
   if (!(manifest.egress ?? []).includes(host)) {
     return {
       doc: {
-        ok: false, ...base,
+        ok: false, ...head,
         error: `${host} is not in the top-level "egress" of ${mfFile}; only the project's own domains can be disallowed`,
         allowedBy: neededBy,
       },
@@ -627,7 +613,7 @@ function planDisallow([dir, domain]) {
   if (neededBy.length) {
     return {
       doc: {
-        ok: false, ...base,
+        ok: false, ...head,
         error: `${host} stays allowed while something else needs it; removing it from the top-level "egress" would change nothing`,
         neededBy,
       },
@@ -635,8 +621,8 @@ function planDisallow([dir, domain]) {
   }
   return {
     doc: {
-      ok: true, ...base,
-      remove: { from: 'top-level egress', domain: host },
+      ok: true, ...head,
+      remove: { from: TOP_LEVEL_EGRESS, domain: host },
       // A subdomain declared elsewhere stays allowed on its own.
       subdomainsStayAllowed: declarations.filter((d) => d.domain !== host && covers(host, d.domain)),
       ...(image.known ? {} : { note: `the Base and Variant layers could not be checked (${image.reason}); one of them may still allow ${host}` }),
@@ -656,19 +642,19 @@ function planRemoveSecret([dir, name]) {
   if (read.error) return { doc: { ok: false, ...read } };
   const { file: mfFile, manifest } = read;
   const declarers = secretsNeededBy(manifest).get(name) ?? [];
-  const base = { dir: project, name };
-  if (!declarers.length) return { doc: { ok: false, ...base, error: `${name} is not declared in ${mfFile} (an MCP entry or the top-level "secrets")` } };
+  const head = { dir: project, name };
+  if (!declarers.length) return { doc: { ok: false, ...head, error: `${name} is not declared in ${mfFile} (an MCP entry or the top-level "secrets")` } };
   const mcp = declarers.filter((d) => d !== CONTAINER_WIDE);
   if (mcp.length) {
-    return { doc: { ok: false, ...base, error: `${name} is still declared by ${mcp.join(', ')}; it goes when that entry is removed`, neededBy: mcp } };
+    return { doc: { ok: false, ...head, error: `${name} is still declared by ${mcp.join(', ')}; it goes when that entry is removed`, neededBy: mcp } };
   }
   const { image } = projectLayers(project, manifest);
   const keptBy = image.known ? secretDeclarations(image.layers).filter((s) => s.name === name) : [];
   return {
     doc: {
-      ok: true, ...base, layers: layersDoc(image),
+      ok: true, ...head, layers: layersDoc(image),
       remove: { from: 'top-level secrets', name },
-      ...remoteEnvFate(remoteEnvRefs(project), name, keptBy.length > 0),
+      ...remoteEnvFate(readRemoteEnv(project), name, keptBy.length > 0),
       ...(keptBy.length ? { remoteEnvKeptFor: keptBy } : {}),
       ...(image.known ? {} : { note: `the Base and Variant layers could not be checked (${image.reason}); if one of them declares ${name}, its remoteEnv line is still needed` }),
     },

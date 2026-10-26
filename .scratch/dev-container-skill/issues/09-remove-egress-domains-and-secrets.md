@@ -48,6 +48,8 @@
 - Verified: `npm run test:skill` 50/50, `npm run test:installer` 52/52, `node scripts/check-pins.mjs` ok. The fixture image is removed by the file's `after`. `npm test` was not run, because the container suite does not cover the plan commands.
 - The last box (the conversation never asks for or shows a value, and mentions unsetting) is unticked, so Status is left unchanged, as in 08. The helper never emits a value (asserted), and it gives `unsetOnHost`. The references tell the agent to say it. Checklist rows E10, E11 and X7 cover it, but they were not run. Set `done` once they pass.
 
+- Review follow-up: `readRemoteEnv` and `localEnvName` moved from `status.mjs` to `manifests.mjs`, so `status` and the plans share them. `TOP_LEVEL_EGRESS` is now a constant. Tests now also cover `plan-remove-preset`'s `secretsWithEntries`, `remoteEnv: none`, and that the applied `remoteEnv` line is gone. `npm run test:skill` passes 50/50.
+
 **Belongs elsewhere:**
 
 - 13: `plan-remove`/`plan-remove-preset` also ignore Base and Variant secret declarations. A secret an MCP entry and the Base layer both declare would get `remoteEnv: delete`. Today no Base or Variant manifest declares secrets. If 13 makes removal plans read the image layers, the secrets part should use them too (`remoteEnvKeptFor`, as `plan-remove-secret` does).

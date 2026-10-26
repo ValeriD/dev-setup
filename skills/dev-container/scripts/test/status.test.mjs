@@ -355,6 +355,7 @@ test('plan-disallow refuses a domain the Base or Variant layer, an entry or a pa
   const m = JSON.parse(readFileSync(mf, 'utf8'));
   m.egress = m.egress.filter((d) => d !== 'mine.example.com');
   writeFileSync(mf, JSON.stringify(m));
+  // Catches a plan that misses a needer status sees (the two filter the same declarations differently).
   assert.equal(h(['status', p, '--skip-image-check', '--domain', 'mine.example.com']).doc.egress.check.allowed, false);
 
   // Without the image, the Base and Variant layers are unknown: the plan goes ahead and says so.
@@ -367,13 +368,13 @@ test('plan-disallow refuses a domain the Base or Variant layer, an entry or a pa
 
 test('plan-remove-secret refuses a name an MCP entry declares; plan-remove keeps a remoteEnv line the top level still needs (Q20); no value is shown', () => {
   const image = layersImage();
-  const both = { ...searchMcp, env: ['SEARCH_TOKEN', 'SHARED_TOKEN'] };
+  const both = { ...searchMcp, env: ['SEARCH_TOKEN', 'SHARED_TOKEN'], preset: 'web' };
   const p = project([both], undefined, {
     SEARCH_TOKEN: '${localEnv:SEARCH_TOKEN}', SHARED_TOKEN: '${localEnv:SHARED_TOKEN}', NPM_TOKEN: '${localEnv:MY_NPM}', BASE_TOKEN: '${localEnv:BASE_TOKEN}',
   });
   pinImage(p, image);
   const mf = join(p, '.devcontainer/extensions.json');
-  writeFileSync(mf, JSON.stringify({ ...JSON.parse(readFileSync(mf, 'utf8')), secrets: ['SHARED_TOKEN', 'NPM_TOKEN', 'BASE_TOKEN'] }));
+  writeFileSync(mf, JSON.stringify({ ...JSON.parse(readFileSync(mf, 'utf8')), secrets: ['SHARED_TOKEN', 'NPM_TOKEN', 'BASE_TOKEN', 'NO_LINE'] }));
   const env = { SEARCH_TOKEN: SECRET_VALUE, SHARED_TOKEN: SECRET_VALUE, MY_NPM: SECRET_VALUE, BASE_TOKEN: SECRET_VALUE };
   const before = files(p);
   const outs = [];
@@ -390,6 +391,8 @@ test('plan-remove-secret refuses a name an MCP entry declares; plan-remove keeps
     { name: 'SEARCH_TOKEN', stillDeclaredBy: [], remoteEnv: 'delete', unsetOnHost: 'SEARCH_TOKEN' },
     { name: 'SHARED_TOKEN', stillDeclaredBy: ['container-wide'], remoteEnv: 'keep' },
   ]);
+  // Removing the Preset that entry came from plans the same secrets.
+  assert.deepEqual(plan('plan-remove-preset', p, 'web').doc.secretsWithEntries, rm.doc.secretsWithEntry);
 
   for (const name of ['SEARCH_TOKEN', 'SHARED_TOKEN']) {
     const r = plan('plan-remove-secret', p, name);
@@ -406,15 +409,17 @@ test('plan-remove-secret refuses a name an MCP entry declares; plan-remove keeps
   assert.equal(baseTok.remoteEnv, 'keep');
   assert.deepEqual(baseTok.remoteEnvKeptFor, [{ name: 'BASE_TOKEN', layer: 'Base', neededBy: ['container-wide'] }]);
   assert.equal(plan('plan-remove-secret', p, 'NOPE').code, 1);
+  assert.equal(plan('plan-remove-secret', p, 'NO_LINE').doc.remoteEnv, 'none', 'no remoteEnv line to delete');
   assert.deepEqual(files(p), before, 'the plans write nothing');
   assert.doesNotMatch(outs.join('\n'), new RegExp(SECRET_VALUE), 'a secret value never reaches the output');
 
   // Applying the NPM_TOKEN plan as the agent would leaves a valid project.
   const m = JSON.parse(readFileSync(mf, 'utf8'));
-  m.secrets = m.secrets.filter((x) => x !== 'NPM_TOKEN');
+  m.secrets = m.secrets.filter((x) => x !== 'NPM_TOKEN' && x !== 'NO_LINE');
   writeFileSync(mf, JSON.stringify(m));
   const dc = join(p, '.devcontainer/devcontainer.json');
   writeFileSync(dc, readFileSync(dc, 'utf8').replace(/\n\s*"NPM_TOKEN": "\$\{localEnv:MY_NPM\}",/, ''));
+  assert.doesNotMatch(readFileSync(dc, 'utf8'), /NPM_TOKEN/, 'the remoteEnv line is gone');
   const v = h(['validate', p]);
   assert.deepEqual(v.doc.problems.filter((x) => !/digest-pinned/.test(x)), [], v.log);
   assert.deepEqual(v.doc.secrets.map((x) => x.name), ['SEARCH_TOKEN', 'SHARED_TOKEN', 'BASE_TOKEN']);
