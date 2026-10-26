@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -19,6 +19,13 @@
 - **Validation seam:** review. Every code anchor named in the index exists.
 - **Coverage:** docs only.
 
-- [ ] No Node-area row holds two versions of the same fact, and each row matches the code
-- [ ] Every path the index names exists
-- [ ] `docs/agents/architecture.md` has the "rewrite the row, never append" rule
+- [x] No Node-area row holds two versions of the same fact, and each row matches the code
+- [x] Every path the index names exists
+- [x] `docs/agents/architecture.md` has the "rewrite the row, never append" rule
+
+## Comments
+
+- Cause of the duplication: the Extension installer and Node Variant rows each held an old and a new version in one table line (a bad merge). The stale halves are removed, the newer wording kept and re-checked against `installer/`, `variants/node/`, `base/` and `templates/node/`.
+- The Extension installer row also had a stale CLI usage and a duplicated "Codex plugin and hook unsupported" sentence; each is now stated once.
+- CI/release row: now names the installer and skill-helper tests the `pins` job runs, and the Renovate manager for the cosign pin in `commands.mjs`.
+- Belongs elsewhere: the test-suite row (left as-is, node ticket 12 rewrites it) omits `acceptance.test.mjs`, `pins.test.mjs`, `renovate.test.mjs`, `dev-container-skill.test.mjs` and `tests/lib.mjs`.
