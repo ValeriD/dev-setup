@@ -141,10 +141,25 @@ test('status reports Pinned Ref ages, egress, and unset host env names without p
   assert.equal(rem.pinnedRef, null);
   assert.match(rem.note, /D2/);
 
-  assert.deepEqual(d.egress.topLevel, [{ domain: 'cdn.example.com', neededBy: ['extensions[0] (skill "acme/skills/skills/lint")'] }, { domain: 'mine.example.com', neededBy: [] }]);
-  assert.deepEqual(d.egress.entries.map((e) => e.domain), ['cdn.example.com', 'api.search.example.com', 'docs.example.com']);
+  // The pinned image is not local: the Base and Variant layers are unknown, and nothing is pulled.
+  assert.equal(d.layers.known, false);
+  assert.match(d.layers.reason, /not in the local image store/);
+  assert.notEqual(spawnSync('docker', ['image', 'inspect', IMAGE], { stdio: 'ignore' }).status, 0, 'status pulled nothing');
+  const P = 'Consuming Project';
+  assert.deepEqual(d.egress.domains.map((x) => [x.domain, x.declaredBy]), [
+    ['cdn.example.com', [{ layer: P, neededBy: 'extensions[0] (skill "acme/skills/skills/lint")' }, { layer: P, neededBy: 'top-level egress' }]],
+    ['api.search.example.com', [{ layer: P, neededBy: 'extensions[1] (mcp "search")' }]],
+    ['docs.example.com', [{ layer: P, neededBy: 'extensions[2] (mcp-remote "docs")' }]],
+    ['mine.example.com', [{ layer: P, neededBy: 'top-level egress' }]],
+  ]);
+  assert.ok(d.egress.domains.every((x) => !x.coveredBy.length));
+  const unknownCheck = h(['status', p, '--skip-image-check', '--domain', 'Fresh.Example.io']).doc.egress.check;
+  assert.deepEqual(unknownCheck, { domain: 'fresh.example.io', allowed: null, allowedBy: [], note: `Base coverage could not be checked: ${d.layers.reason}` });
+  const subCheck = h(['status', p, '--skip-image-check', '--domain', 'img.cdn.example.com']).doc.egress.check;
+  assert.equal(subCheck.allowed, true, 'a project domain covers its subdomain, layers or not');
+  assert.deepEqual(subCheck.allowedBy.map((x) => x.domain), ['cdn.example.com', 'cdn.example.com']);
 
-  assert.deepEqual(d.env.secrets.map((s) => [s.name, s.hostEnv, s.set]), [['SEARCH_TOKEN', 'SEARCH_TOKEN', true]]);
+  assert.deepEqual(d.env.secrets.map((s) => [s.name, s.layer, s.hostEnv, s.set]), [['SEARCH_TOKEN', P, 'SEARCH_TOKEN', true]]);
   assert.deepEqual(d.env.gitIdentity.map((g) => [g.name, g.set]), [['GIT_AUTHOR_NAME', true], ['GIT_AUTHOR_EMAIL', false]]);
   assert.deepEqual(d.env.missing, ['GIT_AUTHOR_EMAIL']);
   assert.doesNotMatch(r.out, new RegExp(SECRET_VALUE), 'a secret value never reaches the output');
@@ -216,7 +231,7 @@ test('SC-09: after a Preset edit, status reports drift with a per-entry diff and
   assert.equal(after.doc.presets[0].state, 'in-sync', after.log);
   assert.deepEqual(after.doc.extensions.map((e) => [e.index, e.preset ?? null, e.pinnedRef.value]),
     [[0, null, sha.skills[1]], [1, 'site', sha.skills[1]], [2, 'site', '1.0.0']], 'own entry first and untouched, Preset entries where they were');
-  assert.deepEqual(after.doc.egress.topLevel, [{ domain: 'mine.example.com', neededBy: [] }], 'the project\'s own domain is untouched');
+  assert.deepEqual(after.doc.egress.domains.find((x) => x.domain === 'mine.example.com').declaredBy, [{ layer: 'Consuming Project', neededBy: 'top-level egress' }], 'the project\'s own domain is untouched');
 
   // An entry whose only change is a dropped domain is drift too, and resyncing removes the domain with it.
   setPreset('site', { description: 'Web.', extensions: [withEgress(lint(sha.skills[1]), ['cdn.example.com']), searchMcp] });
@@ -226,7 +241,63 @@ test('SC-09: after a Preset edit, status reports drift with a per-entry diff and
   resync(dropped);
   const synced = h(['status', p, '--skip-image-check']).doc;
   assert.equal(synced.presets[0].state, 'in-sync');
-  assert.deepEqual(synced.egress.entries.map((e) => e.domain), ['cdn.example.com', 'api.search.example.com']);
+  assert.deepEqual(synced.egress.domains.flatMap((x) => (x.declaredBy.some((b) => b.neededBy !== 'top-level egress') ? [x.domain] : [])), ['cdn.example.com', 'api.search.example.com']);
+});
+
+test('status reads the Base and Variant layers from the pinned image without running it, and reports their coverage', (t) => {
+  // A fixture image FROM scratch holding only the two manifests the real image ships.
+  const ctx = join(root, 'layers-image');
+  mkdirSync(join(ctx, 'manifests'), { recursive: true });
+  writeFileSync(join(ctx, 'manifests/base.json'), JSON.stringify({ extensions: [], egress: ['github.com', 'example.org'], secrets: ['BASE_TOKEN'] }));
+  writeFileSync(join(ctx, 'manifests/node.json'), JSON.stringify({
+    extensions: [{ kind: 'mcp-remote', agents: ['claude'], name: 'vdocs', url: 'https://variant-docs.example.net/mcp', egress: ['variant-docs.example.net'], bearerTokenEnv: 'VARIANT_DOCS_TOKEN' }],
+  }));
+  writeFileSync(join(ctx, 'Dockerfile'), 'FROM scratch\nCOPY manifests /opt/dev-setup/manifests/\n');
+  const image = `dc-status-layers-test:${process.pid}-${Date.now()}`;
+  const built = spawnSync('docker', ['build', '-q', '-t', image, ctx], { encoding: 'utf8' });
+  assert.equal(built.status, 0, built.stderr);
+  t.after(() => spawnSync('docker', ['rmi', '-f', image], { stdio: 'ignore' }));
+
+  const p = project([withEgress(lint(sha.skills[0]), ['cdn.example.com'])], ['api.github.com', 'mine.example.com'], { BASE_TOKEN: '${localEnv:BASE_TOKEN}' });
+  // A locally built image has no registry digest, so the project names it by tag (validate reports that; status reads it anyway).
+  const dc = join(p, '.devcontainer/devcontainer.json');
+  writeFileSync(dc, readFileSync(dc, 'utf8').replace(IMAGE, image));
+  const since = new Date(Date.now() - 1000).toISOString();
+  const r = h(['status', p, '--skip-image-check', '--domain', 'sub.example.org'], { BASE_TOKEN: SECRET_VALUE });
+  assert.equal(r.code, 0, r.log);
+  const d = r.doc;
+  assert.deepEqual(d.layers, { known: true, image, read: [{ layer: 'Base' }, { layer: 'Variant', variant: 'node' }] });
+
+  const by = Object.fromEntries(d.egress.domains.map((x) => [x.domain, x]));
+  assert.deepEqual(Object.keys(by), ['github.com', 'example.org', 'variant-docs.example.net', 'cdn.example.com', 'api.github.com', 'mine.example.com'], 'Base, then Variant, then the project');
+  assert.deepEqual(by['github.com'].declaredBy, [{ layer: 'Base', neededBy: 'top-level egress' }]);
+  assert.deepEqual(by['variant-docs.example.net'].declaredBy, [{ layer: 'Variant', neededBy: 'extensions[0] (mcp-remote "vdocs")' }]);
+  assert.deepEqual(by['cdn.example.com'].declaredBy, [{ layer: 'Consuming Project', neededBy: 'extensions[0] (skill "acme/skills/skills/lint")' }]);
+  assert.deepEqual(by['api.github.com'].coveredBy, [{ domain: 'github.com', layer: 'Base', neededBy: 'top-level egress' }], 'a parent domain in the Base layer already allows it');
+  assert.deepEqual(by['mine.example.com'].coveredBy, []);
+
+  // "Allow" of a subdomain of a Base domain: already allowed, by that layer.
+  assert.deepEqual(d.egress.check, { domain: 'sub.example.org', allowed: true, allowedBy: [{ domain: 'example.org', layer: 'Base', neededBy: 'top-level egress' }] });
+  const fresh = h(['status', p, '--skip-image-check', '--domain', 'fresh.example.io']).doc.egress.check;
+  assert.deepEqual(fresh, { domain: 'fresh.example.io', allowed: false, allowedBy: [] });
+
+  // Base and Variant Named Secrets, names only, with whether each is set on the host.
+  const secrets = Object.fromEntries(d.env.secrets.map((s) => [s.name, s]));
+  assert.deepEqual(secrets.BASE_TOKEN, { name: 'BASE_TOKEN', layer: 'Base', neededBy: ['container-wide'], hostEnv: 'BASE_TOKEN', set: true });
+  assert.equal(secrets.VARIANT_DOCS_TOKEN.layer, 'Variant');
+  assert.deepEqual(secrets.VARIANT_DOCS_TOKEN.neededBy, ['extensions[0] (mcp-remote "vdocs")']);
+  assert.equal(secrets.VARIANT_DOCS_TOKEN.set, false);
+  assert.match(secrets.VARIANT_DOCS_TOKEN.note, /no remoteEnv "VARIANT_DOCS_TOKEN"/);
+  assert.ok(d.env.missing.includes('VARIANT_DOCS_TOKEN') && !d.env.missing.includes('BASE_TOKEN'));
+  assert.doesNotMatch(r.out, new RegExp(SECRET_VALUE), 'a secret value never reaches the output');
+
+  // The layer read left no container behind and never started one.
+  const left = spawnSync('docker', ['ps', '-aq', '--filter', `ancestor=${image}`], { encoding: 'utf8' });
+  assert.equal(left.stdout.trim(), '', 'no container left');
+  const events = spawnSync('docker', ['events', '--since', since, '--until', new Date().toISOString(), '--filter', 'type=container', '--filter', `image=${image}`, '--format', '{{.Action}}'], { encoding: 'utf8' });
+  const actions = events.stdout.split('\n').filter(Boolean);
+  assert.ok(actions.includes('create') && actions.includes('destroy'), `events: ${actions}`);
+  assert.ok(!actions.includes('start'), `the image was never started: ${actions}`);
 });
 
 test('status names a Preset that is gone or invalid instead of offering a resync', () => {
