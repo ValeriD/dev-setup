@@ -1,6 +1,8 @@
 // `status` (skill ticket 07, SC-09 and SC-11 helper parts) on fixture projects:
 // Preset drift and the resync entries, Pinned Ref ages from local bare-git
-// fixtures and the npm registry stub, egress, host env names (never values).
+// fixtures and the npm registry stub, egress, host env names (never values),
+// and the removal plans that read the image layers (`plan-disallow`,
+// `plan-remove-secret`) or secrets (`plan-remove`), on a fixture image.
 // The registry check is skipped here; the container part (pending recreate) is
 // covered against a real container in tests/dev-container-skill.test.mjs.
 import { test, before, after } from 'node:test';
@@ -80,6 +82,7 @@ function checkout(name, { imageDefault } = {}) {
 
 after(() => {
   stub?.kill();
+  if (fixtureImage) spawnSync('docker', ['rmi', '-f', fixtureImage], { stdio: 'ignore' });
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -105,6 +108,32 @@ const searchMcp = { kind: 'mcp', agents: ['claude'], name: 'search', source: { n
 const remote = { kind: 'mcp-remote', agents: ['claude'], name: 'docs', url: 'https://docs.example.com/mcp', egress: ['docs.example.com'] };
 const tag = (name, entries) => entries.map((e) => ({ ...e, preset: name }));
 const withEgress = (e, egress) => ({ ...e, egress });
+
+// A fixture image FROM scratch holding only the two manifests the real image ships. Built once,
+// on first use, and removed by the file's `after`.
+let fixtureImage;
+function layersImage() {
+  if (fixtureImage) return fixtureImage;
+  const ctx = join(root, 'layers-image');
+  mkdirSync(join(ctx, 'manifests'), { recursive: true });
+  writeFileSync(join(ctx, 'manifests/base.json'), JSON.stringify({ extensions: [], egress: ['github.com', 'example.org'], secrets: ['BASE_TOKEN'] }));
+  writeFileSync(join(ctx, 'manifests/node.json'), JSON.stringify({
+    extensions: [{ kind: 'mcp-remote', agents: ['claude'], name: 'vdocs', url: 'https://variant-docs.example.net/mcp', egress: ['variant-docs.example.net'], bearerTokenEnv: 'VARIANT_DOCS_TOKEN' }],
+  }));
+  writeFileSync(join(ctx, 'Dockerfile'), 'FROM scratch\nCOPY manifests /opt/dev-setup/manifests/\n');
+  const image = `dc-status-layers-test:${process.pid}-${Date.now()}`;
+  const built = spawnSync('docker', ['build', '-q', '-t', image, ctx], { encoding: 'utf8' });
+  assert.equal(built.status, 0, built.stderr);
+  return (fixtureImage = image);
+}
+
+/** Point a project at a local image by tag (a locally built image has no registry digest; validate reports that, the plans and status read it anyway). */
+function pinImage(p, image) {
+  const dc = join(p, '.devcontainer/devcontainer.json');
+  writeFileSync(dc, readFileSync(dc, 'utf8').replace(IMAGE, image));
+}
+
+const files = (p) => ['extensions.json', 'devcontainer.json'].map((f) => readFileSync(join(p, '.devcontainer', f), 'utf8'));
 
 let n = 0;
 function project(extensions, egress, remoteEnv = {}, image = IMAGE) {
@@ -246,24 +275,10 @@ test('SC-09: after a Preset edit, status reports drift with a per-entry diff and
   assert.deepEqual(synced.egress.domains.flatMap((x) => (x.declaredBy.some((b) => b.neededBy !== 'top-level egress') ? [x.domain] : [])), ['cdn.example.com', 'api.search.example.com']);
 });
 
-test('status reads the Base and Variant layers from the pinned image without running it, and reports their coverage', (t) => {
-  // A fixture image FROM scratch holding only the two manifests the real image ships.
-  const ctx = join(root, 'layers-image');
-  mkdirSync(join(ctx, 'manifests'), { recursive: true });
-  writeFileSync(join(ctx, 'manifests/base.json'), JSON.stringify({ extensions: [], egress: ['github.com', 'example.org'], secrets: ['BASE_TOKEN'] }));
-  writeFileSync(join(ctx, 'manifests/node.json'), JSON.stringify({
-    extensions: [{ kind: 'mcp-remote', agents: ['claude'], name: 'vdocs', url: 'https://variant-docs.example.net/mcp', egress: ['variant-docs.example.net'], bearerTokenEnv: 'VARIANT_DOCS_TOKEN' }],
-  }));
-  writeFileSync(join(ctx, 'Dockerfile'), 'FROM scratch\nCOPY manifests /opt/dev-setup/manifests/\n');
-  const image = `dc-status-layers-test:${process.pid}-${Date.now()}`;
-  const built = spawnSync('docker', ['build', '-q', '-t', image, ctx], { encoding: 'utf8' });
-  assert.equal(built.status, 0, built.stderr);
-  t.after(() => spawnSync('docker', ['rmi', '-f', image], { stdio: 'ignore' }));
-
+test('status reads the Base and Variant layers from the pinned image without running it, and reports their coverage', () => {
+  const image = layersImage();
   const p = project([withEgress(lint(sha.skills[0]), ['cdn.example.com'])], ['api.github.com', 'mine.example.com'], { BASE_TOKEN: '${localEnv:BASE_TOKEN}' });
-  // A locally built image has no registry digest, so the project names it by tag (validate reports that; status reads it anyway).
-  const dc = join(p, '.devcontainer/devcontainer.json');
-  writeFileSync(dc, readFileSync(dc, 'utf8').replace(IMAGE, image));
+  pinImage(p, image);
   const since = new Date(Date.now() - 1000).toISOString();
   const r = h(['status', p, '--skip-image-check', '--domain', 'sub.example.org'], { BASE_TOKEN: SECRET_VALUE });
   assert.equal(r.code, 0, r.log);
@@ -300,6 +315,109 @@ test('status reads the Base and Variant layers from the pinned image without run
   const actions = events.stdout.split('\n').filter(Boolean);
   assert.ok(actions.includes('create') && actions.includes('destroy'), `events: ${actions}`);
   assert.ok(!actions.includes('start'), `the image was never started: ${actions}`);
+});
+
+test('plan-disallow refuses a domain the Base or Variant layer, an entry or a parent domain needs, naming the needer; otherwise it removes it from the top level', () => {
+  const image = layersImage();
+  const top = ['github.com', 'variant-docs.example.net', 'cdn.example.com', 'api.example.org', 'img.shop.example.io', 'mine.example.com', 'shop.example.io'];
+  const p = project([withEgress(lint(sha.skills[0]), ['cdn.example.com'])], top);
+  pinImage(p, image);
+  const before = files(p);
+  const plan = (d) => h(['plan-disallow', p, d]);
+  const refused = (d) => {
+    const r = plan(d);
+    assert.equal(r.code, 1, r.log);
+    assert.equal(r.doc.ok, false);
+    assert.equal(r.doc.remove, undefined);
+    return r.doc.neededBy;
+  };
+
+  assert.deepEqual(refused('github.com'), [{ domain: 'github.com', layer: 'Base', neededBy: 'top-level egress' }]);
+  assert.deepEqual(refused('variant-docs.example.net'), [{ domain: 'variant-docs.example.net', layer: 'Variant', neededBy: 'extensions[0] (mcp-remote "vdocs")' }]);
+  assert.deepEqual(refused('cdn.example.com'), [{ domain: 'cdn.example.com', layer: 'Consuming Project', neededBy: 'extensions[0] (skill "acme/skills/skills/lint")' }]);
+  assert.deepEqual(refused('API.example.org'), [{ domain: 'example.org', layer: 'Base', neededBy: 'top-level egress' }], 'a Base parent domain keeps it allowed');
+  assert.deepEqual(refused('img.shop.example.io'), [{ domain: 'shop.example.io', layer: 'Consuming Project', neededBy: 'top-level egress' }], 'a project parent domain keeps it allowed');
+
+  const ok = plan('mine.example.com');
+  assert.equal(ok.code, 0, ok.log);
+  assert.deepEqual(ok.doc, { ok: true, dir: p, domain: 'mine.example.com', layers: { known: true, image }, remove: { from: 'top-level egress', domain: 'mine.example.com' }, subdomainsStayAllowed: [] });
+  assert.deepEqual(plan('shop.example.io').doc.subdomainsStayAllowed, [{ domain: 'img.shop.example.io', layer: 'Consuming Project', neededBy: 'top-level egress' }]);
+
+  // Not a project top-level domain: nothing to remove, with what allows it.
+  const elsewhere = plan('example.org');
+  assert.equal(elsewhere.code, 1);
+  assert.match(elsewhere.doc.error, /not in the top-level "egress"/);
+  assert.deepEqual(elsewhere.doc.allowedBy, [{ domain: 'example.org', layer: 'Base', neededBy: 'top-level egress' }]);
+  assert.deepEqual(files(p), before, 'the plans write nothing');
+
+  // Applying the plan as the agent would leaves a valid manifest without the domain.
+  const mf = join(p, '.devcontainer/extensions.json');
+  const m = JSON.parse(readFileSync(mf, 'utf8'));
+  m.egress = m.egress.filter((d) => d !== 'mine.example.com');
+  writeFileSync(mf, JSON.stringify(m));
+  assert.equal(h(['status', p, '--skip-image-check', '--domain', 'mine.example.com']).doc.egress.check.allowed, false);
+
+  // Without the image, the Base and Variant layers are unknown: the plan goes ahead and says so.
+  const q = project([], ['github.com']);
+  const blind = h(['plan-disallow', q, 'github.com']);
+  assert.equal(blind.code, 0, blind.log);
+  assert.equal(blind.doc.layers.known, false);
+  assert.match(blind.doc.note, /could not be checked/);
+});
+
+test('plan-remove-secret refuses a name an MCP entry declares; plan-remove keeps a remoteEnv line the top level still needs (Q20); no value is shown', () => {
+  const image = layersImage();
+  const both = { ...searchMcp, env: ['SEARCH_TOKEN', 'SHARED_TOKEN'] };
+  const p = project([both], undefined, {
+    SEARCH_TOKEN: '${localEnv:SEARCH_TOKEN}', SHARED_TOKEN: '${localEnv:SHARED_TOKEN}', NPM_TOKEN: '${localEnv:MY_NPM}', BASE_TOKEN: '${localEnv:BASE_TOKEN}',
+  });
+  pinImage(p, image);
+  const mf = join(p, '.devcontainer/extensions.json');
+  writeFileSync(mf, JSON.stringify({ ...JSON.parse(readFileSync(mf, 'utf8')), secrets: ['SHARED_TOKEN', 'NPM_TOKEN', 'BASE_TOKEN'] }));
+  const env = { SEARCH_TOKEN: SECRET_VALUE, SHARED_TOKEN: SECRET_VALUE, MY_NPM: SECRET_VALUE, BASE_TOKEN: SECRET_VALUE };
+  const before = files(p);
+  const outs = [];
+  const plan = (...args) => {
+    const r = h(args, env);
+    outs.push(r.out);
+    return r;
+  };
+
+  // Removing the MCP entry: its own secret's line goes, the one the top level also declares stays.
+  const rm = plan('plan-remove', p, '0');
+  assert.equal(rm.code, 0, rm.log);
+  assert.deepEqual(rm.doc.secretsWithEntry, [
+    { name: 'SEARCH_TOKEN', stillDeclaredBy: [], remoteEnv: 'delete', unsetOnHost: 'SEARCH_TOKEN' },
+    { name: 'SHARED_TOKEN', stillDeclaredBy: ['container-wide'], remoteEnv: 'keep' },
+  ]);
+
+  for (const name of ['SEARCH_TOKEN', 'SHARED_TOKEN']) {
+    const r = plan('plan-remove-secret', p, name);
+    assert.equal(r.code, 1, r.log);
+    assert.deepEqual(r.doc.neededBy, ['extensions[0] (mcp "search")'], `${name} is refused while the MCP entry declares it`);
+  }
+  const npm = plan('plan-remove-secret', p, 'NPM_TOKEN');
+  assert.equal(npm.code, 0, npm.log);
+  assert.deepEqual(npm.doc, {
+    ok: true, dir: p, name: 'NPM_TOKEN', layers: { known: true, image }, remove: { from: 'top-level secrets', name: 'NPM_TOKEN' }, remoteEnv: 'delete', unsetOnHost: 'MY_NPM',
+  });
+  // The Base layer declares it too: the project's declaration goes, its remoteEnv line stays.
+  const baseTok = plan('plan-remove-secret', p, 'BASE_TOKEN').doc;
+  assert.equal(baseTok.remoteEnv, 'keep');
+  assert.deepEqual(baseTok.remoteEnvKeptFor, [{ name: 'BASE_TOKEN', layer: 'Base', neededBy: ['container-wide'] }]);
+  assert.equal(plan('plan-remove-secret', p, 'NOPE').code, 1);
+  assert.deepEqual(files(p), before, 'the plans write nothing');
+  assert.doesNotMatch(outs.join('\n'), new RegExp(SECRET_VALUE), 'a secret value never reaches the output');
+
+  // Applying the NPM_TOKEN plan as the agent would leaves a valid project.
+  const m = JSON.parse(readFileSync(mf, 'utf8'));
+  m.secrets = m.secrets.filter((x) => x !== 'NPM_TOKEN');
+  writeFileSync(mf, JSON.stringify(m));
+  const dc = join(p, '.devcontainer/devcontainer.json');
+  writeFileSync(dc, readFileSync(dc, 'utf8').replace(/\n\s*"NPM_TOKEN": "\$\{localEnv:MY_NPM\}",/, ''));
+  const v = h(['validate', p]);
+  assert.deepEqual(v.doc.problems.filter((x) => !/digest-pinned/.test(x)), [], v.log);
+  assert.deepEqual(v.doc.secrets.map((x) => x.name), ['SEARCH_TOKEN', 'SHARED_TOKEN', 'BASE_TOKEN']);
 });
 
 test('status names a Preset that is gone or invalid instead of offering a resync', () => {

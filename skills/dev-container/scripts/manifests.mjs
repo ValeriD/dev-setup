@@ -151,7 +151,20 @@ export const secretDeclarations = (layers) =>
   layers.flatMap(({ layer, manifest }) => [...secretsNeededBy({ extensions: [], ...manifest })].map(([name, neededBy]) => ({ name, layer, neededBy })));
 
 /**
- * The egress that goes with removing the entries at `indexes`: each removed entry's own
+ * The Named Secrets that go with removing the entries at `indexes`: each removed MCP entry's
+ * names, once, with what still declares each in the project manifest (a staying MCP entry, or
+ * "container-wide" for the top-level `secrets`). Pure: reads only the manifest.
+ * @returns {{name: string, stillDeclaredBy: string[]}[]}
+ */
+export function secretsGoing(manifest, indexes) {
+  const removed = new Set(indexes);
+  const staying = secretsNeededBy({ ...manifest, extensions: manifest.extensions.map((e, i) => (removed.has(i) ? { kind: 'removed' } : e)) });
+  const going = secretsNeededBy({ extensions: manifest.extensions.map((e, i) => (removed.has(i) ? e : { kind: 'staying' })) });
+  return [...going.keys()].map((name) => ({ name, stillDeclaredBy: staying.get(name) ?? [] }));
+}
+
+/**
+ * The egress that goes with removing the entries at `indexes`:each removed entry's own
  * domains, once, with what keeps each allowed in the project layer (a staying entry's egress
  * or the top-level egress, the project's own needs, which removal never touches). Pure:
  * reads only the manifest.

@@ -1,6 +1,6 @@
 # Egress domains and secrets
 
-Both change a Consuming Project's `.devcontainer/`: egress lives in the Extension Manifest `.devcontainer/extensions.json`, secrets in `.devcontainer/devcontainer.json` plus the manifest (on an MCP entry, or in the top-level `secrets`). Follow the section for what the user asked, then **Finish**. Each section ends on the condition in **bold**.
+Allowing or disallowing a domain and adding or removing a secret all change a Consuming Project's `.devcontainer/`: egress lives in the Extension Manifest `.devcontainer/extensions.json`, secrets in `.devcontainer/devcontainer.json` plus the manifest (on an MCP entry, or in the top-level `secrets`). Follow the section for what the user asked, then **Finish**. Each section ends on the condition in **bold**.
 
 ## Allow a domain
 
@@ -12,6 +12,18 @@ Both change a Consuming Project's `.devcontainer/`: egress lives in the Extensio
 3. Otherwise add the domain to the top-level `egress` array of `.devcontainer/extensions.json` (create the array if needed): that list is what the project itself needs, and removing an extension never drops it. If the user says the domain is for one extension, add it to that entry's own `egress` instead, so it leaves with the entry. Leave every other entry's `egress` alone.
 
 **Done when `H validate <dir>` returns `ok: true` and its `egress` lists the domain (or the entry's `egress` does, when the user named an extension).**
+
+## Disallow a domain
+
+Only the project's own domains, the top-level `egress` of `.devcontainer/extensions.json`, can be disallowed. Reduce what the user gave to a plain lower-case hostname as in **Allow a domain**, step 1.
+
+1. Run `H plan-disallow <dir> <domain>`. It is read-only, and reads the Base and Variant layers from the image the project pins.
+   - `ok: true`: show the plan: `remove` takes the domain out of the top-level `egress`. Name each `subdomainsStayAllowed` domain with its `layer` and `neededBy`: it stays reachable on its own. If `note` is present, say Base and Variant coverage couldn't be checked, so one of those layers may still allow the domain.
+   - `ok: false` with `neededBy`: refuse, and write nothing. Name each needer with its `domain`, `layer` and `neededBy`, and say what would disallow it instead: a Base or Variant domain can't be removed from a project; a domain on an entry goes when that entry is removed ([extensions.md](extensions.md)); a parent domain (a different `domain`) keeps all its subdomains allowed, so disallowing it means disallowing that parent.
+   - `ok: false` with `allowedBy`: the domain isn't in the top-level `egress`. Say who allows it, as above, and write nothing.
+2. Ask once to apply the plan. On yes, delete the domain from the top-level `egress` array (drop the array if it is now empty). Leave every entry's `egress` alone.
+
+**Done when `H validate <dir>` returns `ok: true` and its `egress` no longer lists the domain, or the plan was refused or declined.**
 
 ## Add a secret
 
@@ -34,8 +46,22 @@ Then tell the user, with the `hostEnv` from `validate` filled in for `NAME` (it 
 
 > Export `NAME` on the host before the container starts, e.g. in your shell profile: `export NAME=<your value>`. VS Code and `devcontainer up` read it from the environment they were started from. The value stays on your machine; only the reference is in the repository. While it is unset, the container start prints a warning naming it (and the MCP server that needs it, or "container-wide").
 
+## Remove a secret
+
+Only a container-wide secret, a name in the top-level `secrets` of `.devcontainer/extensions.json`, is removed this way. A secret an MCP server declares goes when that server is removed ([extensions.md](extensions.md)). Only names pass through you, as in **Add a secret**.
+
+1. Run `H plan-remove-secret <dir> <NAME>`. It is read-only.
+   - `ok: false` with `neededBy`: an MCP entry still declares the name. Refuse, write nothing, name each entry, and say the secret goes when that entry is removed.
+   - `ok: false` otherwise: the name isn't declared in the project manifest. Say so and write nothing.
+   - `ok: true`: `remove` takes the name out of the top-level `secrets`. `remoteEnv` says what happens to its line in `.devcontainer/devcontainer.json`: `delete` (nothing else declares it), `keep` (`remoteEnvKeptFor` names the Base or Variant layer that declares it too) or `none` (there is no line). If `note` is present, say Base and Variant secrets couldn't be checked: if one of those layers declares the name, the container still needs the line.
+2. Show the plan and ask once to apply it. On yes, delete the name from the top-level `secrets` array (drop the array if it is now empty). On `delete`, also delete the `"NAME": …` line from `remoteEnv`, editing the text so every other line and comment stays. Never show the line's value.
+
+**Done when `H validate <dir>` returns `ok: true` and its `secrets` no longer lists the name (or lists it only for a declarer that remains), or the plan was refused or declined.**
+
+Then, when the `remoteEnv` line was deleted, tell the user they can unset `unsetOnHost` on the host (remove its `export` from their shell profile) if nothing else of theirs uses it. Never ask for, read or check its value.
+
 ## Finish
 
 Egress and `remoteEnv` take effect when the container is created. Ask once, after all the user's changes: "Recreate the dev container now to apply them? Recreating ends any agent sessions running inside." On yes, run `H up <dir> --recreate`. On no, say the changes apply at the next recreate (VS Code "Rebuild Container").
 
-Print the changed files (uncommitted, for the user to review and commit), the domains allowed, the secret names added with the server that needs each (or "container-wide"), the host variables still to export, and whether the container was recreated.
+Print the changed files (uncommitted, for the user to review and commit), the domains allowed or disallowed, the secret names added with the server that needs each (or "container-wide") or removed, the host variables still to export or now free to unset, and whether the container was recreated.
