@@ -88,6 +88,7 @@ function h(args, env = {}, via = c) {
     encoding: 'utf8',
     env: {
       ...process.env, HOME: home, CLAUDE_CONFIG_DIR: '', DEV_SETUP_GIT_BASE: gitBase, GIT_AUTHOR_NAME: '', GIT_AUTHOR_EMAIL: '',
+      DEV_SETUP_GITHUB_PAT: '', MY_PAT: '',
       npm_config_registry: registry, npm_config_cache: join(root, 'npm-cache'), npm_config_update_notifier: 'false', ...env,
     },
   });
@@ -152,6 +153,28 @@ test('status reports Pinned Ref ages, egress, and unset host env names without p
   assert.deepEqual(unset.doc.env.missing, ['SEARCH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL']);
   assert.equal(d.container.found, false, 'no container for a fixture project');
   assert.equal(readFileSync(join(p, '.devcontainer/extensions.json'), 'utf8'), before, 'status writes nothing');
+});
+
+test('status notes an unset PAT host variable by name, never its value, and only when devcontainer.json passes one', () => {
+  const p = join(root, `p${n++}`);
+  mkdirSync(p);
+  assert.equal(h(['render-template', 'node', p, '--image', IMAGE, '--option', 'patEnvVar=MY_PAT']).code, 0);
+
+  const unset = h(['status', p, '--skip-image-check']);
+  assert.equal(unset.code, 0, unset.log);
+  assert.deepEqual(unset.doc.env.pat, { name: 'DEV_SETUP_GITHUB_PAT', hostEnv: 'MY_PAT', set: false, note: 'MY_PAT unset: `git push` from the container will fail' });
+  assert.ok(!unset.doc.env.missing.includes('MY_PAT'), 'a note, not a missing variable');
+
+  const set = h(['status', p, '--skip-image-check'], { MY_PAT: SECRET_VALUE });
+  assert.equal(set.code, 0, set.log);
+  assert.deepEqual(set.doc.env.pat, { name: 'DEV_SETUP_GITHUB_PAT', hostEnv: 'MY_PAT', set: true });
+  assert.doesNotMatch(set.out, new RegExp(SECRET_VALUE), 'the PAT value never reaches the output');
+
+  const dc = join(p, '.devcontainer/devcontainer.json');
+  writeFileSync(dc, readFileSync(dc, 'utf8').replace(/^\s*"DEV_SETUP_GITHUB_PAT":.*\n/m, ''));
+  const none = h(['status', p, '--skip-image-check']);
+  assert.equal(none.code, 0, none.log);
+  assert.equal(none.doc.env.pat, null, 'no PAT line, no note');
 });
 
 test('SC-09: after a Preset edit, status reports drift with a per-entry diff and the exact resync entries', () => {
