@@ -364,12 +364,29 @@ test('plan-remove drops the entry with its own egress, says which domains stay a
 test('plan-remove reads only the manifest: an entry whose pinned content is unreachable plans the same, without a fetch', () => {
   const gone = { kind: 'skill', agents: ['claude'], preset: 'web', source: { github: 'acme/gone', path: 's', sha: 'e'.repeat(40) }, egress: ['x.example.com'] };
   const stay = { kind: 'skill', agents: ['claude'], source: { github: 'acme/gone', path: 't', sha: 'f'.repeat(40) } };
-  const r = h('plan-remove', project([gone, stay], ['x.example.com']), '0');
-  assert.equal(r.code, 0, r.log);
+  const reachable = h('inspect', 'acme/plugins', '--path', 'skills/plain').doc.entry;
+  const p = project([gone, stay, reachable], ['x.example.com']);
+  // A `git` first on PATH that records every call: plan-remove must make none.
+  const bin = join(root, 'git-spy');
+  const calls = join(root, 'git-calls');
+  const realGit = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$@" >> "${calls}"\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+  const spied = (...args) => {
+    rmSync(calls, { force: true });
+    const r = spawnSync('node', [HELPER, ...args], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, CLAUDE_CONFIG_DIR: '', MARKER, DEV_SETUP_GIT_BASE: gitBase, TMPDIR: TMP } });
+    return { doc: JSON.parse(r.stdout), git: existsSync(calls) };
+  };
+  assert.equal(spied('inspect', 'acme/plugins', '--path', 'skills/plain').git, true, 'the spy sees a fetch');
+  for (const i of ['0', '2']) {
+    const r = spied('plan-remove', p, i);
+    assert.equal(r.doc.ok, true);
+    assert.equal(r.git, false, `plan-remove ${i} ran no git`);
+  }
+  const r = spied('plan-remove', p, '0');
   assert.deepEqual(r.doc.dropsWithEntry, [{ domain: 'x.example.com', stillAllowedBy: ['top-level egress'] }]);
   assert.equal(r.doc.remove.preset, 'web');
   assert.match(r.doc.presetNote, /Preset "web"/);
-  assert.equal(r.doc.note, undefined, 'nothing was fetched, so nothing failed to fetch');
 });
 
 test('MIN_RELEASE_AGE_DAYS matches the image pnpm policy', async () => {
