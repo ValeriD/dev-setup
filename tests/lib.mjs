@@ -107,7 +107,10 @@ export function tryUp(dir) {
 
 export function removeProject(dir, containerId) {
   const vols = containerId ? volumeNames(containerId) : [];
-  if (containerId) run('docker', ['rm', '-f', containerId]);
+  // The derived `vsc-...-uid` image the devcontainer CLI built for this container; never the suite's own image.
+  const derived = containerId ? run('docker', ['inspect', containerId, '--format', '{{.Config.Image}}']).out.trim() : '';
+  if (containerId) run('docker', ['rm', '-fv', containerId]);
   for (const v of vols) run('docker', ['volume', 'rm', '-f', v]);
+  if (derived && derived !== IMAGE) run('docker', ['rmi', derived]);
   rmSync(dir, { recursive: true, force: true });
 }
