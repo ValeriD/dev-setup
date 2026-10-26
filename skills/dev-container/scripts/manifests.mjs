@@ -59,7 +59,7 @@ export function countTags(entries) {
 
 const PRESET_NAME = new RegExp(schema.definitions.presetName.pattern);
 
-/** Every presets/*.json, parsed and checked. A Preset with problems carries no `extensions`/`egress`. */
+/** Every presets/*.json, parsed and checked. A Preset with problems carries no `extensions`. */
 export function listPresets(repo) {
   const root = join(repo, 'presets');
   return readdirSync(root)
@@ -75,30 +75,52 @@ export function listPresets(repo) {
       else {
         problems.push(...manifestProblems(preset));
         if (typeof preset?.description !== 'string' || !preset.description.trim()) problems.push('"description" is required: one line saying what the Preset is for');
+        // Top-level egress has no owner, so resync and Preset removal could not tell which
+        // domains the Preset brought in. A Preset carries egress on its entries only.
+        if (preset && typeof preset === 'object' && 'egress' in preset) problems.push('a Preset has no top-level "egress": put each domain on the entry that needs it (its own "egress")');
         (Array.isArray(preset?.extensions) ? preset.extensions : []).forEach((e, i) => {
           if (e && typeof e === 'object' && 'preset' in e) problems.push(`${describeEntry(e, i)}: a Preset's own entries carry no "preset" tag; the tag is added when they are copied into a project`);
         });
       }
       const doc = { name, file, description: typeof preset?.description === 'string' ? preset.description : null, problems };
-      if (!problems.length) Object.assign(doc, { extensions: preset.extensions, egress: preset.egress ?? [] });
+      if (!problems.length) doc.extensions = preset.extensions;
       return doc;
     });
 }
 
 /**
- * Which domains the entries that stay still need, and why: each staying entry's own
- * `egress`, and the top-level egress of every Preset still adopted (by tag).
- * @param {{entry: object, index: number}[]} staying
- * @returns {Map<string, string[]>} domain -> reasons
+ * Which entries list each domain in their own `egress`.
+ * @param {{entry: object, index: number}[]} entries
+ * @returns {Map<string, string[]>} domain -> the entries that need it
  */
-export function egressNeededBy(repo, staying) {
-  const valid = new Map(listPresets(repo).filter((p) => !p.problems.length).map((p) => [p.name, p]));
+export function egressNeededBy(entries) {
   const neededBy = new Map();
-  const need = (d, why) => neededBy.set(d, [...new Set([...(neededBy.get(d) ?? []), why])]);
-  for (const { entry, index } of staying) for (const d of entry.egress ?? []) need(d, describeEntry(entry, index));
-  for (const t of Object.keys(countTags(staying.map((s) => s.entry)))) if (valid.has(t)) for (const d of valid.get(t).egress) need(d, `Preset "${t}"`);
+  for (const { entry, index } of entries) {
+    for (const d of entry.egress ?? []) neededBy.set(d, [...new Set([...(neededBy.get(d) ?? []), describeEntry(entry, index)])]);
+  }
   return neededBy;
 }
 
 /** True when `host` is `domain` or one of its subdomains (an allowlist domain covers its subdomains). */
 export const covers = (domain, host) => host === domain || host.endsWith(`.${domain}`);
+
+/**
+ * The egress that goes with removing the entries at `indexes`: each removed entry's own
+ * domains, once, with what keeps each allowed in the project layer (a staying entry's egress
+ * or the top-level egress, the project's own needs, which removal never touches). Pure:
+ * reads only the manifest.
+ * @returns {{domain: string, stillAllowedBy: string[]}[]}
+ */
+export function egressGoing(manifest, indexes) {
+  const removed = new Set(indexes);
+  const staying = egressNeededBy(manifest.extensions.flatMap((entry, index) => (removed.has(index) ? [] : [{ entry, index }])));
+  const topLevel = manifest.egress ?? [];
+  const own = [...new Set([...removed].flatMap((i) => manifest.extensions[i].egress ?? []))];
+  return own.map((domain) => ({
+    domain,
+    stillAllowedBy: [
+      ...new Set([...staying].filter(([d]) => covers(d, domain)).flatMap(([, by]) => by)),
+      ...(topLevel.some((d) => covers(d, domain)) ? ['top-level egress'] : []),
+    ],
+  }));
+}

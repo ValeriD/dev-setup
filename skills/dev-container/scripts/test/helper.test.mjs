@@ -217,8 +217,9 @@ function checkout(presetFiles) {
 const sha = (c) => c.repeat(40);
 const skillEntry = (path, s = sha('a')) => ({ kind: 'skill', agents: ['claude'], source: { github: 'acme/skills', path, sha: s } });
 const remoteMcp = (name, domain) => ({ kind: 'mcp-remote', agents: ['claude'], name, url: `https://${domain}/mcp`, egress: [domain] });
-const WEB = { description: 'Web app work.', extensions: [skillEntry('skills/lint'), skillEntry('skills/fmt'), remoteMcp('docs', 'docs.example.com')], egress: ['cdn.example.com', 'shared.example.com'] };
-const API = { description: 'API work.', extensions: [skillEntry('skills/fmt')], egress: ['shared.example.com'] };
+const withEgress = (e, egress) => ({ ...e, egress });
+const WEB = { description: 'Web app work.', extensions: [withEgress(skillEntry('skills/lint'), ['cdn.example.com', 'shared.example.com']), skillEntry('skills/fmt'), remoteMcp('docs', 'docs.example.com')] };
+const API = { description: 'API work.', extensions: [withEgress(skillEntry('skills/fmt'), ['shared.example.com'])] };
 
 test('presets lists every Preset with its description and reports invalid Preset files', () => {
   const c = checkout({
@@ -229,16 +230,18 @@ test('presets lists every Preset with its description and reports invalid Preset
     'tagged.json': { description: 'x', extensions: [{ ...skillEntry('s'), preset: 'web-app' }] },
     'floating.json': { description: 'x', extensions: [skillEntry('s', 'main')] },
     'broken.json': '{',
+    'top-egress.json': { description: 'x', extensions: [], egress: ['cdn.example.com'] },
     'Bad Name.json': { description: 'x', extensions: [] },
   });
   const r = c.h(['presets']);
   assert.equal(r.code, 0, r.err);
   const by = Object.fromEntries(r.doc.presets.map((p) => [p.name, p]));
-  assert.deepEqual(Object.keys(by).sort(), ['Bad Name', 'api', 'broken', 'floating', 'no-description', 'tagged', 'web-app']);
+  assert.deepEqual(Object.keys(by).sort(), ['Bad Name', 'api', 'broken', 'floating', 'no-description', 'tagged', 'top-egress', 'web-app']);
   assert.deepEqual(by['web-app'].problems, []);
   assert.equal(by['web-app'].description, 'Web app work.');
   assert.deepEqual(by['web-app'].extensions, WEB.extensions);
-  assert.deepEqual(by['web-app'].egress, WEB.egress);
+  assert.equal(by['web-app'].egress, undefined, 'a Preset\'s egress is on its entries');
+  assert.deepEqual(by['top-egress'].problems, ['a Preset has no top-level "egress": put each domain on the entry that needs it (its own "egress")']);
   assert.match(by['no-description'].problems.join(), /"description" is required/);
   assert.match(by.tagged.problems.join(), /carry no "preset" tag/);
   assert.match(by.floating.problems.join(), /not a full 40-character commit SHA/);
@@ -338,50 +341,47 @@ test('validate flags a named secret without a remoteEnv entry, or with a value i
   assert.equal(h(['validate', bare]).doc.problems.filter((x) => /has no remoteEnv entry/.test(x)).length, 2);
 });
 
-test('plan-remove-preset drops exactly the tagged entries and the egress nothing else needs, and writes nothing', () => {
+test('plan-remove-preset drops exactly the tagged entries and says which of their domains stay allowed, and writes nothing', () => {
   const c = checkout({ 'web-app.json': WEB, 'api.json': API });
-  const apiDocs = remoteMcp('api-docs', 'api.example.com');
   const own = remoteMcp('cdn-tools', 'cdn.example.com');
-  // web-app and api adopted (copied by different paths: fmt only once), plus the project's own entry.
-  const p = project(
-    [...tag('web-app', WEB.extensions), ...tag('api', [apiDocs]), own],
-    ['cdn.example.com', 'shared.example.com', 'mine.example.com'],
-  );
+  // web-app and api adopted (copied by different paths: fmt only once), plus the project's own entry and domain.
+  const p = project([...tag('web-app', WEB.extensions), ...tag('api', [remoteMcp('api-docs', 'api.example.com')]), own], ['docs.example.com']);
   const file = join(p, '.devcontainer/extensions.json');
   const before = readFileSync(file, 'utf8');
 
   const r = c.h(['plan-remove-preset', p, 'web-app']);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.doc.remove.map((x) => x.index), [0, 1, 2], 'every web-app entry, nothing else');
-  assert.deepEqual(r.doc.egress, [], 'cdn is needed by the own entry, shared by api');
-  assert.deepEqual(r.doc.keepEgress.map((k) => k.domain), ['cdn.example.com', 'shared.example.com']);
-  assert.match(r.doc.keepEgress[0].neededBy.join(), /^extensions\[4\] \(mcp-remote "cdn-tools"\)$/);
-  assert.deepEqual(r.doc.keepEgress[1].neededBy, ['Preset "api"']);
+  assert.deepEqual(r.doc.dropsWithEntries, [
+    { domain: 'cdn.example.com', stillAllowedBy: ['extensions[4] (mcp-remote "cdn-tools")'] },
+    { domain: 'shared.example.com', stillAllowedBy: [] },
+    { domain: 'docs.example.com', stillAllowedBy: ['top-level egress'] },
+  ]);
   assert.equal(readFileSync(file, 'utf8'), before, 'the plan writes nothing');
 
-  // Applying the plan as the agent would leaves a valid manifest without the tag.
+  // Applying the plan as the agent would (delete the entries; their egress goes with them) leaves a valid manifest.
   const mf = JSON.parse(before);
   mf.extensions = mf.extensions.filter((_, i) => !r.doc.remove.some((x) => x.index === i));
   writeFileSync(file, JSON.stringify(mf));
   const after = h(['validate', p]);
   assert.equal(after.code, 0, after.out);
   assert.deepEqual(after.doc.presets, { api: 1 });
-
-  // Without the overlap, the Preset's egress goes; a domain it never listed stays.
-  const solo = project(tag('web-app', WEB.extensions), ['cdn.example.com', 'shared.example.com', 'mine.example.com']);
-  assert.deepEqual(c.h(['plan-remove-preset', solo, 'web-app']).doc.egress, ['cdn.example.com', 'shared.example.com']);
-  assert.match(c.h(['plan-remove-preset', solo, 'api']).doc.error, /no entry .* is tagged/);
+  assert.deepEqual(after.doc.egress, ['docs.example.com'], 'the top-level egress is the project\'s own and stays');
+  assert.match(c.h(['plan-remove-preset', p, 'web-app']).doc.error, /no entry .* is tagged/);
 });
 
-test('a project manifest saved as a Preset (tags removed, description added) passes presets', () => {
+test('a project manifest saved as a Preset (tags and top-level egress removed, description added) passes presets', () => {
   const p = project([...tag('web-app', WEB.extensions), skillEntry('skills/own')], ['cdn.example.com']);
   const mf = JSON.parse(readFileSync(join(p, '.devcontainer/extensions.json'), 'utf8'));
   const c = checkout({});
   const asIs = { ...mf, description: 'Saved.' };
   writeFileSync(join(c.dir, 'presets/saved.json'), JSON.stringify(asIs));
-  assert.match(c.h(['presets', '--name', 'saved']).doc.preset.problems.join(), /carry no "preset" tag/, 'tags must be stripped');
+  const problems = c.h(['presets', '--name', 'saved']).doc.preset.problems.join();
+  assert.match(problems, /carry no "preset" tag/, 'tags must be stripped');
+  assert.match(problems, /no top-level "egress"/, 'the project\'s own domains do not go into a Preset');
 
-  const saved = { ...asIs, extensions: mf.extensions.map(({ preset, ...e }) => e) };
+  const { egress, ...noEgress } = asIs;
+  const saved = { ...noEgress, extensions: mf.extensions.map(({ preset, ...e }) => e) };
   writeFileSync(join(c.dir, 'presets/saved.json'), JSON.stringify(saved));
   const r = c.h(['presets', '--name', 'saved']);
   assert.equal(r.code, 0, r.out);

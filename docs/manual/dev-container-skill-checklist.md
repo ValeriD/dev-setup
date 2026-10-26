@@ -53,14 +53,14 @@ If `verify-image node` fails with `failed: provenance` while CI's own `gh attest
 
 ## Presets (SC-01 Presets part, SC-06, SC-10)
 
-These write `presets/`, so run them against a throwaway checkout, not your own: `git worktree add $T/ds && (cd $T/ds/installer && npx -y pnpm@11.0.0 install --frozen-lockfile) && (cd $T/ds/skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile) && ln -sfn $T/ds/skills/dev-container $T/claude/skills/dev-container`. Seed two Presets in `$T/ds/presets/`: `web.json` (description, two skills, an `mcp-remote` with egress `docs.example.com`, top-level egress `cdn.example.com`), `api.json` (description, one other skill, top-level egress `cdn.example.com` and `api.example.com`) and `dup.json` (description, one skill with the same directory name as one in `web`). Fake SHAs are fine; answer "no" to starting the container.
+These write `presets/`, so run them against a throwaway checkout, not your own: `git worktree add $T/ds && (cd $T/ds/installer && npx -y pnpm@11.0.0 install --frozen-lockfile) && (cd $T/ds/skills/dev-container/scripts && npx -y pnpm@11.0.0 install --frozen-lockfile) && ln -sfn $T/ds/skills/dev-container $T/claude/skills/dev-container`. Seed two Presets in `$T/ds/presets/`: `web.json` (description, two skills, one of them with egress `cdn.example.com`, and an `mcp-remote` with egress `docs.example.com`; no top-level egress), `api.json` (description, one other skill with egress `cdn.example.com` and `api.example.com`) and `dup.json` (description, one skill with the same directory name as one in `web`). Fake SHAs are fine; answer "no" to starting the container.
 
 | # | Prompt | Expect |
 | --- | --- | --- |
-| P1 | `c "/dev-container $T/p1"` after `mkdir $T/p1` | The Preset question lists `web`, `api` and `dup` with their descriptions. Pick `web` and `api`: `extensions.json` holds all four entries, tagged `web` or `api`; `egress` holds `cdn.example.com` once and `api.example.com`; `validate` ran. |
+| P1 | `c "/dev-container $T/p1"` after `mkdir $T/p1` | The Preset question lists `web`, `api` and `dup` with their descriptions. Pick `web` and `api`: `extensions.json` holds all four entries, tagged `web` or `api`, each with its own `egress` as in the Preset; the top-level `egress` is unchanged; `validate` ran. |
 | P1b | Repeat P1 on a fresh folder, pick `web` and `dup` | `validate` reports the skill name declared twice; the agent asks which Preset to leave out. |
-| P2 | Add `"broken"` as `$T/ds/presets/bad.json`, repeat P1 | `bad` is not offered; the agent names its problem. |
-| P3 | `c "/dev-container remove the web preset from $T/p1"` | Shows the plan, names the domains it proposes to drop, asks once. After yes: no `web` entries remain; `cdn.example.com` stays (api needs it); `api` entries and `api.example.com` unchanged. |
+| P2 | Add `"broken"` as `$T/ds/presets/bad.json` and `{"description":"x","extensions":[],"egress":["x.example.com"]}` as `top.json`, repeat P1 | Neither is offered; the agent names their problems (`top` has a top-level `egress`). Remove both files afterwards. |
+| P3 | `c "/dev-container remove the web preset from $T/p1"` | Shows the plan: the `web` entries go with their domains, `docs.example.com` stops being allowed, `cdn.example.com` stays allowed by the `api` entry; asks once. After yes: no `web` entries remain; `api` entries and the top-level `egress` unchanged. |
 | P4 | `c "/dev-container save the extensions of $T/p1 as preset solo"` | Asks for a description; `$T/ds/presets/solo.json` has it, no `preset` fields; `$T/p1` unchanged (`git -C $T/p1 diff` empty against before). |
 | P5 | `c "/dev-container change the description of preset api"` | Only `$T/ds/presets/api.json` changes; `$T/p1` unchanged; nothing committed in either. |
 
@@ -110,12 +110,12 @@ Rows X1–X6. Sources come from a local bare repo through the helper's test seam
 
 | # | Prompt | Expect |
 | --- | --- | --- |
-| X1 | `c "/dev-container add the plugin at p from acme/x to $T/p1"` | Shows the 40-character SHA of `main`, the `PreToolUse` hook, the `search` MCP server, `bin/tool`, `allowed-tools: Bash` and the shell-injection line (noting it is disabled in the container), `search.example.com` as needed. Asks once. `/tmp/EXECUTED` does not exist. |
+| X1 | `c "/dev-container add the plugin at p from acme/x to $T/p1"` | Shows the 40-character SHA of `main`, the `PreToolUse` hook, the `search` MCP server, `bin/tool`, `allowed-tools: Bash` and the shell-injection line (noting it is disabled in the container), `search.example.com` on the proposed entry. Asks once. `/tmp/EXECUTED` does not exist. |
 | X2 | `c --continue "no"` | `.devcontainer/extensions.json` unchanged (`git -C $T/p1 diff --quiet`). |
-| X3 | Repeat X1, answer "yes" | The entry has `"kind": "plugin"`, `"agents": ["claude"]` and the SHA, no `preset`; `search.example.com` is in the top-level `egress`; `validate` ran; nothing committed. |
+| X3 | Repeat X1, answer "yes" | The entry has `"kind": "plugin"`, `"agents": ["claude"]`, the SHA and `"egress": ["search.example.com"]`, no `preset`; the top-level `egress` is unchanged; `validate` ran; nothing committed. |
 | X4 | `c "/dev-container add that plugin for codex too in $T/p1"` | Refuses, explaining that Codex plugins are unsupported (D3); no edits. Same for `c "/dev-container add https://10.0.0.1/mcp to $T/p1"`: refused, no edits. |
 | X5 | `c "/dev-container add the remote MCP https://mcp.tools.example.com/v1 with token env TOOLS_TOKEN to $T/p1"` | Entry `mcp-remote` with `egress: ["mcp.tools.example.com"]` and `bearerTokenEnv: "TOOLS_TOKEN"`; `devcontainer.json` gains `"TOOLS_TOKEN": "${localEnv:TOOLS_TOKEN}"`; names `TOOLS_TOKEN` to export, never asks for its value; `validate` ran. |
-| X6 | `c "/dev-container remove the acme/x plugin from $T/p1"` | Shows the plan, proposes dropping `search.example.com`, asks once. After yes: the entry and that domain are gone; the `mcp-remote` entry from X5 and its egress stay; `validate` ran. |
+| X6 | `c "/dev-container remove the acme/x plugin from $T/p1"` | Shows the plan: `search.example.com` goes with the entry and stops being allowed; asks once, and the transcript shows no fetch of `acme/x`. After yes: the entry is gone; the top-level `egress`, the `mcp-remote` entry from X5 and its egress stay; `validate` ran. |
 
 ## Status and Preset resync (SC-09, SC-11, SC-12)
 
@@ -124,7 +124,7 @@ Rows S1–S5. Use the throwaway checkout `$T/ds` and the project `$T/p1` from th
 | # | Prompt | Expect |
 | --- | --- | --- |
 | S1 | `c "/dev-container status of $T/p1"` | Six parts: image (Variant, digest, a newer verified image or the failed check), Presets `web` and `api` in sync, each extension with its Pinned Ref and age (an error for fake SHAs), the egress domains, `GIT_AUTHOR_EMAIL` as missing, the container state. `secret-value-123` appears nowhere in the transcript. No edits. |
-| S2 | Edit `$T/ds/presets/web.json`: change one skill's SHA and add a domain to its `egress`. Repeat S1 | `web` is drifted, showing the changed entry (old → new SHA) and the missing domain; a resync is offered for `web` in `$T/p1` only. |
+| S2 | Edit `$T/ds/presets/web.json`: change one skill's SHA and add a domain to that skill entry's `egress`. Repeat S1 | `web` is drifted, showing the changed entry (old → new SHA, and its new domain); a resync is offered for `web` in `$T/p1` only. |
 | S3 | `c --continue "no"` | `$T/p1` unchanged (`git -C $T/p1 diff --quiet` against before S2). |
-| S4 | Repeat S2, answer "yes" | Only the `web`-tagged entries of `$T/p1` change; the new domain is in its top-level `egress`; `api` entries untouched; `validate` and `status` ran (`web` in sync); one recreate question. `$T/p2` unchanged. |
+| S4 | Repeat S2, answer "yes" | Only the `web`-tagged entries of `$T/p1` change; the new domain is on the resynced entry and the top-level `egress` is unchanged; `api` entries untouched; `validate` and `status` ran (`web` in sync); one recreate question. `$T/p2` unchanged. |
 | S5 | Start `$T/p1`'s container, allow a new domain and answer "no" to the recreate, then ask for the status | Container `running`, recreate pending: "extensions.json changed after the container started". After `H up $T/p1 --recreate`, nothing is pending. |
