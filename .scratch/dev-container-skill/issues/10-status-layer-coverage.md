@@ -7,7 +7,7 @@
 
 **Blocked by:** 08 (Container-wide Named Secrets); 11 (Per-entry egress for every kind)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
