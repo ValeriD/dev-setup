@@ -213,8 +213,7 @@ function readRemoteEnv(project) {
 function hostEnv(secrets, remoteEnv) {
   const secretDocs = secrets.map((s) => ({ name: s.name, neededBy: s.neededBy, hostEnv: s.hostEnv, set: s.hostEnv ? isSet(s.hostEnv) : false }));
   const gitDocs = GIT_IDENTITY.map((name) => {
-    const ref = typeof remoteEnv?.[name] === 'string' ? remoteEnv[name].match(LOCAL_ENV_REF) : null;
-    const hostVar = ref ? ref[1] : null;
+    const hostVar = localEnvName(remoteEnv, name);
     return { name, hostEnv: hostVar, set: hostVar ? isSet(hostVar) : false, ...(hostVar ? {} : { note: `devcontainer.json has no remoteEnv "${name}": "\${localEnv:${name}}"` }) };
   });
   const missing = [...new Set([...secretDocs, ...gitDocs].filter((d) => !d.set).map((d) => d.hostEnv ?? d.name))];
@@ -226,10 +225,16 @@ function hostEnv(secrets, remoteEnv) {
  * one is a note, not a `missing` entry: only `git push` needs it. null without such a line.
  */
 function patStatus(remoteEnv) {
-  const ref = typeof remoteEnv?.[PAT_ENV] === 'string' ? remoteEnv[PAT_ENV].match(LOCAL_ENV_REF) : null;
-  if (!ref) return null;
-  const set = isSet(ref[1]);
-  return { name: PAT_ENV, hostEnv: ref[1], set, ...(set ? {} : { note: `${ref[1]} unset: \`git push\` from the container will fail` }) };
+  const hostVar = localEnvName(remoteEnv, PAT_ENV);
+  if (!hostVar) return null;
+  const set = isSet(hostVar);
+  return { name: PAT_ENV, hostEnv: hostVar, set, ...(set ? {} : { note: `${hostVar} unset: \`git push\` from the container will fail` }) };
+}
+
+/** The host variable a remoteEnv line `"<name>": "${localEnv:VAR}"` passes, or null. */
+function localEnvName(remoteEnv, name) {
+  const ref = typeof remoteEnv?.[name] === 'string' ? remoteEnv[name].match(LOCAL_ENV_REF) : null;
+  return ref ? ref[1] : null;
 }
 
 // ---------- Container ----------

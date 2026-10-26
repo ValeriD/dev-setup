@@ -171,7 +171,9 @@ test('status notes an unset PAT host variable by name, never its value, and only
   assert.doesNotMatch(set.out, new RegExp(SECRET_VALUE), 'the PAT value never reaches the output');
 
   const dc = join(p, '.devcontainer/devcontainer.json');
-  writeFileSync(dc, readFileSync(dc, 'utf8').replace(/^\s*"DEV_SETUP_GITHUB_PAT":.*\n/m, ''));
+  const withoutPat = readFileSync(dc, 'utf8').replace(/^\s*"DEV_SETUP_GITHUB_PAT":.*\n/m, '');
+  assert.doesNotMatch(withoutPat, /DEV_SETUP_GITHUB_PAT/);
+  writeFileSync(dc, withoutPat);
   const none = h(['status', p, '--skip-image-check']);
   assert.equal(none.code, 0, none.log);
   assert.equal(none.doc.env.pat, null, 'no PAT line, no note');
