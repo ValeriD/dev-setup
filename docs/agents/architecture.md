@@ -12,3 +12,5 @@ Architecture is read with progressive disclosure:
 When looking for overlapping proposed work, search open tracker items for `type: technical-design` and the relevant `touches` value. Read the design capsule first and load the full design only when the capsule shows a real overlap.
 
 Keep `ARCHITECTURE.md` an index, not a store. An unlisted area has no indexed architecture; do not assume that it has no architecture.
+
+Rewrite the row when its module changes, and read the row again afterwards: one current version of each fact, never a new version appended beside the old. The same goes when resolving a merge conflict in an index row: keep the current-state wording once and delete the other side.
