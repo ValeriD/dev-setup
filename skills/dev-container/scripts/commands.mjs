@@ -8,8 +8,8 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { describeEntry, schema, secretNames } from '../../../installer/src/index.mjs';
-import { countTags, egressGoing, listPresets, LOCAL_ENV_REF, manifestProblems, readJson, readJsonc, readProjectManifest } from './manifests.mjs';
+import { CONTAINER_WIDE, describeEntry, schema } from '../../../installer/src/index.mjs';
+import { countTags, egressGoing, listPresets, LOCAL_ENV_REF, manifestProblems, readJson, readJsonc, readProjectManifest, secretsNeededBy } from './manifests.mjs';
 import { inspect } from './inspect.mjs';
 import { status } from './status.mjs';
 import { UsageError } from './errors.mjs';
@@ -465,7 +465,7 @@ function validate([dir], _, { repo }) {
         presetTags = countTags(manifest.extensions);
         egress = manifest.egress ?? [];
         // Only once devcontainer.json is readable: otherwise its own problem is already reported.
-        if (dcRead) secrets = checkSecrets(manifest.extensions, remoteEnv, problems);
+        if (dcRead) secrets = checkSecrets(manifest, remoteEnv, problems);
       }
     }
   }
@@ -473,22 +473,19 @@ function validate([dir], _, { repo }) {
 }
 
 /**
- * Every secret the project's MCP entries name (stdio `env`, remote `bearerTokenEnv`) must reach
- * the container through a `remoteEnv` entry that references a host variable. Pushes problems
- * (names only, never a value) and returns [{ name, neededBy, hostEnv }].
+ * Every Named Secret the project manifest declares, on an MCP entry (stdio `env`, remote
+ * `bearerTokenEnv`) or container-wide (top-level `secrets`), must reach the container through a
+ * `remoteEnv` entry that references a host variable. Pushes problems (names only, never a value)
+ * and returns [{ name, neededBy, hostEnv }], one per name.
  */
-function checkSecrets(extensions, remoteEnv, problems) {
+function checkSecrets(manifest, remoteEnv, problems) {
   const env = remoteEnv !== null && typeof remoteEnv === 'object' && !Array.isArray(remoteEnv) ? remoteEnv : null;
   if (remoteEnv !== undefined && !env) problems.push('.devcontainer/devcontainer.json: "remoteEnv" must be an object');
-  const neededBy = new Map();
-  extensions.forEach((e, i) => {
-    for (const name of secretNames(e)) neededBy.set(name, [...(neededBy.get(name) ?? []), describeEntry(e, i)]);
-  });
-  return [...neededBy].map(([name, by]) => {
+  return [...secretsNeededBy(manifest)].map(([name, by]) => {
     const value = env && Object.hasOwn(env, name) ? env[name] : undefined;
     const ref = typeof value === 'string' ? value.match(LOCAL_ENV_REF) : null;
     const fix = `"${name}": "\${localEnv:${name}}"`;
-    if (value === undefined) problems.push(`.devcontainer/devcontainer.json: secret ${name} (named by ${by.join(', ')}) has no remoteEnv entry; add ${fix}`);
+    if (value === undefined) problems.push(`.devcontainer/devcontainer.json: secret ${name} (named by ${by.map((b) => (b === CONTAINER_WIDE ? 'the top-level "secrets" (container-wide)' : b)).join(', ')}) has no remoteEnv entry; add ${fix}`);
     else if (!ref) problems.push(`.devcontainer/devcontainer.json: remoteEnv ${name} must be a host reference like ${fix}, never a value (its current value is not shown)`);
     return { name, neededBy: by, hostEnv: ref ? ref[1] : null };
   });

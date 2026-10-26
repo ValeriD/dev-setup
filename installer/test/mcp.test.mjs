@@ -13,7 +13,7 @@ mkdirSync(join(mcpRoot, 'gh/node_modules/@acme/gh-server'), { recursive: true })
 writeFileSync(join(mcpRoot, 'gh/node_modules/@acme/gh-server/package.json'), JSON.stringify({ name: '@acme/gh-server', bin: { 'gh-server': 'bin/run.mjs' } }));
 const paths = () => {
   const d = mkdtempSync(join(root, 't-'));
-  return { mcpRoot, claudeMcp: join(d, 'claude/managed-mcp.json'), codexConfig: join(d, 'codex.toml'), secretsOut: join(d, 'secrets') };
+  return { mcpRoot, claudeMcp: join(d, 'claude/managed-mcp.json'), codexConfig: join(d, 'codex.toml') };
 };
 const stdio = { kind: 'mcp', agents: ['claude', 'codex'], name: 'gh', source: { npm: '@acme/gh-server', version: '1.0.0' }, env: ['GH_TOKEN'] };
 const remote = { kind: 'mcp-remote', agents: ['claude', 'codex'], name: 'docs', url: 'https://mcp.example.com/x', egress: ['mcp.example.com'], bearerTokenEnv: 'DOCS_TOKEN' };
@@ -23,7 +23,7 @@ test('renders both kinds for both Agents, by env var name only, and keeps the ha
   const p = paths();
   writeFileSync(p.codexConfig, base);
   const r = writeMcpConfig([stdio, remote], p);
-  assert.deepEqual(r.secrets, ['GH_TOKEN', 'DOCS_TOKEN']);
+  assert.deepEqual(r.servers, ['gh', 'docs']);
   const claude = JSON.parse(readFileSync(p.claudeMcp, 'utf8')).mcpServers;
   assert.deepEqual(claude.gh, { type: 'stdio', command: 'node', args: [join(mcpRoot, 'gh/node_modules/@acme/gh-server/bin/run.mjs')], env: { GH_TOKEN: '${GH_TOKEN}' } });
   assert.deepEqual(claude.docs, { type: 'http', url: 'https://mcp.example.com/x', headers: { Authorization: 'Bearer ${DOCS_TOKEN}' } });
@@ -33,7 +33,6 @@ test('renders both kinds for both Agents, by env var name only, and keeps the ha
   assert.equal(codex.sandbox_mode, 'danger-full-access');
   assert.deepEqual(codex.mcp_servers.gh.env_vars, ['GH_TOKEN']);
   assert.equal(codex.mcp_servers.docs.bearer_token_env_var, 'DOCS_TOKEN');
-  assert.equal(readFileSync(p.secretsOut, 'utf8'), 'GH_TOKEN\nDOCS_TOKEN\n');
 });
 
 test('rendering again replaces the generated block instead of appending', () => {

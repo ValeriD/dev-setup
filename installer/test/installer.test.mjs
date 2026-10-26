@@ -10,8 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 const CLI = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
 const POLICY = fileURLToPath(new URL('../../base/claude/managed-settings.json', import.meta.url));
-/** Claude plugin/hook outputs redirected into a scratch directory (the defaults are system paths). */
-const claudeArgs = (d) => ['--claude-policy', POLICY, '--claude-settings', join(d, 'managed-settings.json'), '--claude-dropin', join(d, 'dropin.json'), '--marketplaces', join(d, 'mkts'), '--hooks', join(d, 'hooks')];
+/** Claude plugin/hook and MCP outputs and the secrets list redirected into a scratch directory (the defaults are system paths). */
+const outArgs = (d) => ['--claude-mcp', join(d, 'managed-mcp.json'), '--codex-config', join(d, 'codex.toml'), '--mcp-root', join(d, 'mcp'), '--claude-policy', POLICY, '--claude-settings', join(d, 'managed-settings.json'), '--claude-dropin', join(d, 'dropin.json'), '--marketplaces', join(d, 'mkts'), '--hooks', join(d, 'hooks'), '--secrets-out', join(d, 'secrets')];
 const SCHEMA = fileURLToPath(new URL('../extensions.schema.json', import.meta.url));
 const root = mkdtempSync(join(tmpdir(), 'installer-test-'));
 const gitBase = join(root, 'git');
@@ -57,8 +57,8 @@ function install(...manifests) {
     writeFileSync(f, typeof m === 'string' ? m : JSON.stringify(m));
     return f;
   });
-  const dirs = { claude: join(d, 'claude'), codex: join(d, 'codex'), egress: join(d, 'out/allowlist.txt'), marker: join(d, 'marker') };
-  const args = [CLI, 'install', '--mode', 'build', '--git-base', gitBase, '--claude-skills', dirs.claude, '--codex-skills', dirs.codex, '--egress-out', dirs.egress, ...claudeArgs(d)];
+  const dirs = { claude: join(d, 'claude'), codex: join(d, 'codex'), egress: join(d, 'out/allowlist.txt'), marker: join(d, 'marker'), secrets: join(d, 'secrets') };
+  const args = [CLI, 'install', '--mode', 'build', '--git-base', gitBase, '--claude-skills', dirs.claude, '--codex-skills', dirs.codex, '--egress-out', dirs.egress, ...outArgs(d)];
   for (const f of files) args.push('--manifest', f);
   const r = spawnSync('node', args, { encoding: 'utf8', env: { ...process.env, MARKER: dirs.marker } });
   return { code: r.status, out: r.stdout, err: r.stderr, dirs, files };
@@ -228,9 +228,9 @@ test('the library entry point exports the core functions for host-side reuse', a
 function start(build, project, d = join(root, `start${n++}`)) {
   mkdirSync(d, { recursive: true });
   const write = (name, m) => { const f = join(d, name); writeFileSync(f, JSON.stringify(m)); return f; };
-  const dirs = { claude: join(d, 'claude'), codex: join(d, 'codex'), egress: join(d, 'out/allowlist.txt') };
+  const dirs = { claude: join(d, 'claude'), codex: join(d, 'codex'), egress: join(d, 'out/allowlist.txt'), secrets: join(d, 'secrets') };
   const r = spawnSync('node', [CLI, 'install', '--mode', 'start', '--git-base', gitBase, '--claude-skills', dirs.claude, '--codex-skills', dirs.codex,
-    '--egress-out', dirs.egress, ...claudeArgs(d), '--manifest', write('build.json', build), '--project', write('project.json', project)], { encoding: 'utf8' });
+    '--egress-out', dirs.egress, ...outArgs(d), '--manifest', write('build.json', build), '--project', write('project.json', project)], { encoding: 'utf8' });
   return { code: r.status, err: r.stderr, dirs, d };
 }
 
@@ -258,4 +258,39 @@ test('start mode rejects a project skill that collides with a build-layer skill,
   assert.equal(first.code, 0, first.err);
   const again = start({ extensions: [] }, { extensions: [skill()] }, first.d);
   assert.equal(again.code, 0, again.err);
+});
+
+// ---------- Container-wide Named Secrets ----------
+
+const remote = (name, token) => ({ kind: 'mcp-remote', agents: ['claude', 'codex'], name, url: `https://${name}.example.com/mcp`, egress: [`${name}.example.com`], bearerTokenEnv: token });
+
+test('top-level secrets are listed by both modes without any MCP server, and no MCP config is written', () => {
+  const b = install({ extensions: [], secrets: ['BASE_WIDE'] }, { extensions: [skill()], secrets: ['VARIANT_WIDE', 'BASE_WIDE'] });
+  assert.equal(b.code, 0, b.err);
+  assert.equal(readFileSync(b.dirs.secrets, 'utf8'), 'BASE_WIDE\tcontainer-wide\nVARIANT_WIDE\tcontainer-wide\n');
+  assert.match(b.out, /2 secret name\(s\)/);
+
+  const s = start({ extensions: [], secrets: ['BASE_WIDE'] }, { extensions: [], secrets: ['PROJECT_WIDE'] });
+  assert.equal(s.code, 0, s.err);
+  assert.equal(readFileSync(s.dirs.secrets, 'utf8'), 'BASE_WIDE\tcontainer-wide\nPROJECT_WIDE\tcontainer-wide\n', 'start mode lists every layer');
+  assert.ok(!existsSync(join(s.d, 'managed-mcp.json')), 'no MCP, no exclusive MCP config');
+
+  const none = install({ extensions: [] });
+  assert.equal(none.code, 0, none.err);
+  assert.equal(readFileSync(none.dirs.secrets, 'utf8'), '', 'an empty list replaces any older one');
+});
+
+test('a name an MCP server and the top level both declare is listed once with both declarers', () => {
+  const r = start({ extensions: [remote('docs', 'DOCS_TOKEN')] }, { extensions: [], secrets: ['DOCS_TOKEN', 'OTHER'] });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(readFileSync(r.dirs.secrets, 'utf8'), 'DOCS_TOKEN\tMCP server "docs", container-wide\nOTHER\tcontainer-wide\n');
+});
+
+test('a top-level secret must be an env var name, once', () => {
+  const r = install({ extensions: [], secrets: ['lower-case'] });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /manifest\/secrets\/0 must match pattern/);
+  const dup = install({ extensions: [], secrets: ['A', 'A'] });
+  assert.equal(dup.code, 1);
+  assert.match(dup.err, /must NOT have duplicate items/);
 });

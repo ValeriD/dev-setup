@@ -52,7 +52,7 @@ function main(argv) {
     marketplaces: values.marketplaces,
     hooks: values.hooks,
   });
-  console.log(`installer: ${r.skills.length} skill(s), ${r.plugins.length} plugin(s), ${r.hooks} hook(s), ${r.mcp.length} MCP package(s), ${r.egress.length} egress domain(s)`);
+  console.log(`installer: ${r.skills.length} skill(s), ${r.plugins.length} plugin(s), ${r.hooks} hook(s), ${r.mcp.length} MCP package(s), ${r.egress.length} egress domain(s), ${r.secrets.length} secret name(s)`);
 }
 
 try {

@@ -231,17 +231,20 @@ test('presets lists every Preset with its description and reports invalid Preset
     'floating.json': { description: 'x', extensions: [skillEntry('s', 'main')] },
     'broken.json': '{',
     'top-egress.json': { description: 'x', extensions: [], egress: ['cdn.example.com'] },
+    'top-secrets.json': { description: 'x', extensions: [], secrets: ['WIDE_TOKEN'] },
     'Bad Name.json': { description: 'x', extensions: [] },
   });
   const r = c.h(['presets']);
   assert.equal(r.code, 0, r.err);
   const by = Object.fromEntries(r.doc.presets.map((p) => [p.name, p]));
-  assert.deepEqual(Object.keys(by).sort(), ['Bad Name', 'api', 'broken', 'floating', 'no-description', 'tagged', 'top-egress', 'web-app']);
+  assert.deepEqual(Object.keys(by).sort(), ['Bad Name', 'api', 'broken', 'floating', 'no-description', 'tagged', 'top-egress', 'top-secrets', 'web-app']);
   assert.deepEqual(by['web-app'].problems, []);
   assert.equal(by['web-app'].description, 'Web app work.');
   assert.deepEqual(by['web-app'].extensions, WEB.extensions);
   assert.equal(by['web-app'].egress, undefined, 'a Preset\'s egress is on its entries');
   assert.deepEqual(by['top-egress'].problems, ['a Preset has no top-level "egress": put each domain on the entry that needs it (its own "egress")']);
+  assert.deepEqual(by['top-secrets'].problems, ['a Preset has no top-level "secrets": a secret an MCP server needs goes on that entry ("env" or "bearerTokenEnv"); a container-wide one is the project\'s own']);
+  assert.equal(by['top-secrets'].extensions, undefined, 'a refused Preset offers nothing to copy');
   assert.match(by['no-description'].problems.join(), /"description" is required/);
   assert.match(by.tagged.problems.join(), /carry no "preset" tag/);
   assert.match(by.floating.problems.join(), /not a full 40-character commit SHA/);
@@ -261,12 +264,12 @@ test('this checkout has a presets/ directory whose Presets are all valid', () =>
 });
 
 /** A rendered project whose manifest holds the given entries and egress. */
-function project(extensions, egress) {
+function project(extensions, egress, secrets) {
   const p = dir();
   assert.equal(h(['render-template', 'node', p, '--image', IMAGE]).code, 0);
   const file = join(p, '.devcontainer/extensions.json');
   const mf = JSON.parse(readFileSync(file, 'utf8'));
-  writeFileSync(file, JSON.stringify({ ...mf, extensions, ...(egress ? { egress } : {}) }, null, 2));
+  writeFileSync(file, JSON.stringify({ ...mf, extensions, ...(egress ? { egress } : {}), ...(secrets ? { secrets } : {}) }, null, 2));
   return p;
 }
 const tag = (preset, entries) => entries.map((e) => ({ ...e, preset }));
@@ -309,7 +312,7 @@ test('a domain allowed in the project manifest is reported by validate; a URL is
 test('validate passes a named secret with a ${localEnv:} remoteEnv entry and keeps the Template comments', () => {
   const p = project([stdioMcp('search', ['FOO']), { ...remoteMcp('docs', 'docs.example.com'), bearerTokenEnv: 'DOCS_TOKEN' }]);
   const text = addRemoteEnv(p, ['"FOO": "${localEnv:FOO}"', '"DOCS_TOKEN": "${localEnv:MY_DOCS_TOKEN}"']);
-  assert.match(text, /\/\/ MCP secrets:/);
+  assert.match(text, /\/\/ Secrets: an Extension Manifest names/);
   const r = h(['validate', p]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.doc.secrets, [
@@ -339,6 +342,38 @@ test('validate flags a named secret without a remoteEnv entry, or with a value i
     '.devcontainer/extensions.json': JSON.stringify({ extensions: [stdioMcp('a', ['ONE', 'TWO'])] }),
   });
   assert.equal(h(['validate', bare]).doc.problems.filter((x) => /has no remoteEnv entry/.test(x)).length, 2);
+});
+
+test('validate requires a remoteEnv host reference for a container-wide secret too, never printing the value', () => {
+  const missing = h(['validate', project([], undefined, ['WIDE_TOKEN'])]);
+  assert.equal(missing.code, 1);
+  assert.match(missing.doc.problems.join(), /secret WIDE_TOKEN \(named by the top-level "secrets" \(container-wide\)\) has no remoteEnv entry; add "WIDE_TOKEN": "\$\{localEnv:WIDE_TOKEN\}"/);
+  assert.deepEqual(missing.doc.secrets, [{ name: 'WIDE_TOKEN', neededBy: ['container-wide'], hostEnv: null }]);
+
+  for (const value of ['s3cr3t-value', '${localEnv:WIDE_TOKEN:s3cr3t-value}']) {
+    const p = project([], undefined, ['WIDE_TOKEN']);
+    addRemoteEnv(p, [`"WIDE_TOKEN": ${JSON.stringify(value)}`]);
+    const r = h(['validate', p]);
+    assert.equal(r.code, 1, value);
+    assert.match(r.doc.problems.join(), /remoteEnv WIDE_TOKEN must be a host reference/);
+    assert.doesNotMatch(r.out + r.err, /s3cr3t/, 'a value is never echoed');
+  }
+
+  const ok = project([], undefined, ['WIDE_TOKEN']);
+  addRemoteEnv(ok, ['"WIDE_TOKEN": "${localEnv:WIDE_TOKEN}"']);
+  const r = h(['validate', ok]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.doc.secrets, [{ name: 'WIDE_TOKEN', neededBy: ['container-wide'], hostEnv: 'WIDE_TOKEN' }]);
+
+  assert.match(h(['validate', project([], undefined, ['lower'])]).doc.problems.join(), /secrets\/0 must match pattern/);
+});
+
+test('a name both an MCP entry and the top level declare validates and is listed once with both declarers', () => {
+  const p = project([{ ...remoteMcp('docs', 'docs.example.com'), bearerTokenEnv: 'DOCS_TOKEN' }], undefined, ['DOCS_TOKEN']);
+  addRemoteEnv(p, ['"DOCS_TOKEN": "${localEnv:DOCS_TOKEN}"']);
+  const r = h(['validate', p]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.doc.secrets, [{ name: 'DOCS_TOKEN', neededBy: ['extensions[0] (mcp-remote "docs")', 'container-wide'], hostEnv: 'DOCS_TOKEN' }]);
 });
 
 test('plan-remove-preset drops exactly the tagged entries and says which of their domains stay allowed, and writes nothing', () => {

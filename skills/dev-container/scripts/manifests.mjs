@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
-import { describeEntry, ManifestError, mergeLayers, schema, validateManifest } from '../../../installer/src/index.mjs';
+import { describeEntry, ManifestError, mergeLayers, schema, secretDeclarers, validateManifest } from '../../../installer/src/index.mjs';
 
 /** Strict JSON (Extension Manifests and Presets are plain JSON): { value } or { error }. */
 export function readJson(file) {
@@ -78,6 +78,8 @@ export function listPresets(repo) {
         // Top-level egress has no owner, so resync and Preset removal could not tell which
         // domains the Preset brought in. A Preset carries egress on its entries only.
         if (preset && typeof preset === 'object' && 'egress' in preset) problems.push('a Preset has no top-level "egress": put each domain on the entry that needs it (its own "egress")');
+        // Container-wide secrets are the project's own: a Preset's secrets are on its MCP entries.
+        if (preset && typeof preset === 'object' && 'secrets' in preset) problems.push('a Preset has no top-level "secrets": a secret an MCP server needs goes on that entry ("env" or "bearerTokenEnv"); a container-wide one is the project\'s own');
         (Array.isArray(preset?.extensions) ? preset.extensions : []).forEach((e, i) => {
           if (e && typeof e === 'object' && 'preset' in e) problems.push(`${describeEntry(e, i)}: a Preset's own entries carry no "preset" tag; the tag is added when they are copied into a project`);
         });
@@ -100,6 +102,13 @@ export function egressNeededBy(entries) {
   }
   return neededBy;
 }
+
+/**
+ * Who declares each Named Secret of a manifest: its MCP entries (stdio `env`, remote
+ * `bearerTokenEnv`) and its top-level `secrets` ("container-wide"). A name may have both.
+ * @returns {Map<string, string[]>} name -> declarers, in first-seen order
+ */
+export const secretsNeededBy = (manifest) => secretDeclarers(manifest.extensions, manifest.secrets ?? [], describeEntry);
 
 /** True when `host` is `domain` or one of its subdomains (an allowlist domain covers its subdomains). */
 export const covers = (domain, host) => host === domain || host.endsWith(`.${domain}`);
