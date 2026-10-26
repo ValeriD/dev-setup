@@ -8,7 +8,7 @@
 
 **Blocked by:** 10 (`status` shows which layer covers secrets and egress), and through it 08 and 11
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
