@@ -11,15 +11,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_GIT_BASE, describeEntry, fetchBySha, repoUrl } from '../../../installer/src/index.mjs';
-import { readJsonc, validate, verifyImage } from './commands.mjs';
 import { lastObject, npmView } from './inspect.mjs';
-import { listPresets, readProjectManifest } from './manifests.mjs';
+import { egressNeededBy, listPresets, LOCAL_ENV_REF, readJsonc, readProjectManifest } from './manifests.mjs';
 
 /** Written by the start-up step (base/egress/start.sh): the hash of the project manifest it applied, or "none". */
 export const APPLIED_HASH_PATH = '/run/dev-setup/applied-manifest';
 /** Host variables commits inside the container need (design: "Host git identity"). */
 export const GIT_IDENTITY = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL'];
-const LOCAL_ENV_REF = /^\$\{localEnv:([A-Za-z_][A-Za-z0-9_]*)\}$/;
 const DAY = 86400e3;
 
 const gitBase = () => process.env.DEV_SETUP_GIT_BASE || DEFAULT_GIT_BASE;
@@ -27,46 +25,55 @@ const isSet = (name) => typeof process.env[name] === 'string' && process.env[nam
 const ageDays = (iso) => (iso ? Math.floor((Date.now() - Date.parse(iso)) / DAY) : null);
 const sha256 = (buf) => `sha256:${createHash('sha256').update(buf).digest('hex')}`;
 
+/**
+ * `ctx` carries `repo` plus the `validate` and `verifyImage` subcommands, handed over by
+ * commands.mjs so this module does not import it back.
+ */
 export function status([dir], { 'skip-image-check': skipImage }, ctx) {
   const project = resolve(dir);
   const read = readProjectManifest(project);
   if (read.error) return { doc: { ok: false, dir: project, ...read } };
   const { manifest } = read;
-  const v = validate([project], {}, ctx).doc;
+  const validated = ctx.validate([project], {}, ctx).doc;
   const remoteEnv = readRemoteEnv(project);
+  const neededBy = egressNeededBy(ctx.repo, manifest.extensions.map((entry, index) => ({ entry, index })));
 
   return {
     doc: {
       ok: true,
       dir: project,
-      problems: v.problems,
-      image: imageStatus(v, skipImage, ctx),
+      problems: validated.problems,
+      image: imageStatus(validated, skipImage, ctx),
       presets: presetStatus(ctx.repo, manifest),
       extensions: extensionAges(manifest.extensions),
       egress: {
-        topLevel: manifest.egress ?? [],
+        // neededBy: the entries and adopted Presets that list the domain; empty when only the project allowed it.
+        topLevel: (manifest.egress ?? []).map((domain) => ({ domain, neededBy: neededBy.get(domain) ?? [] })),
         entries: manifest.extensions.flatMap((e, i) => (e.egress ?? []).map((domain) => ({ domain, entry: describeEntry(e, i) }))),
       },
-      env: hostEnv(v.secrets ?? [], remoteEnv),
-      container: containerStatus(project, v.image, remoteEnv),
+      env: hostEnv(validated.secrets ?? [], remoteEnv),
+      container: containerStatus(project, validated.image, remoteEnv),
     },
   };
 }
 
 // ---------- Image ----------
 
-function imageStatus(v, skip, ctx) {
-  const doc = { current: v.image ?? null, variant: v.variant ?? null };
+function imageStatus(validated, skip, ctx) {
+  const doc = { current: validated.image ?? null, variant: validated.variant ?? null };
   if (skip) return { ...doc, latest: null, newerVerified: null, note: 'registry not checked (--skip-image-check)' };
-  if (!v.variant) return { ...doc, latest: null, newerVerified: null, note: 'the image is not one of this repository\'s Variants; nothing to compare with' };
-  const r = verifyImage([v.variant], { current: v.image }, ctx).doc;
+  if (!doc.variant) return { ...doc, latest: null, newerVerified: null, note: 'the image is not one of this repository\'s Variants; nothing to compare with' };
+  const r = ctx.verifyImage([doc.variant], { current: doc.current }, ctx).doc;
   if (!r.ok) return { ...doc, latest: { ok: false, failed: r.failed, error: r.error, ...(r.image ? { image: r.image } : {}) }, newerVerified: null };
-  const newer = !r.upToDate && r.changes?.newer !== false;
+  const newer = r.changes?.newer ?? null;
   return {
     ...doc,
-    latest: { ok: true, verified: true, image: r.image, revision: r.revision, upToDate: r.upToDate, newer: r.changes?.newer ?? null, versions: r.changes?.versions ?? null },
-    // A verified image that is not older than the current one (newer, or not comparable by revision).
-    newerVerified: newer,
+    latest: {
+      ok: true, verified: true, image: r.image, revision: r.revision, upToDate: r.upToDate ?? null, newer, versions: r.changes?.versions ?? null,
+      ...(r.changes?.logNote ? { note: r.changes.logNote } : r.current?.error ? { note: `the current image could not be read: ${r.current.error}` } : {}),
+    },
+    // true only when the verified image is a later revision; null when that cannot be told.
+    newerVerified: r.upToDate ? false : newer,
   };
 }
 
@@ -80,7 +87,7 @@ function canon(v) {
 }
 
 /** The same extension at any Pinned Ref: a change, not an addition plus a removal. */
-function identity(e) {
+function extensionKey(e) {
   const { sha, version, ...where } = e.source ?? {};
   return canon([e.kind, where, e.url ?? null]);
 }
@@ -112,7 +119,7 @@ function presetStatus(repo, manifest) {
     const added = [];
     const changed = [];
     for (const want of pending) {
-      const hit = take((t) => identity(t.entry) === identity(want));
+      const hit = take((t) => extensionKey(t.entry) === extensionKey(want));
       if (hit) changed.push({ index: hit.index, from: hit.entry, to: want, describe: describeEntry(want, hit.index) });
       else added.push(want);
     }
@@ -219,6 +226,20 @@ function docker(args) {
   return { code: r.status, out: (r.stdout ?? '').trim(), err: (r.stderr || r.error?.message || '').trim() };
 }
 
+/** The applied hash of a running container, read as `node`, or null. */
+function execRead(id) {
+  const r = docker(['exec', '-u', 'node', id, 'cat', APPLIED_HASH_PATH]);
+  return r.code === 0 ? r.out : null;
+}
+
+/** The applied hash of a stopped container: `docker cp` streams a one-file tar (512-byte header, size in octal at 124). */
+function copyRead(id) {
+  const r = spawnSync('docker', ['cp', `${id}:${APPLIED_HASH_PATH}`, '-']);
+  if (r.status !== 0 || !r.stdout || r.stdout.length < 512) return null;
+  const size = parseInt(r.stdout.subarray(124, 136).toString('latin1').replace(/\0.*$/s, '').trim(), 8);
+  return Number.isFinite(size) ? r.stdout.subarray(512, 512 + size).toString('utf8').trim() : null;
+}
+
 const layers = (ref) => {
   const r = docker(['image', 'inspect', ref, '--format', '{{json .RootFS.Layers}}']);
   return r.code === 0 ? JSON.parse(r.out) : null;
@@ -251,7 +272,8 @@ function containerStatus(project, configured, remoteEnv) {
   const have = imageId ? layers(imageId) : null;
   const want = configured ? layers(configured) : null;
   if (!configured || !have) unknown.push('the container image could not be compared');
-  else if (!want || want.some((l, i) => have[i] !== l)) reasons.push(`devcontainer.json names ${configured}, which is not the image the container runs`);
+  else if (!want) reasons.push(`devcontainer.json names ${configured}, which is not in the local image store, so it is not the image the container runs (a recreate pulls it)`);
+  else if (want.some((l, i) => have[i] !== l)) reasons.push(`devcontainer.json names ${configured}, which is not the image the container runs`);
 
   // remoteEnv: the CLI records the config's own properties as the last metadata entry.
   let meta = null;
@@ -263,13 +285,9 @@ function containerStatus(project, configured, remoteEnv) {
     if (canon(was) !== canon(remoteEnv)) reasons.push('remoteEnv in devcontainer.json changed since the container was created (secrets or git identity)');
   } else unknown.push('the container has no devcontainer metadata to compare remoteEnv with');
 
-  if (state !== 'running') {
-    unknown.push(`the container is ${state}, so its applied manifest cannot be read; starting it re-applies the manifest, and only a recreate removes entries dropped since`);
-    return { ...doc, manifestHash, appliedHash: null, pendingRecreate: reasons.length ? true : null, reasons, unknown };
-  }
-  const hash = docker(['exec', '-u', 'node', id, 'cat', APPLIED_HASH_PATH]);
-  const appliedHash = hash.code === 0 ? hash.out : null;
-  if (appliedHash === null) unknown.push(`${APPLIED_HASH_PATH} is missing (an image from before the applied hash existed); recreate to compare`);
+  // Running: read as node. Stopped: copy the file out (a start would re-apply the manifest).
+  const appliedHash = state === 'running' ? execRead(id) : copyRead(id);
+  if (appliedHash === null) unknown.push(`${APPLIED_HASH_PATH} cannot be read from the ${state} container (an image from before the applied hash existed, or a container that never finished starting); recreate to compare`);
   else if (appliedHash !== manifestHash) reasons.push('.devcontainer/extensions.json changed after the container started');
   const pendingRecreate = reasons.length ? true : unknown.length ? null : false;
   return { ...doc, manifestHash, appliedHash, pendingRecreate, reasons, unknown };

@@ -47,7 +47,16 @@
   - a different image. The devcontainer CLI runs a derived `vsc-…-uid` image, so the check is that the configured image's layers are a prefix of the container image's;
   - a changed `remoteEnv` (a secret or git identity line), compared with the config entry the CLI records last in the container's `devcontainer.metadata` label. This depends on how CLI 0.89.0 records that label; if no metadata is found, the result goes under `unknown`.
 - `--skip-image-check` skips only the registry check. It is there for the helper tests (no network) and for a quick view, and the skill says when it was used.
-- Stopped container: `pendingRecreate` comes back `null`, not read through `docker cp`. Starting the container re-runs the start-up step, which applies the manifest again.
+- Stopped container: the hash is read with `docker cp` instead of `docker exec`, so a pending recreate is still reported.
+
+**Review follow-up (same day):**
+
+- The circular import is gone: `readJsonc` and `LOCAL_ENV_REF` moved to `manifests.mjs`, and `commands.mjs` passes `validate` and `verifyImage` to `status`.
+- `newerVerified` is now `true` only when the verified image is a later revision. It is `false` when up to date, and `null` (with a note) when revisions cannot be compared or the check failed. A new test covers the failed check through `status`, using a checkout whose Template points at an unreachable registry.
+- A configured image missing from the local store is still reported as pending (the usual case after an image update), with wording that says so.
+- `egress.topLevel` now lists each domain with `neededBy` (entries and adopted Presets, via `egressNeededBy`). This meets the design's note that pruning is checked through `status`'s "egress needed by" output.
+- The resync test now applies `resync.entries` in place, as `references/status.md` says, and checks the entry order. The mechanical check (no `cwd`, no `import(`) now covers `status.mjs`.
+- Still open: a domain dropped from a Preset's top-level egress is not detected as drift (top-level egress has no tag; see "Belongs elsewhere").
 
 **Belongs elsewhere:**
 

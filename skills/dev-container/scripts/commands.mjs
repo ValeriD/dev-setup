@@ -8,9 +8,8 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
 import { describeEntry, schema, secretNames } from '../../../installer/src/index.mjs';
-import { countTags, egressNeededBy, listPresets, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
+import { countTags, egressNeededBy, listPresets, LOCAL_ENV_REF, manifestProblems, readJson, readJsonc, readProjectManifest } from './manifests.mjs';
 import { inspect, planRemove } from './inspect.mjs';
 import { status } from './status.mjs';
 import { UsageError } from './errors.mjs';
@@ -87,7 +86,8 @@ const COMMANDS = {
     fn: inspect,
   },
   'plan-remove': { positionals: 2, options: {}, fn: planRemove },
-  status: { positionals: 1, options: { 'skip-image-check': { type: 'boolean' } }, fn: status },
+  // status builds on validate and verify-image, handed over so status.mjs does not import this module.
+  status: { positionals: 1, options: { 'skip-image-check': { type: 'boolean' } }, fn: (a, o, ctx) => status(a, o, { ...ctx, validate, verifyImage }) },
   'vscode-settings': { positionals: 0, options: { settings: { type: 'string' } }, fn: vscodeSettings },
   up: { positionals: 1, options: { recreate: { type: 'boolean' } }, fn: up },
   'first-lockfile': { positionals: 1, options: {}, fn: firstLockfile },
@@ -292,7 +292,7 @@ const SIGNER_ARGS = ['--certificate-identity-regexp', SIGNER.identityRegexp, '--
  * Fails closed: any resolve error, missing tool, missing or foreign signature,
  * or missing provenance is `ok: false`. There is deliberately no option to skip a check.
  */
-export function verifyImage([variant], { ref, current }, { repo }) {
+function verifyImage([variant], { ref, current }, { repo }) {
   const source = variantSource(repo, variant, ref);
   const fail = (failed, error, extra = {}) => ({ doc: { ok: false, verified: false, variant, ref: source, failed, error, ...extra } });
 
@@ -421,12 +421,6 @@ function renderTemplate([variant, dir], { image, option = [], replace }, { repo 
 
 // ---------- Validation ----------
 
-export function readJsonc(file) {
-  const errors = [];
-  const value = parseJsonc(readFileSync(file, 'utf8'), errors, { allowTrailingComma: true, disallowComments: false });
-  return { value, errors: errors.map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`) };
-}
-
 /** The Variant whose Template points at the same image repository, or null. */
 function variantOfImage(repo, image) {
   if (typeof image !== 'string') return null;
@@ -434,7 +428,7 @@ function variantOfImage(repo, image) {
   return listVariants(repo).find((v) => v.template && repositoryOf(templateManifest(repo, v.name).options?.image?.default ?? '') === want)?.name ?? null;
 }
 
-export function validate([dir], _, { repo }) {
+function validate([dir], _, { repo }) {
   const project = resolve(dir);
   const problems = [];
   const dcFile = join(project, '.devcontainer/devcontainer.json');
@@ -477,9 +471,6 @@ export function validate([dir], _, { repo }) {
   }
   return { doc: { ok: problems.length === 0, dir: project, image, variant: variantOfImage(repo, image), entries, presets: presetTags, egress, secrets, problems } };
 }
-
-/** `${localEnv:NAME}` with no default: a default would be a value committed to the repository. */
-const LOCAL_ENV_REF = /^\$\{localEnv:([A-Za-z_][A-Za-z0-9_]*)\}$/;
 
 /**
  * Every secret the project's MCP entries name (stdio `env`, remote `bearerTokenEnv`) must reach

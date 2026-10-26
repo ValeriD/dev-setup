@@ -58,22 +58,33 @@ before(async () => {
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  // A checkout whose presets/ the tests control; everything else links to this one.
-  const dir = join(root, 'checkout');
+  c = checkout('checkout');
+});
+
+/** A checkout whose presets/ the tests control; everything else links to this one, or `templates` is a copy. */
+function checkout(name, { imageDefault } = {}) {
+  const dir = join(root, name);
   mkdirSync(dir);
-  for (const d of ['variants', 'templates', 'installer']) symlinkSync(join(REPO, d), join(dir, d));
+  for (const d of ['variants', 'installer', ...(imageDefault ? [] : ['templates'])]) symlinkSync(join(REPO, d), join(dir, d));
+  if (imageDefault) {
+    cpSync(join(REPO, 'templates'), join(dir, 'templates'), { recursive: true });
+    const f = join(dir, 'templates/node/devcontainer-template.json');
+    const t = JSON.parse(readFileSync(f, 'utf8'));
+    t.options.image.default = imageDefault;
+    writeFileSync(f, JSON.stringify(t));
+  }
   cpSync(SKILL, join(dir, 'skills/dev-container'), { recursive: true });
   mkdirSync(join(dir, 'presets'));
-  c = { dir, helper: join(dir, 'skills/dev-container/scripts/dev-container.mjs') };
-});
+  return { dir, helper: join(dir, 'skills/dev-container/scripts/dev-container.mjs') };
+}
 
 after(() => {
   stub?.kill();
   rmSync(root, { recursive: true, force: true });
 });
 
-function h(args, env = {}) {
-  const r = spawnSync('node', [c.helper, ...args], {
+function h(args, env = {}, via = c) {
+  const r = spawnSync('node', [via.helper, ...args], {
     encoding: 'utf8',
     env: {
       ...process.env, HOME: home, CLAUDE_CONFIG_DIR: '', DEV_SETUP_GIT_BASE: gitBase, GIT_AUTHOR_NAME: '', GIT_AUTHOR_EMAIL: '',
@@ -94,10 +105,10 @@ const remote = { kind: 'mcp-remote', agents: ['claude'], name: 'docs', url: 'htt
 const tag = (name, entries) => entries.map((e) => ({ ...e, preset: name }));
 
 let n = 0;
-function project(extensions, egress, remoteEnv = {}) {
+function project(extensions, egress, remoteEnv = {}, image = IMAGE) {
   const p = join(root, `p${n++}`);
   mkdirSync(p);
-  assert.equal(h(['render-template', 'node', p, '--image', IMAGE]).code, 0);
+  assert.equal(h(['render-template', 'node', p, '--image', image]).code, 0);
   const mf = join(p, '.devcontainer/extensions.json');
   writeFileSync(mf, JSON.stringify({ ...JSON.parse(readFileSync(mf, 'utf8')), extensions, ...(egress ? { egress } : {}) }, null, 2));
   const dc = join(p, '.devcontainer/devcontainer.json');
@@ -128,7 +139,7 @@ test('status reports Pinned Ref ages, egress, and unset host env names without p
   assert.equal(rem.pinnedRef, null);
   assert.match(rem.note, /D2/);
 
-  assert.deepEqual(d.egress.topLevel, ['cdn.example.com']);
+  assert.deepEqual(d.egress.topLevel, [{ domain: 'cdn.example.com', neededBy: ['Preset "web"'] }]);
   assert.deepEqual(d.egress.entries.map((e) => e.domain), ['api.search.example.com', 'docs.example.com']);
 
   assert.deepEqual(d.env.secrets.map((s) => [s.name, s.hostEnv, s.set]), [['SEARCH_TOKEN', 'SEARCH_TOKEN', true]]);
@@ -151,7 +162,9 @@ test('SC-09: after a Preset edit, status reports drift with a per-entry diff and
 
   const inSync = h(['status', p, '--skip-image-check']);
   assert.equal(inSync.code, 0, inSync.log);
-  assert.deepEqual(inSync.doc.presets, [{ name: 'site', entries: 2, indexes: [1, 2], state: 'in-sync' }]);
+  assert.equal(inSync.doc.presets[0].state, 'in-sync');
+  assert.deepEqual(inSync.doc.presets[0].indexes, [1, 2]);
+  assert.deepEqual(inSync.doc.egress.topLevel.map((t) => [t.domain, t.neededBy]), [['cdn.example.com', ['Preset "site"']], ['mine.example.com', []]]);
 
   // Edit the Preset: the skill moves to a newer SHA, the remote server goes, an MCP server and a domain arrive.
   setPreset('site', { description: 'Web.', extensions: [lint(sha.skills[1]), searchMcp], egress: ['cdn.example.com', 'fonts.example.com'] });
@@ -165,15 +178,17 @@ test('SC-09: after a Preset edit, status reports drift with a per-entry diff and
   assert.deepEqual(site.diff.egressMissing, ['fonts.example.com']);
   assert.deepEqual(site.resync.entries, tag('site', [lint(sha.skills[1]), searchMcp]));
 
-  // Resync as the agent applies it: only this project's tagged entries change, the own entry stays.
+  // Resync as references/status.md says: the tagged entries are replaced in place by resync.entries.
   const file = join(p, '.devcontainer/extensions.json');
   const mf = JSON.parse(readFileSync(file, 'utf8'));
-  mf.extensions = [...mf.extensions.filter((_, i) => !site.indexes.includes(i)), ...site.resync.entries];
+  const first = site.indexes[0];
+  mf.extensions = mf.extensions.flatMap((e, i) => (i === first ? site.resync.entries : site.indexes.includes(i) ? [] : [e]));
   mf.egress = [...mf.egress, ...site.resync.egressAdd];
   writeFileSync(file, JSON.stringify(mf, null, 2));
   const after = h(['status', p, '--skip-image-check']);
   assert.equal(after.doc.presets[0].state, 'in-sync', after.log);
-  assert.deepEqual(after.doc.extensions[0].entry, inSync.doc.extensions[0].entry, 'the project\'s own entry is untouched');
+  assert.deepEqual(after.doc.extensions.map((e) => [e.index, e.preset ?? null, e.pinnedRef.value]),
+    [[0, null, sha.skills[1]], [1, 'site', sha.skills[1]], [2, 'site', '1.0.0']], 'own entry first and untouched, Preset entries where they were');
 });
 
 test('status names a Preset that is gone or invalid instead of offering a resync', () => {
@@ -195,4 +210,16 @@ test('status fails on a project without an Extension Manifest, and reports an un
   assert.equal(r.code, 0, r.log);
   assert.equal(r.doc.extensions[0].ageDays, null);
   assert.match(r.doc.extensions[0].error, /cannot fetch/);
+});
+
+test('a failed image check is reported as unknown, never as "no newer image"', () => {
+  // The Variant's published image points at a registry nobody listens on: verify-image fails at resolve.
+  const unreachable = checkout('checkout-unreachable', { imageDefault: '127.0.0.1:9/dev-setup/node:latest' });
+  const p = project([], undefined, {}, `127.0.0.1:9/dev-setup/node@sha256:${'b'.repeat(64)}`);
+  const r = h(['status', p], {}, unreachable);
+  assert.equal(r.code, 0, r.log);
+  assert.equal(r.doc.image.variant, 'node');
+  assert.equal(r.doc.image.latest.ok, false);
+  assert.equal(r.doc.image.latest.failed, 'resolve');
+  assert.equal(r.doc.image.newerVerified, null);
 });

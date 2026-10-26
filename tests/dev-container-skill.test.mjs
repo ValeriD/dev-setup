@@ -104,6 +104,16 @@ test('SC-11, SC-12: status finds the running container and reports a recreate pe
   assert.match(pending().reasons.join(), /not the image the container runs/);
   writeFileSync(dcFile, dc);
   assert.equal(pending().pendingRecreate, false, 'restored config: nothing pending');
+
+  // A stopped container still answers: the hash is copied out of it.
+  assert.equal(run('docker', ['stop', '-t', '2', now.id]).code, 0);
+  const stopped = pending();
+  assert.equal(stopped.state, 'exited');
+  assert.equal(stopped.appliedHash, now.appliedHash);
+  assert.equal(stopped.pendingRecreate, false, JSON.stringify(stopped));
+  writeFileSync(mfFile, JSON.stringify({ ...JSON.parse(mf), egress: ['example.com'] }, null, 2));
+  assert.equal(pending().pendingRecreate, true, 'a manifest edit is pending on a stopped container too');
+  writeFileSync(mfFile, mf);
 });
 
 test('migrate: an npm project with its own dev container moves to the Template on a branch, pnpm lockfile made in the container', () => {

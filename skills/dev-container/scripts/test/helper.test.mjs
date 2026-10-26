@@ -434,9 +434,11 @@ test('the helper only spawns fixed programs, never commits, and inspect never ru
     assert.doesNotMatch(src, /\bcommit\b/, `${f} must not run git commit, directly or through sh -c`);
   }
   // The dynamic proof (fixture scripts that would leave a marker) is in inspect.test.mjs.
-  const inspectSrc = readFileSync(join(SCRIPTS, 'inspect.mjs'), 'utf8');
-  assert.doesNotMatch(inspectSrc, /\bcwd\b/, 'inspect runs nothing with a fetched tree as working directory');
-  assert.doesNotMatch(inspectSrc, /\bimport\(/, 'inspect never loads fetched code');
+  for (const f of ['inspect.mjs', 'status.mjs']) {
+    const src = readFileSync(join(SCRIPTS, f), 'utf8');
+    assert.doesNotMatch(src, /\bcwd\b/, `${f} runs nothing with a fetched tree as working directory`);
+    assert.doesNotMatch(src, /\bimport\(/, `${f} never loads fetched code`);
+  }
 });
 
 test('the devcontainer CLI pin matches the acceptance suite and CI', async () => {
