@@ -26,6 +26,10 @@ _Avoid_: Starter, boilerplate
 The destinations a container may reach; everything else is blocked. Assembled from the same three scopes as Extension Layers.
 _Avoid_: Whitelist, firewall rules
 
+**Named Secret**:
+A host environment variable that an Extension Manifest names and the container receives by name only. Its value never appears in the catalogue, a Consuming Project's files, or an image.
+_Avoid_: Credential, token, env var
+
 ### Agents
 
 **Agent**:
