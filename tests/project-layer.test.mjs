@@ -7,12 +7,11 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { run, buildImage, startTemplateRegistry, createProject, up, tryUp, containerFor, exec, removeProject } from './lib.mjs';
+import { run, buildImage, startTemplateRegistry, createProject, up, tryUp, containerFor, exec, removeProject, projectDir } from './lib.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'dev-setup-proj-layer-'));
+const root = projectDir('dev-setup-proj-layer-');
 const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' }).trim();
 let registry;
 let sha;

@@ -7,10 +7,9 @@
 // All secrets are fake.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO, IMAGE, run, buildImage, startTemplateRegistry, createProject, tryUp, containerFor, exec, removeProject } from './lib.mjs';
+import { REPO, IMAGE, run, buildImage, startTemplateRegistry, createProject, tryUp, containerFor, exec, removeProject, projectDir, runLabelArgs } from './lib.mjs';
 
 const FAKE = 'fake-secret-5f3a9c-do-not-use';
 const SERVER = `
@@ -35,7 +34,7 @@ const REGISTRY_SPEC = {
 const stdio = { kind: 'mcp', agents: ['claude', 'codex'], name: 'fx', source: { npm: 'fx-mcp', version: '1.0.0' }, env: ['FX_TOKEN'] };
 const remote = { kind: 'mcp-remote', agents: ['claude', 'codex'], name: 'docs', url: 'https://example.com/mcp', egress: ['example.com'], bearerTokenEnv: 'T09_DOCS_TOKEN' };
 
-const root = mkdtempSync(join(tmpdir(), 'dev-setup-mcp-'));
+const root = projectDir('dev-setup-mcp-');
 let cid;
 let registry;
 const projects = [];
@@ -45,7 +44,7 @@ before(() => {
   buildImage();
   writeFileSync(join(root, 'project.json'), JSON.stringify({ extensions: [stdio, remote], egress: [] }));
   writeFileSync(join(root, 'fresh.json'), JSON.stringify({ extensions: [{ ...stdio, name: 'fresh', source: { npm: 'fresh-mcp', version: '1.0.0' } }] }));
-  cid = run('docker', ['run', '-d', '--rm', '-u', 'root', '--entrypoint', 'sleep', '-v', `${REPO}/tests/fixtures:/fx:ro`, '-v', `${root}:/p:ro`, IMAGE, 'infinity']).out.trim();
+  cid = run('docker', ['run', '-d', '--rm', ...runLabelArgs(), '-u', 'root', '--entrypoint', 'sleep', '-v', `${REPO}/tests/fixtures:/fx:ro`, '-v', `${root}:/p:ro`, IMAGE, 'infinity']).out.trim();
   assert.ok(cid, 'container started');
   const r = run('docker', ['exec', '-u', 'node', '-e', `STUB_SPEC=${JSON.stringify(REGISTRY_SPEC)}`, cid, 'bash', '-c', `nohup node /fx/registry-stub.mjs 4873 >/tmp/stub.log 2>&1 &
     for i in $(seq 50); do node -e "fetch('http://127.0.0.1:4873/fx-mcp').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" && exit 0; sleep 0.2; done; cat /tmp/stub.log; exit 1`]);

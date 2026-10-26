@@ -9,14 +9,13 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { COSIGN_IMAGE } from '../skills/dev-container/scripts/commands.mjs';
-import { REPO, IMAGE, run, pins, buildImage, startTemplateRegistry, containerFor, exec, removeProject } from './lib.mjs';
+import { REPO, IMAGE, run, pins, buildImage, startTemplateRegistry, containerFor, exec, removeProject, projectDir } from './lib.mjs';
 
 const HELPER = join(REPO, 'skills/dev-container/scripts/dev-container.mjs');
-const cfg = mkdtempSync(join(tmpdir(), 'dc-skill-cfg-')); // empty Claude config: no skill link to check
+const cfg = projectDir('dc-skill-cfg-'); // empty Claude config: no skill link to check
 let registry, pushed, dir, legacy;
 
 function helper(...args) {
@@ -42,7 +41,7 @@ before(() => {
   assert.equal(run('docker', ['tag', IMAGE, pushed]).code, 0);
   const p = run('docker', ['push', '-q', pushed]);
   assert.equal(p.code, 0, p.err);
-  dir = mkdtempSync(join(tmpdir(), 'dev-setup-skill-'));
+  dir = projectDir('dev-setup-skill-');
   run('git', ['init', '-q', '-b', 'main'], { cwd: dir });
 });
 
@@ -117,7 +116,7 @@ test('SC-11, SC-12: status finds the running container and reports a recreate pe
 });
 
 test('migrate: an npm project with its own dev container moves to the Template on a branch, pnpm lockfile made in the container', () => {
-  legacy = mkdtempSync(join(tmpdir(), 'dev-setup-legacy-'));
+  legacy = projectDir('dev-setup-legacy-');
   const git = (...a) => {
     const r = run('git', a, { cwd: legacy });
     assert.equal(r.code, 0, r.err);
@@ -189,7 +188,7 @@ test('verify-image fails closed for an unsigned image and a foreign signature; t
 
   // Sign the same digest with a throwaway key pair (no transparency log): a
   // signature exists, but not from the release workflow's keyless identity.
-  const keys = mkdtempSync(join(tmpdir(), 'dc-cosign-keys-'));
+  const keys = projectDir('dc-cosign-keys-');
   try {
     const cosign = (...a) => run('docker', ['run', '--rm', '--network', 'host', '--user', String(process.getuid()), '-e', 'COSIGN_PASSWORD=',
       '-v', `${keys}:/k`, '-w', '/k', COSIGN_IMAGE, ...a]);

@@ -6,7 +6,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO, IMAGE, run, pins, buildImage, headRevision, startTemplateRegistry, createProject, up, tryUp, containerFor, exec, removeProject } from './lib.mjs';
+import { REPO, IMAGE, run, pins, buildImage, builtRevision, startTemplateRegistry, createProject, up, tryUp, containerFor, exec, removeProject } from './lib.mjs';
 import { writeFileSync } from 'node:fs';
 import { IMAGE_LABELS } from '../skills/dev-container/scripts/commands.mjs';
 
@@ -83,8 +83,8 @@ test('image labels carry the build revision and the pinned Agent and pnpm versio
   assert.equal(labels[IMAGE_LABELS.pnpm], pin.pnpm);
   const revision = labels[IMAGE_LABELS.revision];
   assert.match(revision ?? '', /^[0-9a-f]{40}$/);
-  // CI builds with GITHUB_SHA; the suite's own build with this checkout's HEAD.
-  const want = process.env.GITHUB_SHA ?? (process.env.DEV_SETUP_TEST_SKIP_BUILD ? undefined : headRevision());
+  // CI builds with GITHUB_SHA; the suite's own build with the revision the run recorded at its start (a commit landing mid-run must not fail it).
+  const want = process.env.GITHUB_SHA ?? (process.env.DEV_SETUP_TEST_SKIP_BUILD ? undefined : builtRevision());
   if (want) assert.equal(revision, want);
 });
 

@@ -35,7 +35,7 @@ Needs Docker and Node 24 (the devcontainer CLI is fetched with `npx` at an exact
 npm test
 ```
 
-It builds `dev-setup-node:test`, starts a throwaway local registry, applies the Template to a fresh git folder, starts the container and probes it as `node`. It removes its containers, volumes and registry afterwards (about a minute).
+It builds the image under a tag of its own (`dev-setup-node:test-<run id>`, so parallel runs don't collide), starts a throwaway local registry, applies the Template to a fresh git folder, starts the container and probes it as `node`. Afterwards, pass or fail, it removes only what the run created: containers, the derived `vsc-…-uid` images, volumes, the registry, the run's image tag and its temp folders. Other projects' Docker resources are never touched. `DEV_SETUP_TEST_KEEP=1 npm test` keeps everything for debugging and prints what was kept. An image given in `DEV_SETUP_TEST_IMAGE` (CI sets it with `DEV_SETUP_TEST_SKIP_BUILD=1`) is used as is and never removed.
 
 Covered: Template apply and start, no sudo/capabilities/setuid, pinned Agent versions, auto-update off, normal vs yolo modes, Codex running a shell command (against a local mock model endpoint, no login), read-only git/devcontainer paths, login volume persistence and separation.
 

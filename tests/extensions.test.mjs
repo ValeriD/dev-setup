@@ -5,12 +5,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO, IMAGE, run, buildImage } from './lib.mjs';
+import { REPO, IMAGE, run, buildImage, projectDir } from './lib.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'dev-setup-ext-'));
+const root = projectDir('dev-setup-ext-');
 const tag = `dev-setup-ext-test:${process.pid}`;
 const built = [];
 let sha;
