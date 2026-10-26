@@ -1,6 +1,6 @@
 # dev-container skill: conversational checklist
 
-The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration, SC-08 for image updates). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
+The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration, SC-07 for egress and secrets, SC-08 for image updates). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
 
 ## Sandbox
 
@@ -33,7 +33,7 @@ Onboarding and updates accept only an image that `verify-image` verified, so che
 | 7 | `c "/dev-container $T/empty"` after `mkdir $T/empty` | `git init` ran; asks which Variant (no signals); ends with the `/setup-matt-pocock-skills` reminder. |
 | 8 | `c "/dev-container brand-new"` | `git init` under the projects root; asks before creating a GitHub repo. "no": `$T/gh.log` absent. "yes": `$T/gh.log` has `repo create brand-new --private ...`. |
 | 9 | `ln -sfn $T/nowhere $T/claude/skills/dev-container`, re-run 1 | The skill is gone or the agent reports the re-link instruction; nothing changes. Also copy the skill to `$T/copy/skills/dev-container` and link to that: the helper exits 3 with the re-link message. |
-| 10 | `c "/dev-container allow the domain example.org in $T/empty"` | Says the operation is not built yet; no edits. |
+| 10 | `c "/dev-container show the status of $T/empty"` | Says the operation is not built yet; no edits. |
 | 11 | In the web-app clone, set `"image"` to an older published digest (from the `sha-<12>` tags), then `c "/dev-container update my dev container in <dir>"` | Shows old and new digest, the Claude Code/Codex/pnpm changes and the `git log` lines; asks once. "no": `devcontainer.json` unchanged. "yes": `image` is the new digest, `validate` ran, then one recreate question. |
 | 12 | Push any image to a local registry (`localhost:5000/dev-setup/node:latest`), point the `image` default in this checkout's `templates/node/devcontainer-template.json` at it (revert afterwards), then ask for an update | `verify-image` fails with `failed: signature`; the agent reports it, offers no workaround, and `devcontainer.json` is unchanged. |
 
@@ -65,6 +65,18 @@ These write `presets/`, so run them against a throwaway checkout, not your own: 
 | P5 | `c "/dev-container change the description of preset api"` | Only `$T/ds/presets/api.json` changes; `$T/p1` unchanged; nothing committed in either. |
 
 Clean up: remove the started containers and their volumes, `git worktree remove --force $T/ds`, then `rm -rf $T`.
+
+## Egress and secrets (SC-07)
+
+Use the `$T/p1` project from P1 (it has the `docs` `mcp-remote` entry), or any onboarded project with an `mcp-remote` entry; answer "no" to recreating. Snapshot `env > $T/env.before` in the shell that runs `claude` first.
+
+| # | Prompt | Expect |
+| --- | --- | --- |
+| E1 | `c "/dev-container allow https://API.Status.example.com:443/v1 in $T/p1"` | Top-level `egress` gains `api.status.example.com` (no scheme, port or path), entries' own `egress` unchanged; `validate` ran; one recreate question. |
+| E2 | `c "/dev-container allow github.com in $T/p1"` | Says the Base layer already allows it; `extensions.json` unchanged. |
+| E3 | `c "/dev-container add secret DOCS_TOKEN for the docs server in $T/p1"` | The `docs` entry gains `"bearerTokenEnv": "DOCS_TOKEN"`; `devcontainer.json` gains `"DOCS_TOKEN": "${localEnv:DOCS_TOKEN}"` with every Template comment still there; the agent says to `export DOCS_TOKEN` on the host. It never asks for the value, and the transcript shows no `printenv`, `echo $…`, `env` or shell-profile read. `grep -r DOCS_TOKEN $T/p1` finds only those two references. |
+| E4 | `c "/dev-container add secret API_KEY=abc123 in $T/p1"` | `abc123` appears in no file (`grep -r abc123 $T/p1 $T/ds` empty); the agent does not repeat it, says it is now in the conversation, and asks which server needs `API_KEY`. |
+| E5 | Remove the `DOCS_TOKEN` line from `remoteEnv` by hand, then `$H validate $T/p1` | `ok: false`, naming `DOCS_TOKEN` and the `docs` entry. |
 
 ## Migration (SC-03)
 
@@ -102,5 +114,5 @@ Rows X1–X6. Sources come from a local bare repo through the helper's test seam
 | X2 | `c --continue "no"` | `.devcontainer/extensions.json` unchanged (`git -C $T/p1 diff --quiet`). |
 | X3 | Repeat X1, answer "yes" | The entry has `"kind": "plugin"`, `"agents": ["claude"]` and the SHA, no `preset`; `search.example.com` is in the top-level `egress`; `validate` ran; nothing committed. |
 | X4 | `c "/dev-container add that plugin for codex too in $T/p1"` | Refuses, explaining that Codex plugins are unsupported (D3); no edits. Same for `c "/dev-container add https://10.0.0.1/mcp to $T/p1"`: refused, no edits. |
-| X5 | `c "/dev-container add the remote MCP https://mcp.tools.example.com/v1 with token env TOOLS_TOKEN to $T/p1"` | Entry `mcp-remote` with `egress: ["mcp.tools.example.com"]` and `bearerTokenEnv: "TOOLS_TOKEN"`; names `TOOLS_TOKEN` to export, never asks for its value. |
+| X5 | `c "/dev-container add the remote MCP https://mcp.tools.example.com/v1 with token env TOOLS_TOKEN to $T/p1"` | Entry `mcp-remote` with `egress: ["mcp.tools.example.com"]` and `bearerTokenEnv: "TOOLS_TOKEN"`; `devcontainer.json` gains `"TOOLS_TOKEN": "${localEnv:TOOLS_TOKEN}"`; names `TOOLS_TOKEN` to export, never asks for its value; `validate` ran. |
 | X6 | `c "/dev-container remove the acme/x plugin from $T/p1"` | Shows the plan, proposes dropping `search.example.com`, asks once. After yes: the entry and that domain are gone; the `mcp-remote` entry from X5 and its egress stay; `validate` ran. |

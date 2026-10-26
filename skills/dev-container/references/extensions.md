@@ -26,7 +26,7 @@ An Agent Extension is added to a project only after the user has seen what it co
 6. On yes, edit `.devcontainer/extensions.json`:
    - append `entry` exactly as returned, untagged (no `preset` field);
    - when `egress.target` is `entry`, the entry already carries its domains; otherwise add each agreed domain to the top-level `egress` (create the array if needed), skipping domains already there.
-7. If the entry names secrets (`env`, `bearerTokenEnv`), list the names. Each needs a host export and a `remoteEnv` line `"NAME": "${localEnv:NAME}"` in the project's `devcontainer.json`. Wiring them is the secrets operation; while that is not built, tell the user so and that the server gets no value until it is done.
+7. If the entry names secrets (`env`, `bearerTokenEnv`), the entry already holds the manifest reference: for each name, do step 3 of **Add a secret** in [egress-and-secrets.md](egress-and-secrets.md) (the `remoteEnv` line), and tell the user what to export, as that section says. Never ask for a value.
 
 **Done when `H validate <dir>` returns `ok: true`, or the user declined.**
 
@@ -40,6 +40,10 @@ An Agent Extension is added to a project only after the user has seen what it co
    - `keepEgress`: domains that stay, with what still needs them;
    - `note`: the pinned content could not be fetched; show the top-level `egress` and ask which domains to drop.
 3. Show the plan and ask once to apply it (the user may keep any of the `egress` domains).
-4. On yes, delete the entry and the agreed domains. Everything else stays untouched.
+4. On yes, delete the entry and the agreed domains. Everything else stays untouched, including `remoteEnv` lines for secrets the entry named (removing those is not part of this operation; name them in the summary).
 
 **Done when `H validate <dir>` returns `ok: true`, or the user declined.**
+
+## Finish
+
+The project layer is installed when the container is created. After all the user's changes, ask once: "Recreate the dev container now to apply them? Recreating ends any agent sessions running inside." On yes, run `H up <dir> --recreate`. On no, say the changes apply at the next recreate. Print the changed files (uncommitted, for the user to review and commit), the entries added or removed with their Pinned Refs, the domains allowed or dropped, and the host variables to export.

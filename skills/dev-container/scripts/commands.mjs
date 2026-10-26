@@ -9,7 +9,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
-import { describeEntry, schema } from '../../../installer/src/index.mjs';
+import { describeEntry, schema, secretNames } from '../../../installer/src/index.mjs';
 import { countTags, egressNeededBy, listPresets, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
 import { inspect, planRemove } from './inspect.mjs';
 
@@ -48,6 +48,7 @@ const USAGE = `usage: dev-container.mjs <command> [args]
   render-template VARIANT DIR --image REF@sha256:... [--option NAME=VALUE]... [--replace]
                                                 --replace deletes an existing .devcontainer/ first (migrate)
   validate DIR                                  check .devcontainer/devcontainer.json and extensions.json
+                                                (incl. a remoteEnv \${localEnv:…} entry for every named secret)
   presets [--name NAME]                         list Presets (presets/*.json) with descriptions and problems
   plan-remove-preset DIR NAME                   which entries and egress domains removing a Preset drops (read-only)
   inspect SOURCE [--ref REF] [--path PATH] [--plugin NAME] [--kind KIND] [--agents claude,codex]
@@ -433,7 +434,7 @@ function validate([dir], _, { repo }) {
   const problems = [];
   const dcFile = join(project, '.devcontainer/devcontainer.json');
   const mfFile = join(project, '.devcontainer/extensions.json');
-  let image;
+  let image, remoteEnv, dcRead = false;
 
   if (!existsSync(dcFile)) problems.push(`${relative(project, dcFile)} is missing`);
   else {
@@ -443,14 +444,16 @@ function validate([dir], _, { repo }) {
     if (!errors.length) {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) problems.push('.devcontainer/devcontainer.json must be a JSON object');
       else {
+        dcRead = true;
         image = value.image;
+        remoteEnv = value.remoteEnv;
         if (typeof image !== 'string' || !DIGEST_REF.test(image)) problems.push(`.devcontainer/devcontainer.json: "image" must be digest-pinned (…@sha256:<64 hex>), got ${JSON.stringify(image)}`);
       }
     }
     for (const m of text.matchAll(PLACEHOLDER)) problems.push(`.devcontainer/devcontainer.json: unrendered placeholder ${m[0]}`);
   }
 
-  let entries, presetTags;
+  let entries, presetTags, secrets, egress;
   if (!existsSync(mfFile)) problems.push(`${relative(project, mfFile)} (Extension Manifest) is missing`);
   else {
     const { value: manifest, error } = readJson(mfFile);
@@ -461,10 +464,38 @@ function validate([dir], _, { repo }) {
       if (!found.length) {
         entries = manifest.extensions.length;
         presetTags = countTags(manifest.extensions);
+        egress = manifest.egress ?? [];
+        // Only once devcontainer.json is readable: otherwise its own problem is already reported.
+        if (dcRead) secrets = checkSecrets(manifest.extensions, remoteEnv, problems);
       }
     }
   }
-  return { doc: { ok: problems.length === 0, dir: project, image, variant: variantOfImage(repo, image), entries, presets: presetTags, problems } };
+  return { doc: { ok: problems.length === 0, dir: project, image, variant: variantOfImage(repo, image), entries, presets: presetTags, egress, secrets, problems } };
+}
+
+/** `${localEnv:NAME}` with no default: a default would be a value committed to the repository. */
+const LOCAL_ENV_REF = /^\$\{localEnv:([A-Za-z_][A-Za-z0-9_]*)\}$/;
+
+/**
+ * Every secret the project's MCP entries name (stdio `env`, remote `bearerTokenEnv`) must reach
+ * the container through a `remoteEnv` entry that references a host variable. Pushes problems
+ * (names only, never a value) and returns [{ name, neededBy, hostEnv }].
+ */
+function checkSecrets(extensions, remoteEnv, problems) {
+  const env = remoteEnv !== null && typeof remoteEnv === 'object' && !Array.isArray(remoteEnv) ? remoteEnv : null;
+  if (remoteEnv !== undefined && !env) problems.push('.devcontainer/devcontainer.json: "remoteEnv" must be an object');
+  const neededBy = new Map();
+  extensions.forEach((e, i) => {
+    for (const name of secretNames(e)) neededBy.set(name, [...(neededBy.get(name) ?? []), describeEntry(e, i)]);
+  });
+  return [...neededBy].map(([name, by]) => {
+    const value = env && Object.hasOwn(env, name) ? env[name] : undefined;
+    const ref = typeof value === 'string' ? value.match(LOCAL_ENV_REF) : null;
+    const fix = `"${name}": "\${localEnv:${name}}"`;
+    if (value === undefined) problems.push(`.devcontainer/devcontainer.json: secret ${name} (named by ${by.join(', ')}) has no remoteEnv entry; add ${fix}`);
+    else if (!ref) problems.push(`.devcontainer/devcontainer.json: remoteEnv ${name} must be a host reference like ${fix}, never a value (its current value is not shown)`);
+    return { name, neededBy: by, hostEnv: ref ? ref[1] : null };
+  });
 }
 
 function presets(_, { name }, { repo }) {
