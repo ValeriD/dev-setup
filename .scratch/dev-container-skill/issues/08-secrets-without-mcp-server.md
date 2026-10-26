@@ -8,7 +8,7 @@
 
 **Blocked by:** 11 (Per-entry egress for every kind), because both change the schema and ADR 0004
 
-**Status:** done
+**Status:** ready-for-agent
 
 ## Technical context
 
@@ -48,10 +48,10 @@
 - Schema: top-level `secrets` (env-name pattern, `uniqueItems`). Inline rather than `$ref` to `envNames`, because draft-07 ignores keywords beside a `$ref`.
 - Installer: new `installer/src/secrets.mjs` holds `secretNames` (moved from `mcp.mjs`, still exported from `index.mjs`), `secretDeclarers` and `renderSecretsList`. `mergeLayers` now also returns `secrets`, the union of every layer's top-level list. `installBuild` and `installStart` write the list whether or not MCP exists. `writeMcpConfig` no longer writes it and no longer takes `secretsOut`. The CLI summary line counts secret names.
 - The list moved from `/etc/dev-setup/mcp-secrets` to `/etc/dev-setup/secrets`, because it now holds container-wide names too. Each line is `NAME<TAB>declarers`: `MCP server "<name>"` and/or `container-wide`. `check-secrets.sh` (override env var renamed to `DEV_SETUP_SECRETS_LIST`) prints `WARNING: secret NAME (<declarers>) is not set ...`. A line without declarers still warns. Both are in-image paths; nothing outside the image reads them.
-- Skill helper: `manifests.mjs` `secretsNeededBy(manifest)` (name -> declarers: `describeEntry` labels plus `container-wide`) is the seam for 09's `plan-remove`/`plan-remove-secret` (the Q20 rule) and for 10. `validate`'s `checkSecrets` uses it, so `status` (which builds on `validate`) reports a project's container-wide secrets with no extra code. `presets` refuses a top-level `secrets`.
+- Skill helper: `manifests.mjs` `secretsNeededBy(manifest)` (the installer's `secretDeclarers` with `describeEntry` labels plus `container-wide`) is the seam for 09's `plan-remove`/`plan-remove-secret` (the Q20 rule) and for 10. `validate`'s `checkSecrets` uses it, so `status` (which builds on `validate`) reports a project's container-wide secrets with no extra code. `presets` refuses a top-level `secrets`.
 - Docs: `egress-and-secrets.md` "Add a secret" (MCP entry vs top-level, ask when unclear, both allowed), `presets.md` (intro, save), `SKILL.md` description/routing, `presets/README.md`, the Template comment, the ADR 0004 amendment, the ARCHITECTURE.md rows (base material, installer, Template, skill helper, Presets) rewritten in place, and checklist rows E4 (rewritten), E6 and E7 (new).
 - Tests: installer integration (both modes with no MCP, declared in both places, name pattern and duplicates), helper integration (container-wide `validate` with missing, literal and default values, value never echoed, both declarers, Preset refusal), container acceptance (`tests/mcp.test.mjs`: a third project with only a container-wide secret and no MCP entry warns "container-wide"; the set project declares `T09_DOCS_TOKEN` in both places and gets no warning). The container-wide check in the set container is `test -n`, so the value is never read into output.
-- Verified: `npm run test:installer` 52/52, `npm run test:skill` 47/47, `node scripts/check-pins.mjs` ok, `npm test` 52/52 with no container or volume left behind. The last box (the conversation flow) is unticked: the reference is rewritten and checklist rows E4, E6 and E7 cover it, but the manual checklist was not run.
+- Verified: `npm run test:installer` 52/52, `npm run test:skill` 47/47, `node scripts/check-pins.mjs` ok, `npm test` 52/52 with no container or volume left behind. The last box (the conversation flow) is unticked, so Status is left unchanged: the reference is rewritten and checklist rows E4, E6 and E7 cover it, but the manual checklist was not run. Set `done` once E4, E6 and E7 pass.
 
 **Belongs elsewhere:**
 

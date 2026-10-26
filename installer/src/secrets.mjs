@@ -12,15 +12,18 @@ export function secretNames(entry) {
 export const CONTAINER_WIDE = 'container-wide';
 
 /**
- * Every Named Secret with who declares it, in first-seen order.
- * @param {object[]} extensions merged entries
- * @param {string[]} secrets merged top-level `secrets`
- * @returns {Map<string, string[]>} name -> declarers (`MCP server "<name>"`, `container-wide`)
+ * Every Named Secret with who declares it, in first-seen order. A name may have both kinds.
+ * @param {object[]} extensions entries (merged, or one manifest's)
+ * @param {string[]} secrets top-level `secrets`
+ * @param {(entry: object, index: number) => string} [label] how an MCP declarer is named
+ * @returns {Map<string, string[]>} name -> declarers (`label(entry)`, `container-wide`)
  */
-export function secretDeclarers(extensions, secrets) {
+export function secretDeclarers(extensions, secrets, label = (e) => `MCP server "${e.name}"`) {
   const by = new Map();
   const add = (name, who) => by.set(name, [...new Set([...(by.get(name) ?? []), who])]);
-  for (const e of extensions) for (const n of secretNames(e)) add(n, `MCP server "${e.name}"`);
+  extensions.forEach((e, i) => {
+    for (const n of secretNames(e)) add(n, label(e, i));
+  });
   for (const n of secrets) add(n, CONTAINER_WIDE);
   return by;
 }

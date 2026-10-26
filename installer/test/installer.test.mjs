@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const CLI = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
 const POLICY = fileURLToPath(new URL('../../base/claude/managed-settings.json', import.meta.url));
 /** Claude plugin/hook and MCP outputs and the secrets list redirected into a scratch directory (the defaults are system paths). */
-const claudeArgs = (d) => ['--claude-mcp', join(d, 'managed-mcp.json'), '--codex-config', join(d, 'codex.toml'), '--mcp-root', join(d, 'mcp'), '--claude-policy', POLICY, '--claude-settings', join(d, 'managed-settings.json'), '--claude-dropin', join(d, 'dropin.json'), '--marketplaces', join(d, 'mkts'), '--hooks', join(d, 'hooks'), '--secrets-out', join(d, 'secrets')];
+const outArgs = (d) => ['--claude-mcp', join(d, 'managed-mcp.json'), '--codex-config', join(d, 'codex.toml'), '--mcp-root', join(d, 'mcp'), '--claude-policy', POLICY, '--claude-settings', join(d, 'managed-settings.json'), '--claude-dropin', join(d, 'dropin.json'), '--marketplaces', join(d, 'mkts'), '--hooks', join(d, 'hooks'), '--secrets-out', join(d, 'secrets')];
 const SCHEMA = fileURLToPath(new URL('../extensions.schema.json', import.meta.url));
 const root = mkdtempSync(join(tmpdir(), 'installer-test-'));
 const gitBase = join(root, 'git');
@@ -58,7 +58,7 @@ function install(...manifests) {
     return f;
   });
   const dirs = { claude: join(d, 'claude'), codex: join(d, 'codex'), egress: join(d, 'out/allowlist.txt'), marker: join(d, 'marker'), secrets: join(d, 'secrets') };
-  const args = [CLI, 'install', '--mode', 'build', '--git-base', gitBase, '--claude-skills', dirs.claude, '--codex-skills', dirs.codex, '--egress-out', dirs.egress, ...claudeArgs(d)];
+  const args = [CLI, 'install', '--mode', 'build', '--git-base', gitBase, '--claude-skills', dirs.claude, '--codex-skills', dirs.codex, '--egress-out', dirs.egress, ...outArgs(d)];
   for (const f of files) args.push('--manifest', f);
   const r = spawnSync('node', args, { encoding: 'utf8', env: { ...process.env, MARKER: dirs.marker } });
   return { code: r.status, out: r.stdout, err: r.stderr, dirs, files };
@@ -230,7 +230,7 @@ function start(build, project, d = join(root, `start${n++}`)) {
   const write = (name, m) => { const f = join(d, name); writeFileSync(f, JSON.stringify(m)); return f; };
   const dirs = { claude: join(d, 'claude'), codex: join(d, 'codex'), egress: join(d, 'out/allowlist.txt'), secrets: join(d, 'secrets') };
   const r = spawnSync('node', [CLI, 'install', '--mode', 'start', '--git-base', gitBase, '--claude-skills', dirs.claude, '--codex-skills', dirs.codex,
-    '--egress-out', dirs.egress, ...claudeArgs(d), '--manifest', write('build.json', build), '--project', write('project.json', project)], { encoding: 'utf8' });
+    '--egress-out', dirs.egress, ...outArgs(d), '--manifest', write('build.json', build), '--project', write('project.json', project)], { encoding: 'utf8' });
   return { code: r.status, err: r.stderr, dirs, d };
 }
 

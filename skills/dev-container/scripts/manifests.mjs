@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
-import { CONTAINER_WIDE, describeEntry, ManifestError, mergeLayers, schema, secretNames, validateManifest } from '../../../installer/src/index.mjs';
+import { describeEntry, ManifestError, mergeLayers, schema, secretDeclarers, validateManifest } from '../../../installer/src/index.mjs';
 
 /** Strict JSON (Extension Manifests and Presets are plain JSON): { value } or { error }. */
 export function readJson(file) {
@@ -108,15 +108,7 @@ export function egressNeededBy(entries) {
  * `bearerTokenEnv`) and its top-level `secrets` ("container-wide"). A name may have both.
  * @returns {Map<string, string[]>} name -> declarers, in first-seen order
  */
-export function secretsNeededBy(manifest) {
-  const neededBy = new Map();
-  const add = (name, by) => neededBy.set(name, [...new Set([...(neededBy.get(name) ?? []), by])]);
-  manifest.extensions.forEach((e, i) => {
-    for (const name of secretNames(e)) add(name, describeEntry(e, i));
-  });
-  for (const name of manifest.secrets ?? []) add(name, CONTAINER_WIDE);
-  return neededBy;
-}
+export const secretsNeededBy = (manifest) => secretDeclarers(manifest.extensions, manifest.secrets ?? [], describeEntry);
 
 /** True when `host` is `domain` or one of its subdomains (an allowlist domain covers its subdomains). */
 export const covers = (domain, host) => host === domain || host.endsWith(`.${domain}`);

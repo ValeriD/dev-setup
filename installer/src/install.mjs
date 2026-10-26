@@ -2,7 +2,8 @@
 import { readFileSync, mkdirSync, writeFileSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, join, dirname } from 'node:path';
 import { assertValidManifest, describeEntry, ManifestError } from './validate.mjs';
-import { installMcpPackages, writeMcpConfig, writeAtomic } from './mcp.mjs';
+import { installMcpPackages, writeMcpConfig } from './mcp.mjs';
+import { writeAtomic } from './files.mjs';
 import { secretDeclarers, renderSecretsList } from './secrets.mjs';
 import { installClaude, writeJson } from './claude.mjs';
 import { fetchBySha, repoUrl, copyTree, pathInCheckout, DEFAULT_GIT_BASE } from './fetch.mjs';
