@@ -6,6 +6,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,6 +53,7 @@ function newProject() {
   return p;
 }
 const setManifest = (p, manifest) => writeFileSync(join(p.dir, '.devcontainer/extensions.json'), JSON.stringify(manifest));
+const manifestHash = (p) => `sha256:${createHash('sha256').update(readFileSync(join(p.dir, '.devcontainer/extensions.json'))).digest('hex')}`;
 const skillEntry = (s = sha) => ({ kind: 'skill', agents: ['claude', 'codex'], source: { github: 'acme/skills', path: 'skills/proj-hello', sha: s } });
 const sh = (p, script, opts) => exec(p.dir, script, opts);
 const reachable = (p) =>
@@ -72,12 +74,15 @@ test('SC-05, SC-13: a project skill and egress domain appear on recreate, are re
   }
   assert.equal(sh(p, `stat -c %U ${skillPaths}`).out.trim(), 'root\nroot');
   assert.ok(reachable(p), 'project egress domain reachable');
+  assert.equal(sh(p, 'cat /run/dev-setup/applied-manifest').out.trim(), manifestHash(p), 'the start-up step records the applied manifest hash');
 
   // Remove the entry and recreate: no leftovers, domain blocked again.
   setManifest(p, { extensions: [] });
   p.containerId = up(p.dir, ['--remove-existing-container']).containerId;
   assert.notEqual(sh(p, `ls ${skillPaths}`).code, 0, 'skill removed');
   assert.ok(!reachable(p), 'domain blocked again');
+  assert.equal(sh(p, 'cat /run/dev-setup/applied-manifest').out.trim(), manifestHash(p), 'the hash follows the recreate');
+  assert.notEqual(sh(p, 'echo x > /run/dev-setup/applied-manifest').code, 0, 'node cannot rewrite the applied hash');
 });
 
 test('an invalid project manifest makes `up` fail, naming the entry, and the container does not run open', () => {

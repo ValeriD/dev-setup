@@ -76,6 +76,36 @@ test('render-template output validates, starts, and gets a first lockfile; nothi
   assert.notEqual(run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: dir }).code, 0, 'no commits were made');
 });
 
+test('SC-11, SC-12: status finds the running container and reports a recreate pending once the config changed after it started', () => {
+  const pending = () => h('status', dir, '--skip-image-check').container;
+  const now = pending();
+  assert.equal(now.found, true);
+  assert.equal(now.state, 'running');
+  assert.equal(now.appliedHash, now.manifestHash, 'the start-up step wrote the hash of the manifest it applied');
+  assert.deepEqual(now.unknown, [], 'the derived image and the remoteEnv could be compared');
+  assert.equal(now.pendingRecreate, false, JSON.stringify(now));
+
+  // An agent-style edit, no recreate: the manifest now differs from what the container applied.
+  const mfFile = join(dir, '.devcontainer/extensions.json');
+  const mf = readFileSync(mfFile, 'utf8');
+  writeFileSync(mfFile, JSON.stringify({ ...JSON.parse(mf), egress: ['example.com'] }, null, 2));
+  const changed = pending();
+  assert.equal(changed.pendingRecreate, true);
+  assert.match(changed.reasons.join(), /extensions\.json changed after the container started/);
+
+  // A secret's remoteEnv line alone (devcontainer.json) is a pending recreate too.
+  writeFileSync(mfFile, mf);
+  const dcFile = join(dir, '.devcontainer/devcontainer.json');
+  const dc = readFileSync(dcFile, 'utf8');
+  writeFileSync(dcFile, dc.replace('"remoteEnv": {', '"remoteEnv": {\n    "MY_TOKEN": "${localEnv:MY_TOKEN}",'));
+  assert.match(pending().reasons.join(), /remoteEnv/);
+  // And so is a different image.
+  writeFileSync(dcFile, dc.replace(/@sha256:[0-9a-f]{64}/, `@sha256:${'0'.repeat(64)}`));
+  assert.match(pending().reasons.join(), /not the image the container runs/);
+  writeFileSync(dcFile, dc);
+  assert.equal(pending().pendingRecreate, false, 'restored config: nothing pending');
+});
+
 test('migrate: an npm project with its own dev container moves to the Template on a branch, pnpm lockfile made in the container', () => {
   legacy = mkdtempSync(join(tmpdir(), 'dev-setup-legacy-'));
   const git = (...a) => {

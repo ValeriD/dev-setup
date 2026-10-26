@@ -18,6 +18,10 @@ RUN=/run/egress
 MANIFESTS=/opt/dev-setup/manifests
 INSTALLER=/opt/dev-setup/installer/src/cli.mjs
 PROJECT_MANIFEST=${DEV_SETUP_WORKSPACE:-/workspace}/.devcontainer/extensions.json
+# Hash of the project manifest this start applied ("none" without one), read by the
+# host skill's `status` to tell whether the manifest changed since (recreate pending).
+# The Base and Variant layers are fixed by the image. World-readable, no secrets.
+APPLIED=/run/dev-setup/applied-manifest
 
 # Status files for wait-ready.sh (the postStartCommand): `devcontainer up` does not
 # wait for the entrypoint, so the lifecycle command is what makes `up` fail with
@@ -64,7 +68,12 @@ main() {
   # Consuming Project layer. An existing but invalid manifest is fatal; absence is normal.
   # Absence is only believed if the directory itself is readable (never fail open on EACCES).
   ls -A "$(dirname "$PROJECT_MANIFEST")" >/dev/null || fail "cannot read $(dirname "$PROJECT_MANIFEST")"
+  mkdir -p "$(dirname "$APPLIED")" && rm -f "$APPLIED" || fail "cannot prepare $APPLIED"
+  applied=none
   if [ -e "$PROJECT_MANIFEST" ]; then
+    # Hashed before the installer reads it, so a later edit always shows as a difference.
+    sum=$(sha256sum <"$PROJECT_MANIFEST") || fail "cannot hash $PROJECT_MANIFEST"
+    applied="sha256:${sum%% *}"
     gitbase=
     [ -z "${DEV_SETUP_GIT_BASE:-}" ] || gitbase="--git-base $DEV_SETUP_GIT_BASE" # test seam: local git fixtures
     # shellcheck disable=SC2086
@@ -75,6 +84,7 @@ main() {
     apply "$RUN/allowlist.full" "$RUN/resolv.orig"
     echo "egress: full allowlist applied ($(grep -c . "$RUN/domains") domains)"
   fi
+  printf '%s\n' "$applied" >"$APPLIED.tmp" && chmod 644 "$APPLIED.tmp" && mv "$APPLIED.tmp" "$APPLIED" || fail "cannot write $APPLIED"
   touch "$RUN/ready"
 }
 

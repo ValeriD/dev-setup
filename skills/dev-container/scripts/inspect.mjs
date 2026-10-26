@@ -451,7 +451,7 @@ function compareVersions(a, b) {
 }
 
 /** `npm view ... --json`: package metadata from the registry. Nothing is downloaded or run. */
-function npmView(args) {
+export function npmView(args) {
   const r = spawnSync('npm', ['view', ...args, '--json'], { encoding: 'utf8', maxBuffer: 64 << 20 });
   if (r.status !== 0) {
     let msg = lastLine(r.stderr || r.error?.message);
@@ -468,7 +468,7 @@ function npmView(args) {
 }
 
 /** npm view prints one object, or (newer npm) an array of them. */
-const lastObject = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object').at(-1) : v) ?? null;
+export const lastObject = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object').at(-1) : v) ?? null;
 
 function defaultMcpName(pkg) {
   const [scope, bare] = pkg.startsWith('@') ? pkg.slice(1).split('/') : [null, pkg];

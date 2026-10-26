@@ -12,6 +12,7 @@ import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
 import { describeEntry, schema, secretNames } from '../../../installer/src/index.mjs';
 import { countTags, egressNeededBy, listPresets, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
 import { inspect, planRemove } from './inspect.mjs';
+import { status } from './status.mjs';
 import { UsageError } from './errors.mjs';
 
 /** Same pin as the acceptance suite (tests/lib.mjs) and CI (CLI_VERSION). */
@@ -58,6 +59,8 @@ const USAGE = `usage: dev-container.mjs <command> [args]
                                                 contains and propose its entry; SOURCE is owner/repo,
                                                 https://github.com/owner/repo, npm:PACKAGE[@RANGE] or an https MCP URL
   plan-remove DIR INDEX                         what removing extensions[INDEX] drops, with egress nothing else needs (read-only)
+  status DIR [--skip-image-check]               Variant and image (newer verified image?), Preset drift and resync entries,
+                                                Pinned Ref ages, egress, unset host env names, pending recreate (read-only)
   vscode-settings [--settings FILE]             check the host VS Code settings ADR 0003 relies on
   up DIR [--recreate]                           start (or recreate) the project's container
   first-lockfile DIR                            create the first pnpm lockfile inside the container
@@ -84,6 +87,7 @@ const COMMANDS = {
     fn: inspect,
   },
   'plan-remove': { positionals: 2, options: {}, fn: planRemove },
+  status: { positionals: 1, options: { 'skip-image-check': { type: 'boolean' } }, fn: status },
   'vscode-settings': { positionals: 0, options: { settings: { type: 'string' } }, fn: vscodeSettings },
   up: { positionals: 1, options: { recreate: { type: 'boolean' } }, fn: up },
   'first-lockfile': { positionals: 1, options: {}, fn: firstLockfile },
@@ -288,7 +292,7 @@ const SIGNER_ARGS = ['--certificate-identity-regexp', SIGNER.identityRegexp, '--
  * Fails closed: any resolve error, missing tool, missing or foreign signature,
  * or missing provenance is `ok: false`. There is deliberately no option to skip a check.
  */
-function verifyImage([variant], { ref, current }, { repo }) {
+export function verifyImage([variant], { ref, current }, { repo }) {
   const source = variantSource(repo, variant, ref);
   const fail = (failed, error, extra = {}) => ({ doc: { ok: false, verified: false, variant, ref: source, failed, error, ...extra } });
 
@@ -417,7 +421,7 @@ function renderTemplate([variant, dir], { image, option = [], replace }, { repo 
 
 // ---------- Validation ----------
 
-function readJsonc(file) {
+export function readJsonc(file) {
   const errors = [];
   const value = parseJsonc(readFileSync(file, 'utf8'), errors, { allowTrailingComma: true, disallowComments: false });
   return { value, errors: errors.map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`) };
@@ -430,7 +434,7 @@ function variantOfImage(repo, image) {
   return listVariants(repo).find((v) => v.template && repositoryOf(templateManifest(repo, v.name).options?.image?.default ?? '') === want)?.name ?? null;
 }
 
-function validate([dir], _, { repo }) {
+export function validate([dir], _, { repo }) {
   const project = resolve(dir);
   const problems = [];
   const dcFile = join(project, '.devcontainer/devcontainer.json');
