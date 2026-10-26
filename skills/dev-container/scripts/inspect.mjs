@@ -11,7 +11,7 @@ import {
   CAPABILITIES, DEFAULT_GIT_BASE, describeEntry, externalSource, fetchBySha, pathInCheckout, repoUrl, schema, validateManifest,
 } from '../../../installer/src/index.mjs';
 import { UsageError } from './errors.mjs';
-import { pinnedImage, PROJECT, readImageLayers } from './image-layers.mjs';
+import { projectLayers } from './image-layers.mjs';
 import { covers, egressDeclarations, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -319,9 +319,8 @@ function projectContext(dir, entry, entryValid) {
   const read = readProjectManifest(resolve(dir));
   if (read.error) return { error: read.error, problems: read.problems };
   const { manifest } = read;
-  const image = readImageLayers(pinnedImage(resolve(dir)));
-  const declarations = egressDeclarations([...(image.known ? image.layers : []), { layer: PROJECT, manifest }]);
-  const allowed = [...new Set(declarations.map((d) => d.domain))];
+  const { image, layers: all } = projectLayers(resolve(dir), manifest);
+  const allowed = [...new Set(egressDeclarations(all).map((d) => d.domain))];
   const layers = image.known ? { known: true } : { known: false, reason: image.reason };
   // The same extension at any Pinned Ref: an update, not a second entry.
   const identity = (e) => {

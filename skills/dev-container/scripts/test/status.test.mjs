@@ -154,9 +154,11 @@ test('status reports Pinned Ref ages, egress, and unset host env names without p
   ]);
   assert.ok(d.egress.domains.every((x) => !x.coveredBy.length));
   const unknownCheck = h(['status', p, '--skip-image-check', '--domain', 'Fresh.Example.io']).doc.egress.check;
-  assert.deepEqual(unknownCheck, { domain: 'fresh.example.io', allowed: null, allowedBy: [], note: `Base coverage could not be checked: ${d.layers.reason}` });
+  assert.deepEqual([unknownCheck.domain, unknownCheck.allowed, unknownCheck.allowedBy], ['fresh.example.io', null, []], 'unknown, never "not allowed"');
+  assert.match(unknownCheck.note, /Base coverage could not be checked/);
   const subCheck = h(['status', p, '--skip-image-check', '--domain', 'img.cdn.example.com']).doc.egress.check;
   assert.equal(subCheck.allowed, true, 'a project domain covers its subdomain, layers or not');
+  assert.match(subCheck.note, /Base coverage could not be checked/, 'and says the layers are unknown');
   assert.deepEqual(subCheck.allowedBy.map((x) => x.domain), ['cdn.example.com', 'cdn.example.com']);
 
   assert.deepEqual(d.env.secrets.map((s) => [s.name, s.layer, s.hostEnv, s.set]), [['SEARCH_TOKEN', P, 'SEARCH_TOKEN', true]]);

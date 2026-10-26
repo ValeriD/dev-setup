@@ -14,8 +14,8 @@ import { validateManifest } from '../../../installer/src/index.mjs';
 import { readJson, readJsonc } from './manifests.mjs';
 
 export const IMAGE_MANIFESTS = '/opt/dev-setup/manifests';
-export const BASE = 'Base';
-export const VARIANT = 'Variant';
+const BASE = 'Base';
+const VARIANT = 'Variant';
 export const PROJECT = 'Consuming Project';
 
 function docker(args) {
@@ -29,6 +29,16 @@ export function pinnedImage(project) {
   if (!existsSync(file)) return null;
   const { value, errors } = readJsonc(file);
   return !errors.length && typeof value?.image === 'string' ? value.image : null;
+}
+
+/**
+ * A project's three layers as far as they can be read: the Base and Variant layers of its
+ * pinned image (when known), then its own manifest.
+ * @returns {{image: ReturnType<typeof readImageLayers>, layers: {layer: string, variant?: string, manifest: object}[]}}
+ */
+export function projectLayers(project, manifest) {
+  const image = readImageLayers(pinnedImage(project));
+  return { image, layers: [...(image.known ? image.layers : []), { layer: PROJECT, manifest }] };
 }
 
 /**

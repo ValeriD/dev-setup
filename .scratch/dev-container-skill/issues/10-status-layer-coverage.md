@@ -41,7 +41,7 @@
   - It gains `layers`.
   - `egress` is now `{ domains: [{domain, declaredBy, coveredBy}], check? }`, replacing `topLevel` and `entries`.
   - `env.secrets[]` gains `layer`. A Base or Variant secret has a `note` when it has no `remoteEnv` line.
-  - A new `--domain <host>` gives `egress.check` with `{ allowed: true | false | null, allowedBy, note? }`. The allow flow in `egress-and-secrets.md` uses it, so the agent does not do suffix matching itself. `null` means "Base coverage couldn't be checked".
+  - A new `--domain <host>` gives `egress.check` with `{ allowed: true | false | null, allowedBy, note? }`. The allow flow in `egress-and-secrets.md` uses it, so the agent does not do suffix matching itself. `null` means nothing in the project allows the domain and Base coverage couldn't be checked. Whenever the layers are unknown, `note` says so, even when the project itself allows the domain. `projectLayers(project, manifest)` gives the known layers plus the project manifest, and is shared by `status` and `inspect`.
 - `inspect --project` (`projectContext`) now takes its Base and Variant domains from the image too, and no longer reads `extensions/base.json` from the checkout. It reports `project.layers`.
 - Tests:
   - `status.test.mjs` builds a fixture image `FROM scratch` with a unique tag and removes it in `t.after`. The test checks there is no leftover container (`ps --filter ancestor`), and that `docker events` shows `create` and `destroy` but no `start`.
