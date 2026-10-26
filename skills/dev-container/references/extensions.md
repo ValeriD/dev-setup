@@ -4,7 +4,7 @@ An Agent Extension is added to a project only after the user has seen what it co
 
 ## Add
 
-1. Work out the source and pass it to `H inspect <source> --project <dir>`:
+1. Work out the source. If the user gave only a name ("the Playwright MCP"), find its repository, npm package or URL, say which one you found, and ask the user to confirm it before inspecting. Pass it to `H inspect <source> --project <dir>`:
    - a skill, plugin or hook script in a GitHub repository: `owner/repo`, plus `--path <dir-or-file>` inside it and `--ref <branch|tag|sha>` if the user named one (default: the default branch);
    - a plugin listed in a marketplace repository: `owner/repo --plugin <name>`;
    - a hook script: also `--event <Event>` and, if wanted, `--matcher <pattern>`. Ask for the event if the user did not say;
@@ -36,10 +36,11 @@ An Agent Extension is added to a project only after the user has seen what it co
 2. Run `H plan-remove <dir> <index>`. It is read-only and says:
    - `remove`: the entry. With `presetNote`, the entry came from a Preset: say that the project will differ from that Preset, and offer removing the whole Preset instead ([presets.md](presets.md));
    - `dropsWithEntry`: the entry's own egress domains, which go with it;
-   - `egress`: top-level domains that the entry named and nothing staying needs. Top-level egress carries no owner, so this is a proposal: the user may have allowed some of them for other reasons;
-   - `keepEgress`: domains that stay, with what still needs them;
-   - `note`: the pinned content could not be fetched; show the top-level `egress` and ask which domains to drop.
-3. Show the plan and ask once to apply it (the user may keep any of the `egress` domains).
+   - `egress`: top-level domains the entry certainly used (its own egress, its MCP server URLs) that nothing staying needs;
+   - `heuristicEgress`: top-level domains only seen in the entry's files that nothing staying needs. Label them as a heuristic. Top-level egress carries no owner, so both lists are proposals: the user may have allowed some of these domains for other reasons;
+   - `keepEgress`: domains that stay, with what still needs them (staying entries' egress, adopted Presets, hosts named in staying entries' pinned content);
+   - `note`: some pinned content could not be fetched; say which, show the top-level `egress` and ask which domains to drop.
+3. Show the plan and ask once to apply it. Propose dropping the `egress` domains; offer the `heuristicEgress` ones without recommending them.
 4. On yes, delete the entry and the agreed domains. Everything else stays untouched, including `remoteEnv` lines for secrets the entry named (removing those is not part of this operation; name them in the summary).
 
 **Done when `H validate <dir>` returns `ok: true`, or the user declined.**

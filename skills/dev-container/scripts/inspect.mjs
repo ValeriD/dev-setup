@@ -11,6 +11,7 @@ import { join, posix, resolve } from 'node:path';
 import {
   CAPABILITIES, DEFAULT_GIT_BASE, describeEntry, externalSource, fetchBySha, pathInCheckout, repoUrl, schema, validateManifest,
 } from '../../../installer/src/index.mjs';
+import { UsageError } from './errors.mjs';
 import { covers, egressNeededBy, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -21,7 +22,7 @@ export const MIN_RELEASE_AGE_DAYS = 7;
 const TEXT_LIMIT = 1 << 20;
 const SCRIPT_EXT = /\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|ps1|php)$/;
 const LIFECYCLE = ['preinstall', 'install', 'postinstall', 'prepare'];
-const D3 = 'Codex installs plugins and hooks only into its login volume ($CODEX_HOME), which the design forbids (node-devcontainer D3); add it for claude only';
+const CODEX_UNSUPPORTED = 'Codex installs plugins and hooks only into its login volume ($CODEX_HOME), which the design forbids (node-devcontainer D3); add it for claude only';
 
 /** Git base for owner/repo sources. DEV_SETUP_GIT_BASE is a test seam (also read by the start-up step). */
 const gitBase = () => process.env.DEV_SETUP_GIT_BASE || DEFAULT_GIT_BASE;
@@ -29,7 +30,7 @@ const lastLine = (s) => String(s ?? '').trim().split('\n').filter(Boolean).pop()
 
 // ---------- Sources and refs ----------
 
-function parseSource(source, UsageError) {
+function parseSource(source) {
   if (source.startsWith('npm:')) {
     const spec = source.slice(4);
     const at = spec.lastIndexOf('@');
@@ -205,19 +206,18 @@ export function inventory(root) {
     const pj = manifest?.value ?? {};
     if (manifest?.value) inv.plugin = { name: pj.name ?? null, version: pj.version ?? null, keys: Object.keys(pj) };
     const refs = (v) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
-    const load = (defaults, field, what, list) => {
-      const paths = [...defaults.filter((d) => existsSync(join(root, d))), ...refs(pj[field])];
+    // A component lives in its default file, in files plugin.json points at, or inline in plugin.json.
+    const load = (defaultFile, field, parse, list) => {
+      const paths = [...(existsSync(join(root, defaultFile)) ? [defaultFile] : []), ...refs(pj[field])];
       for (const p of new Set(paths)) {
-        const r = pluginJson(root, p, what);
+        const r = pluginJson(root, p, field);
         if (r.problem) inv.problems.push(r.problem);
-        else list.push(...(field === 'hooks' ? hookList(r.value, r.file) : mcpList(r.value, r.file)));
+        else list.push(...parse(r.value, r.file));
       }
-      if (pj[field] && typeof pj[field] === 'object' && !Array.isArray(pj[field])) {
-        list.push(...(field === 'hooks' ? hookList(pj[field], '.claude-plugin/plugin.json') : mcpList(pj[field], '.claude-plugin/plugin.json')));
-      }
+      if (pj[field] && typeof pj[field] === 'object' && !Array.isArray(pj[field])) list.push(...parse(pj[field], '.claude-plugin/plugin.json'));
     };
-    load(['hooks/hooks.json'], 'hooks', 'hooks', inv.hooks);
-    load(['.mcp.json'], 'mcpServers', 'mcpServers', inv.mcpServers);
+    load('hooks/hooks.json', 'hooks', hookList, inv.hooks);
+    load('.mcp.json', 'mcpServers', mcpList, inv.mcpServers);
   }
 
   inv.hosts.domains = [...hostFiles].sort(([a], [b]) => a.localeCompare(b)).map(([domain, fs]) => ({ domain, files: [...new Set(fs)].slice(0, 5) }));
@@ -298,11 +298,11 @@ function detectKind(root) {
 /** Why an entry cannot be written, in plain words; empty when it can. */
 function refusals(entry) {
   const reasons = validateManifest({ extensions: [entry] }).map((p) => (p.startsWith('extensions[0] ') ? p.slice(p.indexOf('): ') + 3) : p));
-  if ((entry.kind === 'plugin' || entry.kind === 'hook') && entry.agents.includes('codex')) reasons.push(D3);
+  if ((entry.kind === 'plugin' || entry.kind === 'hook') && entry.agents.includes('codex')) reasons.push(CODEX_UNSUPPORTED);
   return reasons;
 }
 
-function parseAgents(kind, agents, UsageError) {
+function parseAgents(kind, agents) {
   if (!agents) return [...CAPABILITIES[kind]];
   const list = agents.split(',').map((a) => a.trim()).filter(Boolean);
   const unknown = list.filter((a) => !['claude', 'codex'].includes(a));
@@ -311,26 +311,36 @@ function parseAgents(kind, agents, UsageError) {
 }
 
 /** The project's allowed domains (Base layer and the project's manifest) and whether the entry conflicts with it. */
-function projectContext(repo, dir, entry) {
+function projectContext(repo, dir, entry, entryValid) {
   if (!dir) return null;
   const read = readProjectManifest(resolve(dir));
   if (read.error) return { error: read.error, problems: read.problems };
   const { manifest } = read;
   const base = readJson(join(repo, 'extensions/base.json')).value?.egress ?? [];
   const allowed = [...new Set([...base, ...(manifest.egress ?? []), ...manifest.extensions.flatMap((e) => e.egress ?? [])])];
-  const same = (e) => JSON.stringify(e.source ?? e.url) === JSON.stringify(entry.source ?? entry.url) && e.kind === entry.kind;
-  const existing = manifest.extensions.flatMap((e, i) => (same(e) ? [describeEntry(e, i)] : []));
-  const conflicts = manifestProblems({ ...manifest, extensions: [...manifest.extensions, entry] })
-    .filter((p) => !manifestProblems(manifest).includes(p));
+  // The same extension at any Pinned Ref: an update, not a second entry.
+  const identity = (e) => {
+    const { sha, version, ...where } = e.source ?? {};
+    return JSON.stringify([e.kind, where, e.url ?? null]);
+  };
+  const existing = manifest.extensions.flatMap((e, i) => (identity(e) === identity(entry) ? [describeEntry(e, i)] : []));
+  // The project manifest is valid (readProjectManifest), so every problem here is the new entry's clash.
+  const conflicts = entryValid ? manifestProblems({ ...manifest, extensions: [...manifest.extensions, entry] }) : [];
   return { allowed, alreadyDeclared: existing, conflicts };
+}
+
+/** Whether the schema gives this kind its own `egress` field (MCP kinds); others use the top-level egress. */
+function takesEntryEgress(kind) {
+  const branch = schema.definitions.entry.allOf.find((b) => b.if.properties.kind.const === kind);
+  return 'egress' in (branch?.then.properties ?? {});
 }
 
 const allowedBy = (allowed, host) => allowed.find((d) => covers(d, host)) ?? null;
 
 // ---------- inspect ----------
 
-export function inspect([source], opts, { repo, UsageError }) {
-  const src = parseSource(source, UsageError);
+export function inspect([source], opts, { repo }) {
+  const src = parseSource(source);
   if (src.type !== 'git' && (opts.ref || opts.path || opts.plugin)) throw new UsageError('--ref, --path and --plugin apply to git sources only');
   if (opts.env && src.type !== 'npm') throw new UsageError('--env applies to npm (stdio MCP) sources only');
   if (opts['bearer-token-env'] && src.type !== 'url') throw new UsageError('--bearer-token-env applies to remote MCP URLs only');
@@ -338,11 +348,11 @@ export function inspect([source], opts, { repo, UsageError }) {
     if (!ENV_NAME.test(n)) throw new UsageError(`"${n}" is not an environment variable name (upper case, digits, _); pass the name, never a value`);
   }
   if (opts.kind && !(opts.kind in CAPABILITIES)) throw new UsageError(`unknown kind "${opts.kind}" (known: ${Object.keys(CAPABILITIES).join(', ')})`);
-  const r = src.type === 'git' ? inspectGit(src, opts, UsageError) : src.type === 'npm' ? inspectNpm(src, opts, UsageError) : inspectUrl(src, opts, UsageError);
+  const r = src.type === 'git' ? inspectGit(src, opts) : src.type === 'npm' ? inspectNpm(src, opts) : inspectUrl(src, opts);
   if (!r.entry) return { doc: { ok: false, source, ...r } };
 
   const reasons = [...refusals(r.entry), ...(r.reasons ?? [])];
-  const project = projectContext(repo, opts.project, r.entry);
+  const project = projectContext(repo, opts.project, r.entry, reasons.length === 0);
   if (project?.error) return { doc: { ok: false, source, error: `--project: ${project.error}`, problems: project.problems } };
 
   // Egress: domains on the entry itself (MCP kinds), domains the content certainly needs, and
@@ -352,7 +362,7 @@ export function inspect([source], opts, { repo, UsageError }) {
   const onEntry = r.entry.egress ?? [];
   const needed = (r.neededHosts ?? []).filter((h) => !onEntry.some((d) => covers(d, h)));
   const egress = {
-    target: 'egress' in (schema.definitions.entry.allOf.find((b) => b.if.properties.kind.const === r.entry.kind)?.then.properties ?? {}) ? 'entry' : 'top-level',
+    target: takesEntryEgress(r.entry.kind) ? 'entry' : 'top-level',
     onEntry,
     needed: needed.map((domain) => ({ domain, allowedBy: allowedBy(allowed, domain) })),
     detected: { heuristic: true, domains: (r.inventory?.hosts?.domains ?? []).filter((d) => !needed.includes(d.domain) && !onEntry.some((e) => covers(e, d.domain))).map((d) => ({ ...d, allowedBy: allowedBy(allowed, d.domain) })) },
@@ -373,7 +383,7 @@ export function inspect([source], opts, { repo, UsageError }) {
   return { doc };
 }
 
-function inspectGit(src, opts, UsageError) {
+function inspectGit(src, opts) {
   const ref = opts.ref ?? 'HEAD';
   const repoAt = repoUrl(src.repo, gitBase());
   const resolved = resolveRef(repoAt, ref);
@@ -388,7 +398,7 @@ function inspectGit(src, opts, UsageError) {
 
   const fetched = fetchContent(source);
   if (fetched.error) {
-    if (fetched.unpinnable) return { resolved: resolvedDoc, entry: { kind: 'plugin', agents: parseAgents('plugin', opts.agents, UsageError), source }, reasons: [`cannot pin this plugin: ${fetched.error}`] };
+    if (fetched.unpinnable) return { resolved: resolvedDoc, entry: { kind: 'plugin', agents: parseAgents('plugin', opts.agents), source }, reasons: [`cannot pin this plugin: ${fetched.error}`] };
     return { resolved: resolvedDoc, error: fetched.error };
   }
   try {
@@ -407,7 +417,7 @@ function inspectGit(src, opts, UsageError) {
     if (kind === 'mcp' || kind === 'mcp-remote') throw new UsageError(`a ${kind} entry does not come from a git repository; use npm:PACKAGE or an https URL`);
     if (kind === 'hook' && !opts.event) throw new UsageError('a hook entry needs --event (e.g. PreToolUse, SessionStart) and optionally --matcher');
 
-    const entry = { kind, agents: parseAgents(kind, opts.agents, UsageError) };
+    const entry = { kind, agents: parseAgents(kind, opts.agents) };
     if (kind === 'skill' && opts.name) entry.name = opts.name;
     if (kind === 'hook') Object.assign(entry, { event: opts.event, ...(opts.matcher !== undefined ? { matcher: opts.matcher } : {}) });
     entry.source = source;
@@ -437,7 +447,7 @@ function compareVersions(a, b) {
   if (x.pre === y.pre) return 0;
   if (x.pre === null) return 1;
   if (y.pre === null) return -1;
-  return x.pre < y.pre ? -1 : 1;
+  return x.pre.localeCompare(y.pre, 'en', { numeric: true });
 }
 
 /** `npm view ... --json`: package metadata from the registry. Nothing is downloaded or run. */
@@ -466,7 +476,7 @@ function defaultMcpName(pkg) {
   return (stripped || scope || bare).toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z0-9]+/, '');
 }
 
-function inspectNpm(src, opts, UsageError) {
+function inspectNpm(src, opts) {
   if (opts.kind && opts.kind !== 'mcp') throw new UsageError('an npm source is a stdio MCP server (kind mcp)');
   const versions = npmView([`${src.name}@${src.range}`, 'version']);
   if (versions.error) return { error: `cannot resolve ${src.name}@${src.range}: ${versions.error}` };
@@ -484,7 +494,7 @@ function inspectNpm(src, opts, UsageError) {
   const bin = typeof m.bin === 'string' ? { [src.name.split('/').pop()]: m.bin } : m.bin ?? {};
   const lifecycle = Object.fromEntries(LIFECYCLE.filter((s) => m.scripts?.[s]).map((s) => [s, m.scripts[s]]));
 
-  const entry = { kind: 'mcp', agents: parseAgents('mcp', opts.agents, UsageError), name: opts.name ?? defaultMcpName(src.name), source: { npm: src.name, version: pick } };
+  const entry = { kind: 'mcp', agents: parseAgents('mcp', opts.agents), name: opts.name ?? defaultMcpName(src.name), source: { npm: src.name, version: pick } };
   if (opts.env?.length) entry.env = [...new Set(opts.env)];
   const reasons = [];
   const warnings = [];
@@ -510,12 +520,12 @@ function inspectNpm(src, opts, UsageError) {
   };
 }
 
-function inspectUrl(src, opts, UsageError) {
+function inspectUrl(src, opts) {
   if (opts.kind && opts.kind !== 'mcp-remote') throw new UsageError('an https URL source is a remote MCP server (kind mcp-remote)');
   if (!DOMAIN.test(src.host) || isIp(src.host)) {
     return { error: `${src.host} cannot be an Egress Allowlist domain (a plain lower-case hostname is required), so this remote server cannot be allowed` };
   }
-  const entry = { kind: 'mcp-remote', agents: parseAgents('mcp-remote', opts.agents, UsageError), name: opts.name ?? defaultMcpName(src.host.split('.').slice(-2, -1)[0] ?? src.host), url: src.url, egress: [src.host] };
+  const entry = { kind: 'mcp-remote', agents: parseAgents('mcp-remote', opts.agents), name: opts.name ?? defaultMcpName(src.host.split('.').slice(-2, -1)[0] ?? src.host), url: src.url, egress: [src.host] };
   if (opts['bearer-token-env']) entry.bearerTokenEnv = opts['bearer-token-env'];
   return {
     resolved: { url: src.url },
@@ -527,7 +537,20 @@ function inspectUrl(src, opts, UsageError) {
 
 // ---------- plan-remove ----------
 
-export function planRemove([dir, index], _, { repo, UsageError }) {
+/** Hosts a pinned entry's content names: { definite, seen }, plus `error` when it cannot be fetched. */
+function contentHosts(source) {
+  if (!source?.sha) return { definite: [], seen: [] };
+  const fetched = fetchContent(source);
+  if (fetched.error) return { definite: [], seen: [], error: fetched.error };
+  try {
+    const inv = inventory(fetched.root);
+    return { definite: definiteHosts(inv), seen: inv.hosts.domains.map((d) => d.domain) };
+  } finally {
+    fetched.cleanup();
+  }
+}
+
+export function planRemove([dir, index], _, { repo }) {
   const project = resolve(dir);
   const read = readProjectManifest(project);
   if (read.error) return { doc: { ok: false, ...read } };
@@ -538,35 +561,40 @@ export function planRemove([dir, index], _, { repo, UsageError }) {
     throw new UsageError(`INDEX must be one of: ${entries.map((e, n) => `${n} = ${describeEntry(e, n)}`).join('; ') || '(the manifest has no entries)'}`);
   }
   const entry = entries[i];
-  const neededBy = egressNeededBy(repo, entries.flatMap((e, n) => (n === i ? [] : [{ entry: e, index: n }])));
+  const staying = entries.flatMap((e, n) => (n === i ? [] : [{ entry: e, index: n }]));
+  const neededBy = egressNeededBy(repo, staying);
   const topLevel = manifest.egress ?? [];
+  const notes = [];
 
-  // Candidates in the top-level egress: the entry's own domains, plus hosts its pinned
-  // content names (the add review proposes those there for kinds without entry egress).
-  let seen = [];
-  let note;
-  if (entry.source?.sha) {
-    const fetched = fetchContent(entry.source);
-    if (fetched.error) note = `cannot fetch the pinned content (${fetched.error}), so only the entry's own egress is matched; show the top-level egress and ask`;
-    else {
-      try {
-        const inv = inventory(fetched.root);
-        seen = [...definiteHosts(inv), ...inv.hosts.domains.map((d) => d.domain)];
-      } finally {
-        fetched.cleanup();
-      }
+  // Top-level egress has no owner: for kinds without entry egress, the add review puts their
+  // domains there. So the hosts each pinned entry's content names (MCP server URLs certainly,
+  // other URLs as a heuristic) stand in for ownership, for the removed and the staying entries.
+  const named = contentHosts(entry.source);
+  if (named.error) notes.push(`cannot fetch the pinned content of the entry (${named.error}), so only its own egress is matched; show the top-level egress and ask`);
+  const unchecked = [];
+  for (const s of staying) {
+    const hosts = contentHosts(s.entry.source);
+    if (hosts.error) unchecked.push(describeEntry(s.entry, s.index));
+    const why = `${describeEntry(s.entry, s.index)} (named in its pinned content)`;
+    for (const d of topLevel) {
+      if ([...hosts.definite, ...hosts.seen].some((h) => covers(d, h))) neededBy.set(d, [...new Set([...(neededBy.get(d) ?? []), why])]);
     }
   }
-  const candidates = topLevel.filter((d) => (entry.egress ?? []).includes(d) || seen.some((h) => covers(d, h)));
+  if (unchecked.length) notes.push(`cannot fetch the pinned content of ${unchecked.join(', ')}, so a domain they need may be proposed; check before dropping`);
+
+  const own = entry.egress ?? [];
+  const certain = topLevel.filter((d) => own.includes(d) || named.definite.some((h) => covers(d, h)));
+  const heuristic = topLevel.filter((d) => !certain.includes(d) && named.seen.some((h) => covers(d, h)));
   return {
     doc: {
       ok: true,
       dir: project,
       remove: { index: i, entry: describeEntry(entry, i), ...(entry.preset ? { preset: entry.preset } : {}) },
-      dropsWithEntry: (entry.egress ?? []).map((domain) => ({ domain, stillAllowedBy: [...(neededBy.get(domain) ?? []), ...(topLevel.includes(domain) ? ['top-level egress'] : [])] })),
-      egress: candidates.filter((d) => !neededBy.has(d)),
-      keepEgress: candidates.filter((d) => neededBy.has(d)).map((domain) => ({ domain, neededBy: neededBy.get(domain) })),
-      ...(note ? { note } : {}),
+      dropsWithEntry: own.map((domain) => ({ domain, stillAllowedBy: [...(neededBy.get(domain) ?? []), ...(topLevel.includes(domain) ? ['top-level egress'] : [])] })),
+      egress: certain.filter((d) => !neededBy.has(d)),
+      heuristicEgress: heuristic.filter((d) => !neededBy.has(d)),
+      keepEgress: [...certain, ...heuristic].filter((d) => neededBy.has(d)).map((domain) => ({ domain, neededBy: neededBy.get(domain) })),
+      ...(notes.length ? { note: notes.join('; ') } : {}),
       ...(entry.preset ? { presetNote: `this entry was copied from Preset "${entry.preset}"; removing it alone leaves the project out of sync with that Preset` } : {}),
     },
   };

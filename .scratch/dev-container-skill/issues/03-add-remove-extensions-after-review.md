@@ -47,6 +47,9 @@ It writes the pinned entry and its egress only after I approve. Removing an exte
 - `https://` URL sources produce an `mcp-remote` entry with the URL host as entry egress, plus an optional `--bearer-token-env`. A floating ref passed to `inspect` is resolved to a SHA, not refused. Floating refs and `mcp-remote` without egress are refused by `validate` (existing installer rules; covered by tests here).
 - Egress for kinds without an entry `egress` field (skill, plugin, hook) goes to the project's top-level `egress`. Top-level egress has no owner, so `plan-remove` finds candidates by fetching the removed entry's pinned content again and matching the hosts it names. This is a proposal that the user confirms, the same approach as `plan-remove-preset`.
 
+- The design says to check egress pruning through `status`'s "egress needed by" output. `status` (ticket 07) is not built, so the read-only `plan-remove` stands in for it, following the `plan-remove-preset` precedent. Its "needed by" logic lives in `manifests.mjs` (`egressNeededBy`) so that `status` can reuse it. Removing a whole Preset (SC-06's second sentence) is the existing `plan-remove-preset` from ticket 02.
+- After review: `plan-remove` also fetches each staying pinned entry and keeps a top-level domain that its content names. It splits the domains it proposes into certain ones (`egress`: the entry's own egress and its MCP server URLs) and heuristic ones (`heuristicEgress`: hosts only seen in its files).
+
 **For the product owner:**
 - Adding an optional `egress` field to skill, plugin and hook entries in the installer schema would make "egress only it needed" exact, with no re-fetch and no heuristic. The installer's `mergeLayers` already merges `entry.egress` for any kind. This is a public schema change, so it was not made here.
 

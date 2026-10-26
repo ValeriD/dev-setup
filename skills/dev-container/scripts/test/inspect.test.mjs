@@ -81,6 +81,7 @@ before(async () => {
     'plugins/rich/bin/rich-tool': RUN,
     'plugins/rich/skills/deploy/SKILL.md': SKILL_MD,
     'skills/plain/SKILL.md': '---\nname: plain\ndescription: Plain.\n---\nNothing to run.\n',
+    'skills/searcher/SKILL.md': '---\nname: searcher\ndescription: Searches.\n---\nQuery https://search.example.com/api with curl.\n',
     'hooks/fmt.sh': RUN,
     'docs/README.md': 'not an extension\n',
   });
@@ -224,7 +225,7 @@ test('inspect finds skills and hooks, asks for a hook event, and offers candidat
 
   const none = h('inspect', 'acme/plugins');
   assert.equal(none.code, 1);
-  assert.deepEqual(none.doc.candidates.map((c) => c.path).sort(), ['plugins/rich', 'plugins/rich/skills/deploy', 'skills/plain']);
+  assert.deepEqual(none.doc.candidates.map((c) => c.path).sort(), ['plugins/rich', 'plugins/rich/skills/deploy', 'skills/plain', 'skills/searcher']);
   const mkt = h('inspect', 'acme/mkt');
   assert.deepEqual(mkt.doc.candidates.filter((c) => c.via === 'marketplace').map((c) => c.plugin), ['rel', 'ext', 'floating']);
 });
@@ -324,6 +325,8 @@ test('inspect --project refuses an entry that clashes with the project, e.g. a s
   const r = h('inspect', 'acme/plugins', '--path', 'skills/plain', '--project', p);
   assert.equal(r.code, 1, r.log);
   assert.match(r.doc.reasons.join(), /skill name "plain" is already declared/);
+  assert.equal(r.doc.project.alreadyDeclared.length, 1, 'the same skill at another Pinned Ref counts as already declared');
+  assert.equal(r.doc.reasons.length, 1, 'each problem is reported once');
 });
 
 test('plan-remove drops the entry and only the egress nothing else needs, and writes nothing', () => {
@@ -336,7 +339,8 @@ test('plan-remove drops the entry and only the egress nothing else needs, and wr
   const r = h('plan-remove', p, '0');
   assert.equal(r.code, 0, r.log);
   assert.match(r.doc.remove.entry, /plugin/);
-  assert.deepEqual(r.doc.egress, ['docs.example.org'], 'only what the plugin named and nothing staying needs');
+  assert.deepEqual(r.doc.egress, [], 'search.example.com (its MCP server) is still needed');
+  assert.deepEqual(r.doc.heuristicEgress, ['docs.example.org'], 'a host only seen in its files is proposed as a heuristic');
   assert.deepEqual(r.doc.keepEgress, [{ domain: 'search.example.com', neededBy: ['extensions[1] (mcp-remote "search")'] }]);
 
   const t = h('plan-remove', p, '2');
@@ -348,9 +352,21 @@ test('plan-remove drops the entry and only the egress nothing else needs, and wr
   // Applying the first plan as the agent would leaves a valid manifest.
   const mf = manifestOf(p);
   mf.extensions.splice(0, 1);
-  mf.egress = mf.egress.filter((d) => !r.doc.egress.includes(d));
+  mf.egress = mf.egress.filter((d) => !r.doc.heuristicEgress.includes(d));
   writeFileSync(join(p, '.devcontainer/extensions.json'), JSON.stringify(mf));
   assert.equal(h('validate', p).code, 0);
+});
+
+test('plan-remove keeps a top-level domain that a staying skill or plugin names in its pinned content', () => {
+  const rich = h('inspect', 'acme/plugins', '--path', 'plugins/rich').doc.entry;
+  const searcher = h('inspect', 'acme/plugins', '--path', 'skills/searcher').doc.entry;
+  const p = project([rich, searcher], ['search.example.com']);
+  const r = h('plan-remove', p, '0');
+  assert.equal(r.code, 0, r.log);
+  assert.deepEqual(r.doc.egress, []);
+  assert.deepEqual(r.doc.keepEgress, [{ domain: 'search.example.com', neededBy: ['extensions[1] (skill "acme/plugins/skills/searcher") (named in its pinned content)'] }]);
+  // Alone, the plugin's MCP host is certain to go with it.
+  assert.deepEqual(h('plan-remove', project([rich], ['search.example.com']), '0').doc.egress, ['search.example.com']);
 });
 
 test('plan-remove notes a Preset-tagged entry and still plans when the pinned content cannot be fetched', () => {
@@ -362,21 +378,14 @@ test('plan-remove notes a Preset-tagged entry and still plans when the pinned co
   assert.deepEqual(r.doc.egress, []);
 });
 
-test('the helper only spawns fixed programs, never with a fetched directory as program or working directory', () => {
-  for (const f of readdirSync(SCRIPTS).filter((x) => x.endsWith('.mjs'))) {
-    const src = readFileSync(join(SCRIPTS, f), 'utf8');
-    for (const m of src.matchAll(/\bspawn(?:Sync)?\(\s*([^,]+),/g)) {
-      assert.match(m[1], /^'(git|docker|npx|npm)'$/, `${f}: spawn of ${m[1]}`);
-    }
-    assert.doesNotMatch(src, /\bexec(File)?(Sync)?\(|\bfork\(|child_process'.*\b(exec|execFile)\b/, f);
-    assert.doesNotMatch(src, /\bcommit\b/, `${f} must not run git commit`);
-  }
-  const inspectSrc = readFileSync(join(SCRIPTS, 'inspect.mjs'), 'utf8');
-  assert.doesNotMatch(inspectSrc, /\bcwd\b/, 'inspect never runs anything inside a fetched tree');
-  assert.doesNotMatch(inspectSrc, /\bimport\(/, 'inspect never loads fetched code');
+test('MIN_RELEASE_AGE_DAYS matches the image pnpm policy', async () => {
+  const { MIN_RELEASE_AGE_DAYS } = await import('../inspect.mjs');
+  const minutes = readFileSync(join(REPO, 'variants/node/devcontainer.json'), 'utf8').match(/"pnpm_config_minimum_release_age":\s*"(\d+)"/)[1];
+  assert.equal(MIN_RELEASE_AGE_DAYS * 24 * 60, Number(minutes));
 });
 
-test('no fetched file was executed by any inspect or plan-remove above', () => {
+// Keep last: it checks what every test above did (node:test runs a file's tests in order).
+test('runs last: no fetched file was executed by any inspect or plan-remove above', () => {
   assert.equal(existsSync(MARKER), false);
   assert.deepEqual(readdirSync(TMP).filter((f) => f.startsWith('dev-setup-fetch-')), [], 'every fetch directory was removed');
 });

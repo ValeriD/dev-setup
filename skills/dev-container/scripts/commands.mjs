@@ -12,6 +12,7 @@ import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
 import { describeEntry, schema, secretNames } from '../../../installer/src/index.mjs';
 import { countTags, egressNeededBy, listPresets, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
 import { inspect, planRemove } from './inspect.mjs';
+import { UsageError } from './errors.mjs';
 
 /** Same pin as the acceptance suite (tests/lib.mjs) and CI (CLI_VERSION). */
 export const DEVCONTAINER_CLI = '@devcontainers/cli@0.89.0';
@@ -35,7 +36,7 @@ export const IMAGE_LABELS = {
 };
 const PLACEHOLDER = /\$\{templateOption:([A-Za-z0-9_-]+)\}/g;
 
-export class UsageError extends Error {}
+export { UsageError } from './errors.mjs';
 
 const USAGE = `usage: dev-container.mjs <command> [args]
   check                                         verify the skill link and checkout
@@ -80,9 +81,9 @@ const COMMANDS = {
       name: { type: 'string' }, event: { type: 'string' }, matcher: { type: 'string' }, env: { type: 'string', multiple: true },
       'bearer-token-env': { type: 'string' }, project: { type: 'string' },
     },
-    fn: (args, opts, ctx) => inspect(args, opts, { ...ctx, UsageError }),
+    fn: inspect,
   },
-  'plan-remove': { positionals: 2, options: {}, fn: (args, opts, ctx) => planRemove(args, opts, { ...ctx, UsageError }) },
+  'plan-remove': { positionals: 2, options: {}, fn: planRemove },
   'vscode-settings': { positionals: 0, options: { settings: { type: 'string' } }, fn: vscodeSettings },
   up: { positionals: 1, options: { recreate: { type: 'boolean' } }, fn: up },
   'first-lockfile': { positionals: 1, options: {}, fn: firstLockfile },
