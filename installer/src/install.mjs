@@ -2,7 +2,8 @@
 import { readFileSync, mkdirSync, writeFileSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, join, dirname } from 'node:path';
 import { assertValidManifest, describeEntry, ManifestError } from './validate.mjs';
-import { installMcpPackages, writeMcpConfig } from './mcp.mjs';
+import { installMcpPackages, writeMcpConfig, writeAtomic } from './mcp.mjs';
+import { secretDeclarers, renderSecretsList } from './secrets.mjs';
 import { installClaude, writeJson } from './claude.mjs';
 import { fetchBySha, repoUrl, copyTree, pathInCheckout, DEFAULT_GIT_BASE } from './fetch.mjs';
 
@@ -13,7 +14,7 @@ export const SYSTEM_PATHS = {
   mcpRoot: '/opt/dev-setup/mcp',
   claudeMcp: '/etc/claude-code/managed-mcp.json',
   codexConfig: '/etc/codex/config.toml',
-  secretsOut: '/etc/dev-setup/mcp-secrets',
+  secretsOut: '/etc/dev-setup/secrets', // Named Secret names (MCP and container-wide), read by check-secrets.sh
   // Claude plugins and hooks: policy template in, managed settings out, generated marketplaces and hook scripts.
   claudePolicy: '/opt/dev-setup/claude-policy.json',
   claudeSettings: '/etc/claude-code/managed-settings.json',
@@ -41,12 +42,14 @@ export function skillName(entry) {
 }
 
 /**
- * Union of Extension Layers (in order) and of their Egress Allowlist domains.
+ * Union of Extension Layers (in order), of their Egress Allowlist domains and of
+ * their top-level (container-wide) Named Secrets.
  * @param {{label: string, manifest: object}[]} layers
  */
 export function mergeLayers(layers) {
   const extensions = [];
   const egress = [];
+  const secrets = [];
   const skills = new Map();
   const servers = new Map();
   const problems = [];
@@ -71,9 +74,10 @@ export function mergeLayers(layers) {
       for (const d of entry.egress ?? []) egress.push(d);
     });
     for (const d of manifest.egress ?? []) egress.push(d);
+    for (const n of manifest.secrets ?? []) secrets.push(n);
   }
   if (problems.length) throw new ManifestError(problems);
-  return { extensions, egress: [...new Set(egress)] };
+  return { extensions, egress: [...new Set(egress)], secrets: [...new Set(secrets)] };
 }
 
 /** Domains in first-seen order, one per line, in the format the start-up step consumes. */
@@ -145,6 +149,13 @@ function writeAllowlist(file, egress, sources) {
   renameSync(tmp, file);
 }
 
+/** Every layer's Named Secrets with their declarers; written in both modes, whether or not MCP is declared. */
+function writeSecretsList(file, merged) {
+  const declarers = secretDeclarers(merged.extensions, merged.secrets);
+  writeAtomic(file, renderSecretsList(declarers));
+  return [...declarers.keys()];
+}
+
 const resolvePaths = (paths) => ({ ...SYSTEM_PATHS, ...Object.fromEntries(Object.entries(paths).filter(([, v]) => v !== undefined)) });
 
 /**
@@ -160,12 +171,13 @@ export function installBuild({ manifests, gitBase, ...paths }) {
   const skills = installSkills(merged.extensions, { claudeSkills: out.claudeSkills, codexSkills: out.codexSkills, gitBase });
   const mcp = installMcpPackages(merged.extensions, { mcpRoot: out.mcpRoot });
   writeMcpConfig(merged.extensions, out);
+  const secrets = writeSecretsList(out.secretsOut, merged);
   // The image layer's plugins and hooks are rendered into the managed settings base file, on top of the policy template.
   const claude = installClaude(merged.extensions, { layer: 'image', marketplaces: out.marketplaces, hooks: out.hooks, gitBase });
   const policy = JSON.parse(readFileSync(out.claudePolicy, 'utf8'));
   writeJson(out.claudeSettings, { ...policy, ...claude.settings });
   writeAllowlist(out.egressOut, merged.egress, manifests);
-  return { skills, mcp, plugins: claude.plugins, hooks: claude.hooks, egress: merged.egress };
+  return { skills, mcp, plugins: claude.plugins, hooks: claude.hooks, egress: merged.egress, secrets };
 }
 
 /**
@@ -184,9 +196,10 @@ export function installStart({ manifests, project, gitBase, ...paths }) {
   const skills = installSkills(mine, { claudeSkills: out.claudeSkills, codexSkills: out.codexSkills, gitBase, overwrite: true });
   const mcp = installMcpPackages(mine, { mcpRoot: out.mcpRoot, overwrite: true });
   writeMcpConfig(merged.extensions, out); // all layers: the rendered files are regenerated whole
+  const secrets = writeSecretsList(out.secretsOut, merged);
   // The project layer's plugins and hooks go into a drop-in that Claude merges over the image's base file.
   const claude = installClaude(mine, { layer: 'project', marketplaces: out.marketplaces, hooks: out.hooks, gitBase });
   writeJson(out.claudeDropin, claude.settings);
   writeAllowlist(out.egressOut, merged.egress, files);
-  return { skills, mcp, plugins: claude.plugins, hooks: claude.hooks, egress: merged.egress };
+  return { skills, mcp, plugins: claude.plugins, hooks: claude.hooks, egress: merged.egress, secrets };
 }

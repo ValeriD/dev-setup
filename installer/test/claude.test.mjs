@@ -64,7 +64,7 @@ function install(mode, ...extensions) {
   const p = { settings: join(d, 'managed-settings.json'), dropin: join(d, 'managed-settings.d/50-project.json'), mkts: join(d, 'mkts'), hooks: join(d, 'hooks') };
   const args = [CLI, 'install', '--mode', mode, '--git-base', gitBase, '--claude-skills', join(d, 'cs'), '--codex-skills', join(d, 'xs'),
     '--egress-out', join(d, 'allow.txt'), '--claude-policy', POLICY, '--claude-settings', p.settings, '--claude-dropin', p.dropin,
-    '--marketplaces', p.mkts, '--hooks', p.hooks];
+    '--marketplaces', p.mkts, '--hooks', p.hooks, '--secrets-out', join(d, 'secrets')];
   if (mode === 'build') args.push('--manifest', f('layer.json', { extensions }));
   else args.push('--manifest', f('base.json', { extensions: [] }), '--project', f('project.json', { extensions }));
   const r = spawnSync('node', args, { encoding: 'utf8' });

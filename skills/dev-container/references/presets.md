@@ -1,6 +1,6 @@
 # Presets
 
-A Preset is `presets/<name>.json` in the dev-setups checkout (`repo` from `H check`): an Extension Manifest with a one-line `description`. A Preset carries egress only on its entries (each entry's own `egress`), never a top-level `egress`, so its entries carry everything it brings in. A project adopts a Preset by **copying** its entries into its own `.devcontainer/extensions.json`, each tagged `"preset": "<name>"`. The tag is the only link back: nothing resolves Presets at container start, and editing a Preset changes no project (ADR 0005).
+A Preset is `presets/<name>.json` in the dev-setups checkout (`repo` from `H check`): an Extension Manifest with a one-line `description`. A Preset carries egress only on its entries (each entry's own `egress`), never a top-level `egress`, and secrets only on its MCP entries, never a top-level `secrets`, so its entries carry everything it brings in. A project adopts a Preset by **copying** its entries into its own `.devcontainer/extensions.json`, each tagged `"preset": "<name>"`. The tag is the only link back: nothing resolves Presets at container start, and editing a Preset changes no project (ADR 0005).
 
 `H presets` lists every Preset with `description`, `extensions` and `problems`. Offer only Presets whose `problems` is empty; name the others with their problems so the user can fix them. `H presets --name <name>` checks one.
 
@@ -26,7 +26,7 @@ Branch on what the user asked for, then follow that section. Each ends on the co
 ## Save a project's extensions as a Preset
 
 1. Ask for the Preset name (lower case, digits, `.`, `_`, `-`) and a one-line description. If `presets/<name>.json` exists, this is an edit: ask whether to replace it.
-2. Write `presets/<name>.json` in the checkout: `$schema` copied from the project manifest, the `description`, and the project's `extensions` with every `preset` field removed. Leave out the project's top-level `egress`: a Preset has none. If the project has some, name those domains and ask, for each, which entry needs it; add it to that entry's `egress` in the Preset file, or leave it out.
+2. Write `presets/<name>.json` in the checkout: `$schema` copied from the project manifest, the `description`, and the project's `extensions` with every `preset` field removed. Leave out the project's top-level `egress`: a Preset has none. If the project has some, name those domains and ask, for each, which entry needs it; add it to that entry's `egress` in the Preset file, or leave it out. Leave out the top-level `secrets` too: container-wide secrets are the project's own. Name them, and say a secret an MCP server needs belongs on that entry (`env` or `bearerTokenEnv`).
 3. The project stays as it is: its entries keep their current tags (or none).
 
 **Done when `H presets --name <name>` returns `ok: true`.**

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/valerid/dev-setup/main/installer/extensions.schema.json",
   "title": "Dev Setup Extension Manifest",
-  "description": "Declares one Extension Layer: Agent Extensions with a Pinned Ref, and extra Egress Allowlist domains.",
+  "description": "Declares one Extension Layer: Agent Extensions with a Pinned Ref, extra Egress Allowlist domains and container-wide Named Secrets.",
   "type": "object",
   "required": ["extensions"],
   "additionalProperties": false,
@@ -11,7 +11,8 @@
     "description": { "type": "string", "minLength": 1, "description": "One line saying what the set is for. Required in a Preset file (presets/<name>.json); ignored by the installer." },
     "notes": { "type": "array", "items": { "type": "string" }, "description": "Free-form notes; ignored by the installer." },
     "extensions": { "type": "array", "items": { "$ref": "#/definitions/entry" } },
-    "egress": { "$ref": "#/definitions/domains", "description": "Domains the layer itself needs, independent of any entry. Removing an extension never removes one of these; a domain an extension needs goes on that entry's own egress." }
+    "egress": { "$ref": "#/definitions/domains", "description": "Domains the layer itself needs, independent of any entry. Removing an extension never removes one of these; a domain an extension needs goes on that entry's own egress." },
+    "secrets": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" }, "description": "Container-wide Named Secrets: host env var names the container needs whatever extension runs. Only names are declared, never values; each needs a remoteEnv \"NAME\": \"${localEnv:NAME}\" line. A secret an MCP server needs goes on that entry (env or bearerTokenEnv) instead; a name may be declared in both places." }
   },
   "definitions": {
     "domain": {

@@ -3,7 +3,8 @@
 //    is pre-installed under /opt/dev-setup/mcp and listed by both Agents, a
 //    secret reaches its environment, and no value lands in an image layer or file.
 // 2. The real start path (Template -> up): a remote server entry is listed, and
-//    a named secret that is missing from the host env prints a warning at attach.
+//    a named secret that is missing from the host env prints a warning at attach
+//    naming its declarer, including a container-wide one with no MCP server.
 // All secrets are fake.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -81,7 +82,7 @@ test('SC-17: a stdio server is pre-installed, listed by both Agents and runs wit
   assert.equal(dx('node', 'echo x >> /etc/claude-code/managed-mcp.json').code === 0, false);
   assert.equal(dx('node', 'echo x >> /opt/dev-setup/mcp/fx/node_modules/fx-mcp/server.mjs').code === 0, false);
   assert.equal(dx('node', 'echo x >> /etc/codex/config.toml').code === 0, false);
-  assert.equal(dx('node', 'echo x >> /etc/dev-setup/mcp-secrets').code === 0, false);
+  assert.equal(dx('node', 'echo x >> /etc/dev-setup/secrets').code === 0, false);
 });
 
 test('SC-17: no secret value appears in image layers, rendered files or the repository', () => {
@@ -97,37 +98,51 @@ test('an MCP package inside the 7-day release cooldown is refused, naming the en
   assert.match(i.err, /extensions\[0\] \(mcp "fresh"\).*cannot install fresh-mcp@1\.0\.0/);
 });
 
-test('SC-17: a named secret missing from the host env warns at attach; a set one does not', () => {
-  const warn = /WARNING: MCP secret T09_DOCS_TOKEN is not set/;
-  const project = (withSecret) => {
+test('SC-17: a named secret missing from the host env warns at attach, naming its declarer; a set one does not', () => {
+  const WIDE = 'T08_WIDE_TOKEN';
+  const warn = /WARNING: secret T09_DOCS_TOKEN \(MCP server "docs"\) is not set/;
+  const wideWarn = /WARNING: secret T08_WIDE_TOKEN \(container-wide\) is not set/;
+  const project = (manifest, withSecrets = []) => {
     const dir = createProject(registry.templateId);
     const p = { dir, containerId: null };
     projects.push(p);
-    writeFileSync(join(dir, '.devcontainer/extensions.json'), JSON.stringify({ extensions: [remote] }));
-    if (withSecret) {
-      const f = join(dir, '.devcontainer/devcontainer.json');
-      writeFileSync(f, readFileSync(f, 'utf8').replace('"remoteEnv": {', '"remoteEnv": {\n    "T09_DOCS_TOKEN": "${localEnv:T09_DOCS_TOKEN}",'));
-    }
+    writeFileSync(join(dir, '.devcontainer/extensions.json'), JSON.stringify(manifest));
+    const f = join(dir, '.devcontainer/devcontainer.json');
+    const lines = withSecrets.map((n) => `\n    "${n}": "\${localEnv:${n}}",`).join('');
+    writeFileSync(f, readFileSync(f, 'utf8').replace('"remoteEnv": {', `"remoteEnv": {${lines}`));
     return p;
+  };
+  const up = (p) => {
+    const r = tryUp(p.dir);
+    p.containerId = containerFor(p.dir);
+    assert.equal(r.code, 0, r.err);
+    return r.out + r.err;
   };
 
   delete process.env.T09_DOCS_TOKEN;
-  const missing = project(false);
-  const r1 = tryUp(missing.dir);
-  missing.containerId = containerFor(missing.dir);
-  assert.equal(r1.code, 0, r1.err);
-  assert.match(r1.out + r1.err, warn);
+  delete process.env[WIDE];
+  const missing = project({ extensions: [remote] });
+  const out1 = up(missing);
+  assert.match(out1, warn);
   const listed = exec(missing.dir, 'cd /tmp && claude mcp list 2>&1; codex mcp list 2>&1').out;
   assert.match(listed, /docs: https:\/\/example\.com\/mcp/);
   assert.match(listed, /docs\s+https:\/\/example\.com\/mcp/);
 
+  // A container-wide secret with no MCP server anywhere: still listed and warned about.
+  const wideOnly = up(project({ extensions: [], secrets: [WIDE] }));
+  assert.match(wideOnly, wideWarn);
+  assert.doesNotMatch(wideOnly, /T09_DOCS_TOKEN/);
+
+  // Both set, and T09_DOCS_TOKEN declared by the MCP entry and container-wide: no warning.
   process.env.T09_DOCS_TOKEN = FAKE;
-  const given = project(true);
-  const r2 = tryUp(given.dir);
-  given.containerId = containerFor(given.dir);
-  assert.equal(r2.code, 0, r2.err);
-  assert.doesNotMatch(r2.out + r2.err, warn);
+  process.env[WIDE] = FAKE;
+  const given = project({ extensions: [remote], secrets: [WIDE, 'T09_DOCS_TOKEN'] }, ['T09_DOCS_TOKEN', WIDE]);
+  const out2 = up(given);
+  assert.doesNotMatch(out2, /WARNING: secret/);
   const seen = exec(given.dir, 'printenv T09_DOCS_TOKEN').out.trim();
+  const wideSet = exec(given.dir, `test -n "$${WIDE}"`).code;
   delete process.env.T09_DOCS_TOKEN;
+  delete process.env[WIDE];
   assert.equal(seen, FAKE, 'the secret reaches the container environment');
+  assert.equal(wideSet, 0, 'the container-wide secret reaches it too');
 });

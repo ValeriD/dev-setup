@@ -1,12 +1,14 @@
 // MCP servers: stdio servers are installed ahead of time with pnpm at an exact
 // version (never fetched by npx at runtime); both kinds are rendered into the
 // root-owned config each Agent reads. Secrets are passed by environment variable
-// name only: the rendered files reference names, never values.
+// name only: the rendered files reference names, never values. The list of
+// Named Secrets is written by the install modes (secrets.mjs), MCP or not.
 import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync, rmSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { ManifestError, describeEntry } from './validate.mjs';
+import { secretNames } from './secrets.mjs';
 
 // The pnpm supply-chain policy (ADR 0001). The image sets it as env for dev-user
 // shells, but a build step and the root start-up step do not see that metadata,
@@ -23,10 +25,6 @@ const BLOCK_END = '# END dev-setup mcp_servers';
 
 const isMcp = (e) => e.kind === 'mcp' || e.kind === 'mcp-remote';
 
-/** Names of the host env vars an MCP entry needs (stdio `env`, remote `bearerTokenEnv`). */
-export function secretNames(entry) {
-  return entry.kind === 'mcp-remote' ? (entry.bearerTokenEnv ? [entry.bearerTokenEnv] : []) : entry.env ?? [];
-}
 
 /** Resolve the executable file of an installed package from its `bin` field. */
 function binPath(pkgDir, pkgName) {
@@ -128,7 +126,8 @@ export function withCodexMcpBlock(text, servers) {
   return out;
 }
 
-function writeAtomic(file, content) {
+/** Write a root-owned, world-readable file by rename, so a reader never sees half of it. */
+export function writeAtomic(file, content) {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, content);
@@ -142,16 +141,14 @@ function writeAtomic(file, content) {
  * of MCP servers, so the file exists only when something was declared.
  * @param {object[]} extensions merged entries of all layers
  */
-export function writeMcpConfig(extensions, { mcpRoot, claudeMcp, codexConfig, secretsOut }) {
+export function writeMcpConfig(extensions, { mcpRoot, claudeMcp, codexConfig }) {
   const mcp = extensions.filter(isMcp);
-  if (mcp.length === 0) return { servers: [], secrets: [] }; // touch nothing: no MCP, no config, no exclusive control
+  if (mcp.length === 0) return { servers: [] }; // touch nothing: no MCP, no config, no exclusive control
   const claude = renderClaudeMcp(extensions, mcpRoot);
   const codex = renderCodexMcp(extensions, mcpRoot);
   if (Object.keys(claude.mcpServers).length) writeAtomic(claudeMcp, `${JSON.stringify(claude, null, 2)}\n`);
   if (Object.keys(codex).length || (existsSync(codexConfig) && readFileSync(codexConfig, 'utf8').includes(BLOCK_BEGIN))) {
     writeAtomic(codexConfig, withCodexMcpBlock(existsSync(codexConfig) ? readFileSync(codexConfig, 'utf8') : '', codex));
   }
-  const secrets = [...new Set(mcp.flatMap(secretNames))];
-  writeAtomic(secretsOut, secrets.map((n) => `${n}\n`).join(''));
-  return { servers: mcp.map((e) => e.name), secrets };
+  return { servers: mcp.map((e) => e.name) };
 }

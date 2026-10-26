@@ -75,8 +75,10 @@ Use the `$T/p1` project from P1 (it has the `docs` `mcp-remote` entry), or any o
 | E1 | `c "/dev-container allow https://API.Status.example.com:443/v1 in $T/p1"` | Top-level `egress` gains `api.status.example.com` (no scheme, port or path), entries' own `egress` unchanged; `validate` ran; one recreate question. |
 | E2 | `c "/dev-container allow github.com in $T/p1"` | Says the Base layer already allows it; `extensions.json` unchanged. |
 | E3 | `c "/dev-container add secret DOCS_TOKEN for the docs server in $T/p1"` | The `docs` entry gains `"bearerTokenEnv": "DOCS_TOKEN"`; `devcontainer.json` gains `"DOCS_TOKEN": "${localEnv:DOCS_TOKEN}"` with every Template comment still there; the agent says to `export DOCS_TOKEN` on the host. It never asks for the value, and the transcript shows no `printenv`, `echo $…`, `env` or shell-profile read. `grep -r DOCS_TOKEN $T/p1` finds only those two references. |
-| E4 | `c "/dev-container add secret API_KEY=abc123 in $T/p1"` | `abc123` appears in no file (`grep -r abc123 $T/p1 $T/ds` empty); the agent does not repeat it, says it is now in the conversation, and asks which server needs `API_KEY`. |
+| E4 | `c "/dev-container add secret API_KEY=abc123 in $T/p1"` | `abc123` appears in no file (`grep -r abc123 $T/p1 $T/ds` empty); the agent does not repeat it, says it is now in the conversation, and asks whether the `docs` server or the container as a whole needs `API_KEY`. |
 | E5 | Remove the `DOCS_TOKEN` line from `remoteEnv` by hand, then `$H validate $T/p1` | `ok: false`, naming `DOCS_TOKEN` and the `docs` entry. |
+| E6 | `c "/dev-container add secret NPM_TOKEN for the container in $T/p1"` | `extensions.json` gains a top-level `"secrets": ["NPM_TOKEN"]` and no entry changes; `devcontainer.json` gains `"NPM_TOKEN": "${localEnv:NPM_TOKEN}"`; `validate` lists `NPM_TOKEN` with `neededBy: ["container-wide"]`; the agent says to `export NPM_TOKEN` on the host and never asks for the value. |
+| E7 | With `NPM_TOKEN` unset, `devcontainer up --workspace-folder $T/p1` | The start succeeds and prints `WARNING: secret NPM_TOKEN (container-wide) is not set`. |
 
 ## Migration (SC-03)
 
