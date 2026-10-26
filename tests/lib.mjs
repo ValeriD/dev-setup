@@ -8,7 +8,12 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
-export const IMAGE = process.env.DEV_SETUP_TEST_IMAGE ?? 'dev-setup-node:test';
+export const DEFAULT_IMAGE = 'dev-setup-node:test';
+// Under `npm test` the global setup (tests/global-setup.mjs) gives the run its own image tag,
+// project root and label; a test file run on its own falls back to the shared tag and tmpdir.
+export const IMAGE = process.env.DEV_SETUP_TEST_IMAGE ?? DEFAULT_IMAGE;
+export const RUN_LABEL = 'dev-setup.test-run';
+export const runLabelArgs = () => (process.env.DEV_SETUP_TEST_RUN ? ['--label', `${RUN_LABEL}=${process.env.DEV_SETUP_TEST_RUN}`] : []);
 const CLI = ['npx', '-y', '@devcontainers/cli@0.89.0'];
 const REGISTRY_IMAGE = 'registry:2.8.3';
 
@@ -30,11 +35,19 @@ export function pins() {
   return { claude: arg('CLAUDE_CODE_VERSION'), codex: arg('CODEX_VERSION'), pnpm: arg('PNPM_VERSION') };
 }
 
+/** A fresh temp folder for a test project, under the run's root when there is one. */
+export function projectDir(prefix) {
+  return mkdtempSync(join(process.env.DEV_SETUP_TEST_ROOT ?? tmpdir(), prefix));
+}
+
+/** The revision the run labels its image with: recorded once at the start of the run. */
+export const builtRevision = () => process.env.DEV_SETUP_TEST_REVISION ?? headRevision();
+
 export function buildImage() {
   if (process.env.DEV_SETUP_TEST_SKIP_BUILD) return; // CI builds once and tests that image
   const dir = join(REPO, 'variants/node');
   // Labels the image with this checkout's commit, as CI does with GITHUB_SHA.
-  const env = { ...process.env, DEV_SETUP_REVISION: headRevision() };
+  const env = { ...process.env, DEV_SETUP_REVISION: builtRevision() };
   must(cli(['build', '--workspace-folder', dir, '--config', join(dir, 'devcontainer.json'), '--image-name', IMAGE], { env }), 'image build');
 }
 
@@ -44,7 +57,7 @@ export function headRevision() {
 
 /** Throwaway local registry holding the published Template. */
 export function startTemplateRegistry() {
-  const id = must(run('docker', ['run', '-d', '--rm', '-p', '127.0.0.1::5000', REGISTRY_IMAGE]), 'registry start').out.trim();
+  const id = must(run('docker', ['run', '-d', '--rm', ...runLabelArgs(), '-p', '127.0.0.1::5000', REGISTRY_IMAGE]), 'registry start').out.trim();
   const port = run('docker', ['port', id, '5000/tcp']).out.trim().split(':').pop();
   const registry = `localhost:${port}`;
   for (let i = 0; i < 50; i++) {
@@ -54,13 +67,13 @@ export function startTemplateRegistry() {
   must(cli(['templates', 'publish', '-r', registry, '-n', 'dev-setup', join(REPO, 'templates')]), 'template publish');
   return {
     templateId: `${registry}/dev-setup/node:0.1.0`,
-    stop: () => run('docker', ['rm', '-f', id]),
+    stop: () => run('docker', ['rm', '-fv', id]),
   };
 }
 
 /** A fresh folder with a `.git` directory, the Template applied, ready for `up`. */
 export function createProject(templateId) {
-  const dir = mkdtempSync(join(tmpdir(), 'dev-setup-proj-'));
+  const dir = projectDir('dev-setup-proj-');
   must(run('git', ['init', '-q', '-b', 'main'], { cwd: dir }), 'git init');
   must(cli(['templates', 'apply', '-w', dir, '-t', templateId, '-a', JSON.stringify({ image: IMAGE })]), 'template apply');
   return dir;

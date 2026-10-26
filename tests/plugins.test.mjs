@@ -6,12 +6,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { IMAGE, run, buildImage, startTemplateRegistry, createProject, up, exec, removeProject } from './lib.mjs';
+import { IMAGE, run, buildImage, startTemplateRegistry, createProject, up, exec, removeProject, projectDir } from './lib.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'dev-setup-plugins-'));
+const root = projectDir('dev-setup-plugins-');
 const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' }).trim();
 const tag = `dev-setup-plugins-test:${process.pid}`;
 let sha;
