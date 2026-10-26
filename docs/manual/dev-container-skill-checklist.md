@@ -81,6 +81,10 @@ Use the `$T/p1` project from P1 (it has the `docs` `mcp-remote` entry), or any o
 | E5 | Remove the `DOCS_TOKEN` line from `remoteEnv` by hand, then `$H validate $T/p1` | `ok: false`, naming `DOCS_TOKEN` and the `docs` entry. |
 | E6 | `c "/dev-container add secret NPM_TOKEN for the container in $T/p1"` | `extensions.json` gains a top-level `"secrets": ["NPM_TOKEN"]` and no entry changes; `devcontainer.json` gains `"NPM_TOKEN": "${localEnv:NPM_TOKEN}"`; `validate` lists `NPM_TOKEN` with `neededBy: ["container-wide"]`; the agent says to `export NPM_TOKEN` on the host and never asks for the value. |
 | E7 | With `NPM_TOKEN` unset, `devcontainer up --workspace-folder $T/p1` | The start succeeds and prints `WARNING: secret NPM_TOKEN (container-wide) is not set`. |
+| E8 | `c "/dev-container disallow api.status.example.com in $T/p1"` | Shows the plan, asks once; after yes the top-level `egress` no longer lists `api.status.example.com`, entries' own `egress` unchanged; `validate` ran; one recreate question. |
+| E9 | With the pinned image local (as in E2), add `github.com` and `docs.example.com` to the top-level `egress` by hand, then `c "/dev-container disallow github.com and docs.example.com in $T/p1"` | Refuses both and writes nothing: `github.com` is needed by the Base layer (it can't be removed from a project), `docs.example.com` by the `docs` entry (it goes with that entry). Revert the two lines afterwards. |
+| E10 | `c "/dev-container remove secret NPM_TOKEN from $T/p1"` | Shows the plan, asks once; after yes the top-level `secrets` no longer lists `NPM_TOKEN` and `devcontainer.json` has no `NPM_TOKEN` line, every other line and comment kept; says the user can unset `NPM_TOKEN` on the host; never asks for or shows a value; `validate` ran; one recreate question. |
+| E11 | `c "/dev-container remove secret DOCS_TOKEN from $T/p1"` | Refuses, naming the `docs` entry, and says the secret goes when that server is removed; nothing written. |
 
 ## Migration (SC-03)
 
@@ -104,7 +108,7 @@ Clean up: remove the started containers and their volumes, then `rm -rf $T`.
 
 ## Add and remove extensions (SC-04 to SC-06)
 
-Rows X1–X6. Sources come from a local bare repo through the helper's test seam, so export `DEV_SETUP_GIT_BASE=$T/git/` before starting `claude`. `$T/p1` is any onboarded project (or one rendered with `H render-template`). Build the fixture repo `$T/git/acme/x.git` (a bare clone of a work tree with one commit) holding a plugin at `p/`:
+Rows X1–X7. Sources come from a local bare repo through the helper's test seam, so export `DEV_SETUP_GIT_BASE=$T/git/` before starting `claude`. `$T/p1` is any onboarded project (or one rendered with `H render-template`). Build the fixture repo `$T/git/acme/x.git` (a bare clone of a work tree with one commit) holding a plugin at `p/`:
 
 - `p/.claude-plugin/plugin.json`: `{"name":"p"}`;
 - `p/bin/tool`, executable: `#!/bin/sh` then `touch /tmp/EXECUTED`;
@@ -120,6 +124,7 @@ Rows X1–X6. Sources come from a local bare repo through the helper's test seam
 | X4 | `c "/dev-container add that plugin for codex too in $T/p1"` | Refuses, explaining that Codex plugins are unsupported (D3); no edits. Same for `c "/dev-container add https://10.0.0.1/mcp to $T/p1"`: refused, no edits. |
 | X5 | `c "/dev-container add the remote MCP https://mcp.tools.example.com/v1 with token env TOOLS_TOKEN to $T/p1"` | Entry `mcp-remote` with `egress: ["mcp.tools.example.com"]` and `bearerTokenEnv: "TOOLS_TOKEN"`; `devcontainer.json` gains `"TOOLS_TOKEN": "${localEnv:TOOLS_TOKEN}"`; names `TOOLS_TOKEN` to export, never asks for its value; `validate` ran. |
 | X6 | `c "/dev-container remove the acme/x plugin from $T/p1"` | Shows the plan: `search.example.com` goes with the entry and stops being allowed; asks once, and the transcript shows no fetch of `acme/x`. After yes: the entry is gone; the top-level `egress`, the `mcp-remote` entry from X5 and its egress stay; `validate` ran. |
+| X7 | Add `"TOOLS_TOKEN"` to the top-level `secrets` of `$T/p1` by hand, then `c "/dev-container remove the tools MCP server from $T/p1"` | The plan says `TOOLS_TOKEN` stays declared container-wide and its `remoteEnv` line stays; after yes the entry is gone and `devcontainer.json` is unchanged. Repeat on a copy without the top-level `TOOLS_TOKEN`: the `remoteEnv` line goes and the agent says `TOOLS_TOKEN` can be unset on the host. |
 
 ## Status and Preset resync (SC-09, SC-11, SC-12)
 

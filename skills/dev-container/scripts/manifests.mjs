@@ -26,6 +26,24 @@ export const LOCAL_ENV_REF = /^\$\{localEnv:([A-Za-z_][A-Za-z0-9_]*)\}$/;
 
 const LAYER = 'layer';
 
+/** Who needs a domain in a layer's top-level `egress`: the layer itself. */
+export const TOP_LEVEL_EGRESS = 'top-level egress';
+
+/** A project's devcontainer.json `remoteEnv` object, or null when it is missing or unreadable. */
+export function readRemoteEnv(project) {
+  const file = join(project, '.devcontainer/devcontainer.json');
+  if (!existsSync(file)) return null;
+  const { value, errors } = readJsonc(file);
+  const env = errors.length ? null : value?.remoteEnv;
+  return env && typeof env === 'object' && !Array.isArray(env) ? env : null;
+}
+
+/** The host variable a remoteEnv line `"<name>": "${localEnv:VAR}"` passes, or null. Never the value. */
+export function localEnvName(remoteEnv, name) {
+  const ref = typeof remoteEnv?.[name] === 'string' ? remoteEnv[name].match(LOCAL_ENV_REF) : null;
+  return ref ? ref[1] : null;
+}
+
 /** Schema, Pinned Ref and kind x Agent rules, plus the installer's per-layer rules (unique skill names). */
 export function manifestProblems(manifest) {
   const problems = validateManifest(manifest);
@@ -122,7 +140,7 @@ export const covers = (domain, host) => host === domain || host.endsWith(`.${dom
 export function egressDeclarations(layers) {
   return layers.flatMap(({ layer, manifest }) => [
     ...(manifest.extensions ?? []).flatMap((e, i) => (e.egress ?? []).map((domain) => ({ domain, layer, neededBy: describeEntry(e, i) }))),
-    ...(manifest.egress ?? []).map((domain) => ({ domain, layer, neededBy: 'top-level egress' })),
+    ...(manifest.egress ?? []).map((domain) => ({ domain, layer, neededBy: TOP_LEVEL_EGRESS })),
   ]);
 }
 
@@ -151,6 +169,19 @@ export const secretDeclarations = (layers) =>
   layers.flatMap(({ layer, manifest }) => [...secretsNeededBy({ extensions: [], ...manifest })].map(([name, neededBy]) => ({ name, layer, neededBy })));
 
 /**
+ * The Named Secrets that go with removing the entries at `indexes`: each removed MCP entry's
+ * names, once, with what still declares each in the project manifest (a staying MCP entry, or
+ * "container-wide" for the top-level `secrets`). Pure: reads only the manifest.
+ * @returns {{name: string, stillDeclaredBy: string[]}[]}
+ */
+export function secretsGoing(manifest, indexes) {
+  const removed = new Set(indexes);
+  const staying = secretsNeededBy({ ...manifest, extensions: manifest.extensions.map((e, i) => (removed.has(i) ? { kind: 'removed' } : e)) });
+  const going = secretsNeededBy({ extensions: manifest.extensions.map((e, i) => (removed.has(i) ? e : { kind: 'staying' })) });
+  return [...going.keys()].map((name) => ({ name, stillDeclaredBy: staying.get(name) ?? [] }));
+}
+
+/**
  * The egress that goes with removing the entries at `indexes`: each removed entry's own
  * domains, once, with what keeps each allowed in the project layer (a staying entry's egress
  * or the top-level egress, the project's own needs, which removal never touches). Pure:
@@ -166,7 +197,7 @@ export function egressGoing(manifest, indexes) {
     domain,
     stillAllowedBy: [
       ...new Set([...staying].filter(([d]) => covers(d, domain)).flatMap(([, by]) => by)),
-      ...(topLevel.some((d) => covers(d, domain)) ? ['top-level egress'] : []),
+      ...(topLevel.some((d) => covers(d, domain)) ? [TOP_LEVEL_EGRESS] : []),
     ],
   }));
 }

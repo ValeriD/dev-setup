@@ -16,7 +16,7 @@ import { DEFAULT_GIT_BASE, describeEntry, fetchBySha, repoUrl } from '../../../i
 import { lastObject, npmView } from './inspect.mjs';
 import { PROJECT, projectLayers } from './image-layers.mjs';
 import {
-  allowing, egressCoverage, egressDeclarations, listPresets, LOCAL_ENV_REF, readJsonc, readProjectManifest, secretDeclarations,
+  allowing, egressCoverage, egressDeclarations, listPresets, localEnvName, readProjectManifest, readRemoteEnv, secretDeclarations,
 } from './manifests.mjs';
 
 /** Written by the start-up step (base/egress/start.sh): the hash of the project manifest it applied, or "none". */
@@ -226,14 +226,6 @@ function extensionAges(extensions) {
 
 // ---------- Host environment ----------
 
-function readRemoteEnv(project) {
-  const file = join(project, '.devcontainer/devcontainer.json');
-  if (!existsSync(file)) return null;
-  const { value, errors } = readJsonc(file);
-  const env = errors.length ? null : value?.remoteEnv;
-  return env && typeof env === 'object' && !Array.isArray(env) ? env : null;
-}
-
 /**
  * Which host variables the container expects and whether each is set on this host: the
  * Named Secrets of the Base and Variant layers (from the image) and of the project, then
@@ -264,12 +256,6 @@ function patStatus(remoteEnv) {
   if (!hostVar) return null;
   const set = isSet(hostVar);
   return { name: PAT_ENV, hostEnv: hostVar, set, ...(set ? {} : { note: `${hostVar} unset: \`git push\` from the container will fail` }) };
-}
-
-/** The host variable a remoteEnv line `"<name>": "${localEnv:VAR}"` passes, or null. */
-function localEnvName(remoteEnv, name) {
-  const ref = typeof remoteEnv?.[name] === 'string' ? remoteEnv[name].match(LOCAL_ENV_REF) : null;
-  return ref ? ref[1] : null;
 }
 
 // ---------- Container ----------

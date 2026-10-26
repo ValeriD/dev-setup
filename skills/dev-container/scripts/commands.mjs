@@ -9,7 +9,11 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CONTAINER_WIDE, describeEntry, schema } from '../../../installer/src/index.mjs';
-import { countTags, egressGoing, listPresets, LOCAL_ENV_REF, manifestProblems, readJson, readJsonc, readProjectManifest, secretsNeededBy } from './manifests.mjs';
+import {
+  allowing, countTags, covers, egressDeclarations, egressGoing, listPresets, LOCAL_ENV_REF, localEnvName, manifestProblems, readJson, readJsonc,
+  readProjectManifest, readRemoteEnv, secretDeclarations, secretsGoing, secretsNeededBy, TOP_LEVEL_EGRESS,
+} from './manifests.mjs';
+import { PROJECT, projectLayers } from './image-layers.mjs';
 import { inspect } from './inspect.mjs';
 import { status } from './status.mjs';
 import { UsageError } from './errors.mjs';
@@ -57,7 +61,12 @@ const USAGE = `usage: dev-container.mjs <command> [args]
                                                 resolve a Pinned Ref, fetch read-only, list what the extension
                                                 contains and propose its entry; SOURCE is owner/repo,
                                                 https://github.com/owner/repo, npm:PACKAGE[@RANGE] or an https MCP URL
-  plan-remove DIR INDEX                         what removing extensions[INDEX] drops: the entry and its own egress (read-only)
+  plan-remove DIR INDEX                         what removing extensions[INDEX] drops: the entry, its own egress, its
+                                                secrets and whether each remoteEnv line goes (read-only)
+  plan-disallow DIR DOMAIN                      remove DOMAIN from the top-level egress, or refuse naming what needs it
+                                                (Base and Variant read from the pinned image) (read-only)
+  plan-remove-secret DIR NAME                   remove a container-wide Named Secret and its remoteEnv line, or refuse
+                                                naming the MCP entries that declare it (read-only, names only)
   status DIR [--skip-image-check] [--domain D]  Variant and image (newer verified image?), Preset drift and resync entries,
                                                 Pinned Ref ages, egress and Named Secrets of all three layers (Base and
                                                 Variant read from the pinned image, never run or pulled), unset host env
@@ -88,6 +97,8 @@ const COMMANDS = {
     fn: inspect,
   },
   'plan-remove': { positionals: 2, options: {}, fn: planRemove },
+  'plan-disallow': { positionals: 2, options: {}, fn: planDisallow },
+  'plan-remove-secret': { positionals: 2, options: {}, fn: planRemoveSecret },
   // status builds on validate and verify-image, handed over so status.mjs does not import this module.
   status: { positionals: 1, options: { 'skip-image-check': { type: 'boolean' }, domain: { type: 'string' } }, fn: (a, o, ctx) => status(a, o, { ...ctx, validate, verifyImage }) },
   'vscode-settings': { positionals: 0, options: { settings: { type: 'string' } }, fn: vscodeSettings },
@@ -501,8 +512,28 @@ function presets(_, { name }, { repo }) {
   return { doc: { ok: one.problems.length === 0, preset: one } };
 }
 
-// Removal plans read only the project manifest, never fetched content: an entry's egress is
-// its own, and the top-level egress is what the project itself needs, which removal keeps.
+// Removal plans read only the project manifest (and the names in devcontainer.json's
+// `remoteEnv`), never fetched content: an entry's egress is its own, and the top-level egress
+// is what the project itself needs, which removal keeps. A Named Secret's `remoteEnv` line
+// goes only with its last declaration in the manifest (an MCP entry or the top-level
+// `secrets`). The agent makes the edits; nothing here writes.
+
+/**
+ * What happens to a secret's `remoteEnv` line once a declaration goes: "keep" while something
+ * still declares it, "delete" when this was the last declaration, "none" when there is no
+ * line. On "delete", `unsetOnHost` names the host variable the user no longer needs to export.
+ */
+function remoteEnvFate(remoteEnv, name, stillDeclared) {
+  if (!remoteEnv || !Object.hasOwn(remoteEnv, name)) return { remoteEnv: 'none' };
+  if (stillDeclared) return { remoteEnv: 'keep' };
+  const hostEnv = localEnvName(remoteEnv, name);
+  return { remoteEnv: 'delete', ...(hostEnv ? { unsetOnHost: hostEnv } : {}) };
+}
+
+const secretsPlan = (project, manifest, indexes) => {
+  const remoteEnv = readRemoteEnv(project);
+  return secretsGoing(manifest, indexes).map((s) => ({ ...s, ...remoteEnvFate(remoteEnv, s.name, s.stillDeclaredBy.length > 0) }));
+};
 
 function planRemovePreset([dir, name]) {
   const project = resolve(dir);
@@ -521,6 +552,7 @@ function planRemovePreset([dir, name]) {
       preset: name,
       remove: indexes.map((index) => ({ index, entry: describeEntry(entries[index], index) })),
       dropsWithEntries: egressGoing(manifest, indexes),
+      secretsWithEntries: secretsPlan(project, manifest, indexes),
     },
   };
 }
@@ -542,7 +574,89 @@ function planRemove([dir, index]) {
       dir: project,
       remove: { index: i, entry: describeEntry(entry, i), ...(entry.preset ? { preset: entry.preset } : {}) },
       dropsWithEntry: egressGoing(manifest, [i]),
+      secretsWithEntry: secretsPlan(project, manifest, [i]),
       ...(entry.preset ? { presetNote: `this entry was copied from Preset "${entry.preset}"; removing it alone leaves the project out of sync with that Preset` } : {}),
+    },
+  };
+}
+
+/** The image layers' state for a plan's output: read, or unknown with the reason. */
+const layersDoc = (image) => (image.known ? { known: true, image: image.image } : { known: false, image: image.image, reason: image.reason });
+
+/**
+ * Disallowing a domain removes it from the project's top-level `egress`, the only place the
+ * user's own domains live. Refused, naming the needer, when anything else would keep it
+ * allowed: the Base or Variant layer (read from the pinned image), an entry's own `egress`, or
+ * a declared parent domain. Removing a domain an entry needs is removing that entry.
+ */
+function planDisallow([dir, domain]) {
+  const project = resolve(dir);
+  const read = readProjectManifest(project);
+  if (read.error) return { doc: { ok: false, ...read } };
+  const { file: mfFile, manifest } = read;
+  const host = domain.toLowerCase();
+  const { image, layers } = projectLayers(project, manifest);
+  const declarations = egressDeclarations(layers);
+  const isThis = (d) => d.layer === PROJECT && d.neededBy === TOP_LEVEL_EGRESS && d.domain === host;
+  const neededBy = allowing(declarations, host).filter((d) => !isThis(d));
+  const head = { dir: project, domain: host, layers: layersDoc(image) };
+
+  if (!(manifest.egress ?? []).includes(host)) {
+    return {
+      doc: {
+        ok: false, ...head,
+        error: `${host} is not in the top-level "egress" of ${mfFile}; only the project's own domains can be disallowed`,
+        allowedBy: neededBy,
+      },
+    };
+  }
+  if (neededBy.length) {
+    return {
+      doc: {
+        ok: false, ...head,
+        error: `${host} stays allowed while something else needs it; removing it from the top-level "egress" would change nothing`,
+        neededBy,
+      },
+    };
+  }
+  return {
+    doc: {
+      ok: true, ...head,
+      remove: { from: TOP_LEVEL_EGRESS, domain: host },
+      // A subdomain declared elsewhere stays allowed on its own.
+      subdomainsStayAllowed: declarations.filter((d) => d.domain !== host && covers(host, d.domain)),
+      ...(image.known ? {} : { note: `the Base and Variant layers could not be checked (${image.reason}); one of them may still allow ${host}` }),
+    },
+  };
+}
+
+/**
+ * Removing a container-wide Named Secret: its name leaves the top-level `secrets` and, unless
+ * the Base or Variant layer (read from the pinned image) declares it too, its `remoteEnv` line
+ * goes. Refused, naming the entries, while an MCP entry still declares it: that is removing the
+ * entry. Names only: the `remoteEnv` value is never read beyond its host variable name.
+ */
+function planRemoveSecret([dir, name]) {
+  const project = resolve(dir);
+  const read = readProjectManifest(project);
+  if (read.error) return { doc: { ok: false, ...read } };
+  const { file: mfFile, manifest } = read;
+  const declarers = secretsNeededBy(manifest).get(name) ?? [];
+  const head = { dir: project, name };
+  if (!declarers.length) return { doc: { ok: false, ...head, error: `${name} is not declared in ${mfFile} (an MCP entry or the top-level "secrets")` } };
+  const mcp = declarers.filter((d) => d !== CONTAINER_WIDE);
+  if (mcp.length) {
+    return { doc: { ok: false, ...head, error: `${name} is still declared by ${mcp.join(', ')}; it goes when that entry is removed`, neededBy: mcp } };
+  }
+  const { image } = projectLayers(project, manifest);
+  const keptBy = image.known ? secretDeclarations(image.layers).filter((s) => s.name === name) : [];
+  return {
+    doc: {
+      ok: true, ...head, layers: layersDoc(image),
+      remove: { from: 'top-level secrets', name },
+      ...remoteEnvFate(readRemoteEnv(project), name, keptBy.length > 0),
+      ...(keptBy.length ? { remoteEnvKeptFor: keptBy } : {}),
+      ...(image.known ? {} : { note: `the Base and Variant layers could not be checked (${image.reason}); if one of them declares ${name}, its remoteEnv line is still needed` }),
     },
   };
 }

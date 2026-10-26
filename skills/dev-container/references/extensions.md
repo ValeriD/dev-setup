@@ -35,12 +35,13 @@ An Agent Extension is added to a project only after the user has seen what it co
 1. Read `.devcontainer/extensions.json` and find the entry's index in `extensions`. If several entries match what the user said, ask which.
 2. Run `H plan-remove <dir> <index>`. It is read-only and says:
    - `remove`: the entry. With `presetNote`, the entry came from a Preset: say that the project will differ from that Preset, and offer removing the whole Preset instead ([presets.md](presets.md));
-   - `dropsWithEntry`: the entry's own egress domains, which go with it. Each has `stillAllowedBy`: a staying entry's egress or the top-level `egress` (what the project itself needs) that keeps it allowed; empty means the project layer stops allowing it.
+   - `dropsWithEntry`: the entry's own egress domains, which go with it. Each has `stillAllowedBy`: a staying entry's egress or the top-level `egress` (what the project itself needs) that keeps it allowed; empty means the project layer stops allowing it;
+   - `secretsWithEntry`: the Named Secrets the entry declares, which go with it. Each has `stillDeclaredBy` (a staying MCP entry, or `container-wide` for the top-level `secrets`) and `remoteEnv`: `delete` when nothing else declares it, `keep` when something does, `none` when there is no line.
 3. Show the plan and ask once to apply it.
-4. On yes, delete the entry. Its domains go with it; the top-level `egress` and everything else stay untouched, including `remoteEnv` lines for secrets the entry named (removing those is not part of this operation; name them in the summary).
+4. On yes, delete the entry. Its domains and secret names go with it; the top-level `egress` and `secrets` stay untouched. For each secret with `remoteEnv: delete`, delete its `"NAME": …` line from `remoteEnv` in `.devcontainer/devcontainer.json`, editing the text so every other line and comment stays; never show the value. Then tell the user they can unset `unsetOnHost` on the host if nothing else of theirs uses it.
 
 **Done when `H validate <dir>` returns `ok: true`, or the user declined.**
 
 ## Finish
 
-The project layer is installed when the container is created. After all the user's changes, ask once: "Recreate the dev container now to apply them? Recreating ends any agent sessions running inside." On yes, run `H up <dir> --recreate`. On no, say the changes apply at the next recreate. Print the changed files (uncommitted, for the user to review and commit), the entries added or removed with their Pinned Refs, the domains allowed or dropped, and the host variables to export.
+The project layer is installed when the container is created. After all the user's changes, ask once: "Recreate the dev container now to apply them? Recreating ends any agent sessions running inside." On yes, run `H up <dir> --recreate`. On no, say the changes apply at the next recreate. Print the changed files (uncommitted, for the user to review and commit), the entries added or removed with their Pinned Refs, the domains allowed or dropped, the host variables to export, and those now free to unset.
