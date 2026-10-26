@@ -7,7 +7,7 @@
 
 **Blocked by:** 01 (Skill foundation and onboarding)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 

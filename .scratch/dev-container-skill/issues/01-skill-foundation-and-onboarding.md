@@ -19,7 +19,7 @@ A broken install symlink makes it stop with a re-link message.
 
 **Blocked by:** node-devcontainer 06 (Extension installer tracer). The installer library provides validation.
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 

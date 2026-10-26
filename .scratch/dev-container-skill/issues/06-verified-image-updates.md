@@ -10,7 +10,7 @@ A verification failure writes nothing. Onboarding (ticket 01) also starts verify
 
 **Blocked by:** 01 (Skill foundation and onboarding)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 

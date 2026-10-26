@@ -8,7 +8,7 @@
 
 **Blocked by:** 07 (Consuming Project layer installed at container start)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 

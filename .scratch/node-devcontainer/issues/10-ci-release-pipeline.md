@@ -9,7 +9,7 @@
 
 **Blocked by:** 02 (Walking skeleton)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Human prerequisite:** the user creates the GitHub repository `ValeriD/dev-setup`, pushes the local repo, and makes the GHCR packages public after the first publish. The agent writes the workflows and verifies them as far as is possible locally (e.g. `actionlint`), then lists the exact remaining steps for the user.
 
