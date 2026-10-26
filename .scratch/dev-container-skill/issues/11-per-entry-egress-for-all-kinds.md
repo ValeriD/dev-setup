@@ -1,20 +1,45 @@
-# 11: Per-entry egress for skills, plugins and hooks
+# 11: Per-entry egress for every kind
 
-**What to build:** Each Extension Manifest entry carries the egress it needs, whatever its kind. Then "remove an extension" drops exactly that egress, with no need to fetch the pinned content and guess.
+**What to build:**
+- Any Extension Manifest entry (skill, plugin, hook, mcp, mcp-remote) can carry the egress it needs, and that egress reaches the Egress Allowlist.
+- "Add <extension>" puts the domains the extension needs on its entry.
+- "Remove <extension>" drops exactly that entry's domains, unless something else still needs them, and never fetches content.
+- A domain in the top-level `egress` means "the project needs it", so removing an extension never drops it.
+- A Preset file carries egress only on its entries. A Preset with top-level `egress` is refused, so resync and Preset removal catch every egress change exactly.
 
-**Blocked by:** 03 (Add and remove extensions after review)
+**Blocked by:** None (can start immediately)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Context
+## Technical context
 
-Found while building 03:
-- Skill, plugin and hook entries have no `egress` field, so their domains go into the project's shared top-level `egress`.
-- On removal, `plan-remove` decides what to drop from the content it fetches and heuristic host detection.
-- The installer already merges per-entry egress for any kind. The schema allows it only on `mcp-remote`.
+**Design:** `.scratch/manifest-followups/design.md`. Use the "Schema", "Helper: `presets`" and "Helper: removal plans" rows (except the secrets parts, which are 08 and 09), and Q6, Q13, Q14.
 
-## Open questions (for grilling)
+- **Modules:**
+  - Schema: optional `egress` on every kind.
+  - ADR 0004 amendment.
+  - Skill helper:
+    - `inspect` targets the entry for every kind;
+    - `plan-remove` becomes a pure manifest computation;
+    - `egressNeededBy` and Preset drift lose the Preset top-level egress branch;
+    - `presets` refuses top-level `egress`.
+  - Skill references (`extensions.md`, `presets.md`, `status.md`): their egress wording.
+- **Implementation anchors:**
+  - `installer/src/install.mjs` `mergeLayers` already merges `entry.egress` for every kind.
+  - `skills/dev-container/scripts/inspect.mjs`: `takesEntryEgress` reads the schema; `planRemove` fetches content today.
+  - `manifests.mjs` `egressNeededBy`.
+  - `status.mjs` `presetStatus` (`egressMissing`).
+- **Reuse:** `mergeLayers`, `takesEntryEgress` and `covers`, with no installer code change for the merge.
+- **Dependency direction:** the skill helper imports from the installer, never the reverse.
+- **Must not introduce:** a migration of existing top-level domains, per-entry secrets (08), or a manifest-editing helper.
+- **Validation seam:** the installer's `installBuild`/`validateManifest` with fixture manifests; the helper CLI JSON.
+- **Coverage:**
+  - installer integration: entry egress on a skill, plugin and hook reaches the allowlist;
+  - helper integration: replace the content-fetch removal tests; Preset refusal; drift with entry egress;
+  - the manual checklist rows for add and remove updated.
 
-- Allow an optional `egress` on every kind? This is a public schema change and an ADR 0004 amendment.
-- Migrate existing top-level domains onto entries, or leave them where they are?
-- Does 08 (secrets no MCP server needs) want the same "per-entry vs top-level" decision, made together?
+- [ ] A skill, plugin or hook entry with `egress` validates, and its domains appear in the assembled allowlist
+- [ ] `inspect` proposes the entry with its domains on the entry, for every kind
+- [ ] `plan-remove` lists only the entry's own domains, keeps any that another entry or the top level needs, and makes no network call
+- [ ] A Preset with top-level `egress` fails `presets` with a clear reason; a Preset entry's changed `egress` shows as drift in `status`
+- [ ] ADR 0004 records per-entry egress and "top-level means the project needs it"

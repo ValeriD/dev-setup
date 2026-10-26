@@ -1,19 +1,32 @@
 # 10: `status` shows which layer covers secrets and egress
 
-**What to build:** `status` reports secrets and egress domains from every layer (Base, Variant, Project). For each egress domain it says which layer allows it and which entry needs it. "Allow <domain>" then uses that to tell whether a domain is already covered, instead of the agent deciding this from the instructions.
+**What to build:**
+- `status` reports egress domains and Named Secrets from all three layers (Base, Variant, Project). For each, it says which layer declares it and which entry needs it.
+- The Base and Variant layers are read from the image the project pins, without running it. When that image isn't local, `status` says the layers are unknown.
+- "Allow <domain>" uses this coverage to say when a domain, or a parent domain, is already allowed. When the layers are unknown, it says Base coverage couldn't be checked.
 
-**Blocked by:** 07 (`status`)
+**Blocked by:** 08 (Container-wide Named Secrets); 11 (Per-entry egress for every kind)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Context
+## Technical context
 
-Found while building 04:
-- `validate` checks only the Project layer's secrets. Base and Variant secrets are warned about only at container start, by `base/mcp/check-secrets.sh`.
-- Whether a parent domain or the Base layer already covers a new domain is decided by the agent from SKILL.md, not by a helper command.
+**Design:** `.scratch/manifest-followups/design.md`. Use the "Helper: `status`", "Image layer read" and "SKILL references" rows, and Q10, Q11.
 
-## Open questions (for grilling)
+- **Modules:** skill helper `status` (the image layer read and coverage); skill references `status.md` and `egress-and-secrets.md` (the allow flow).
+- **Implementation anchors:**
+  - the image ships `/opt/dev-setup/manifests/base.json` and `node.json`;
+  - `status.mjs` `copyRead` (the `docker cp` pattern);
+  - `manifests.mjs` `covers`;
+  - `inspect.mjs` `projectContext`, which reads `extensions/base.json` from the checkout today, and should use the image layers once they exist.
+- **Reuse:** `docker create` + `docker cp` + `docker rm` on a never-started container; `covers` (a domain covers its subdomains, as dnsmasq does).
+- **Dependency direction:** unchanged.
+- **Must not introduce:** running or pulling the image; falling back to the local checkout for Base/Variant; printing secret values.
+- **Validation seam:** the helper CLI JSON.
+- **Coverage:** helper integration against a fixture image built `FROM scratch` with the two manifest files; the "unknown" case with an image that isn't local; checklist rows for "allow" of an already-covered domain.
 
-- Read the Base and Variant layers from the local checkout, or from the pinned image? A local checkout can disagree with the image the project actually uses.
-- Does a parent domain (`example.com`) cover subdomains in our egress model? Check this against how dnsmasq `--nftset` matches before writing the rule.
-- Is this one ticket, or should secrets and egress coverage be split?
+- [ ] `status` lists each egress domain with its layer and needer, across all three layers, read from the pinned image
+- [ ] `status` lists Base and Variant Named Secrets with whether each is set on the host (names only)
+- [ ] With the pinned image not present locally, `status` reports the layers as unknown and pulls nothing
+- [ ] No container is left after the layer read, and the image was never started
+- [ ] "Allow" of a subdomain of an allowed domain writes nothing and names the covering layer

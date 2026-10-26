@@ -1,17 +1,42 @@
-# 08: Secrets no MCP server needs
+# 08: Container-wide Named Secrets
 
-**What to build:** "Add secret FOO" for a variable no MCP server uses still leaves a manifest reference. Then the start-up warning and `status` report it when it is missing from the host env, the same as MCP secrets.
+**What to build:**
+- "Add secret FOO" for a variable no MCP server needs adds `FOO` to the manifest's top-level `secrets` and a `remoteEnv` line `"FOO": "${localEnv:FOO}"`, then tells me to export `FOO` on the host.
+- When `FOO` is unset, the attach-time warning and `validate` report it, the same as an MCP secret, and say it is container-wide.
+- An MCP server's own secrets stay on its entry. The same name may be declared in both places.
+- A Preset file with top-level `secrets` is refused.
 
-**Blocked by:** 04 (Egress domains and secrets)
+**Blocked by:** 11 (Per-entry egress for every kind), because both change the schema and ADR 0004
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Context
+## Technical context
 
-Found while building 04. The Extension Manifest's only place for a secret name is an MCP entry: `env` for stdio, `bearerTokenEnv` for `mcp-remote`. For any other variable, 04 adds only the `remoteEnv` line. This falls short of the spec's "and the manifest reference".
+**Design:** `.scratch/manifest-followups/design.md`. Use the "Schema", "Installer merge", "`check-secrets.sh`", "Helper: `validate`" and "Helper: `presets`" rows, and Q7, Q15, Q20, D2. Named Secret is defined in `CONTEXT.md`.
 
-## Open questions (for grilling)
+- **Modules:**
+  - Schema: top-level `secrets`, using the env-name pattern.
+  - Installer: the merge unions top-level `secrets` and the MCP names; the secrets list is written in both install modes, whether or not MCP exists.
+  - `base/mcp/check-secrets.sh`: names who declared each secret.
+  - Skill helper: `validate`'s `checkSecrets` covers top-level names; `presets` refuses top-level `secrets`.
+  - Skill references: `egress-and-secrets.md` "add a secret" flow.
+  - ADR 0004 amendment.
+- **Implementation anchors:**
+  - `installer/src/mcp.mjs` `writeMcpConfig`, which writes `/etc/dev-setup/mcp-secrets` and returns early without MCP;
+  - `installer/src/install.mjs` `installBuild`/`installStart`;
+  - `skills/dev-container/scripts/commands.mjs` `checkSecrets`.
+- **Reuse:** `secretNames`, `checkSecrets` and `LOCAL_ENV_REF`.
+- **Dependency direction:** unchanged.
+- **Must not introduce:** a secrets field on skill, plugin or hook entries; any path that reads or writes a value; a failing start for an unset secret.
+- **Validation seam:** container `postStartCommand` output; installer output files; helper CLI JSON.
+- **Coverage:**
+  - container acceptance: extend the `tests/mcp.test.mjs` SC-17 warn test with a container-wide secret and no MCP server;
+  - installer integration;
+  - helper integration;
+  - manual checklist rows E-series updated.
 
-- Do non-MCP secrets belong in the Extension Manifest at all, for example as a top-level `secrets` list? Or should `remoteEnv` alone be the source?
-- If they go in the manifest: which layers may declare them, and does the installer or `check-secrets.sh` warn about them?
-- Is this a schema change to `installer/extensions.schema.json` (and an ADR 0004 amendment)?
+- [ ] A project manifest with only top-level `secrets` and no MCP entry gets a warning at attach naming the unset secret as container-wide; a set one gets none
+- [ ] `validate` fails when a top-level secret has no `remoteEnv` line, or a literal or default value, and never prints the value
+- [ ] A name declared both by an MCP entry and at the top level validates, and is listed once with both declarers
+- [ ] A Preset with top-level `secrets` fails `presets` with a clear reason
+- [ ] The skill's "add secret" flow writes to top-level `secrets` when no MCP server needs it, and to the MCP entry when one does

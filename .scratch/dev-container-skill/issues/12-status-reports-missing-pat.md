@@ -1,17 +1,25 @@
-# 12: `status` reports a missing PAT
+# 12: `status` notes a missing PAT
 
-**What to build:** `status` warns when the project's GitHub PAT host variable is unset. It shows the variable's name only, never its value.
+**What to build:** When the host variable behind the project's GitHub PAT is unset, `status` adds a note: "`<var>` unset: `git push` from the container will fail". It shows the name only, never a value. The attach-time check stays silent about the PAT.
 
-**Blocked by:** 07 (`status`)
+**Blocked by:** None (can start immediately)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Context
+## Technical context
 
-Found while building 07. `status` reports missing named secrets and `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL`, but not the PAT variable used by the github.com credential helper (node ticket 05). Without it, `git push` fails inside the container with no early hint.
+**Design:** `.scratch/manifest-followups/design.md` (the "Helper: `status`" row; Q12).
 
-## Open questions (for grilling)
+- **Modules:** skill helper `status` (host env); skill reference `status.md` (how to render a note as opposed to a warning).
+- **Implementation anchors:**
+  - the Template's `remoteEnv` line `"DEV_SETUP_GITHUB_PAT": "${localEnv:<patEnvVar>}"`;
+  - `status.mjs` `hostEnv` and `readRemoteEnv`;
+  - `manifests.mjs` `LOCAL_ENV_REF`.
+- **Reuse:** the existing `remoteEnv` parsing and `LOCAL_ENV_REF`.
+- **Must not introduce:** a warning in `check-secrets.sh`, reading the value, or a new manifest field.
+- **Validation seam:** the helper CLI JSON.
+- **Coverage:** helper integration, extending `status.test.mjs`: unset, set (the value never appears in the output), and a project with no PAT line (no note).
 
-- Is a missing PAT a warning, or just information? Some projects never push from the container.
-- Should the container's attach-time check (`check-secrets.sh`) warn too, or only `status`?
-- Should this fold into 10 (layer coverage), or into 08 (secrets no MCP server needs)?
+- [ ] With the PAT host variable unset, `status` includes a note naming the variable
+- [ ] With it set, there is no note, and the value never appears in the output
+- [ ] A `devcontainer.json` without a `DEV_SETUP_GITHUB_PAT` line produces no note
