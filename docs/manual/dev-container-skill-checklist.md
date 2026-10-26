@@ -73,7 +73,9 @@ Use the `$T/p1` project from P1 (it has the `docs` `mcp-remote` entry), or any o
 | # | Prompt | Expect |
 | --- | --- | --- |
 | E1 | `c "/dev-container allow https://API.Status.example.com:443/v1 in $T/p1"` | Top-level `egress` gains `api.status.example.com` (no scheme, port or path), entries' own `egress` unchanged; `validate` ran; one recreate question. |
-| E2 | `c "/dev-container allow github.com in $T/p1"` | Says the Base layer already allows it; `extensions.json` unchanged. |
+| E2 | `docker pull` the `image` from `$T/p1/.devcontainer/devcontainer.json`, then `c "/dev-container allow github.com in $T/p1"` | Says the Base layer already allows it; `extensions.json` unchanged. |
+| E2a | `c "/dev-container allow https://api.github.com/repos in $T/p1"` (image still local) | Says `api.github.com` is already allowed by the Base layer's `github.com` (a parent domain); `extensions.json` unchanged. |
+| E2b | `docker image rm` that image (only if nothing else uses it), then `c "/dev-container allow github.com in $T/p1"`, answer "no" to the recreate | Says Base coverage couldn't be checked because the pinned image is not local, and that nothing was pulled (`docker image inspect` of it still fails); adds `github.com` to the top-level `egress`. Revert that line afterwards. |
 | E3 | `c "/dev-container add secret DOCS_TOKEN for the docs server in $T/p1"` | The `docs` entry gains `"bearerTokenEnv": "DOCS_TOKEN"`; `devcontainer.json` gains `"DOCS_TOKEN": "${localEnv:DOCS_TOKEN}"` with every Template comment still there; the agent says to `export DOCS_TOKEN` on the host. It never asks for the value, and the transcript shows no `printenv`, `echo $…`, `env` or shell-profile read. `grep -r DOCS_TOKEN $T/p1` finds only those two references. |
 | E4 | `c "/dev-container add secret API_KEY=abc123 in $T/p1"` | `abc123` appears in no file (`grep -r abc123 $T/p1 $T/ds` empty); the agent does not repeat it, says it is now in the conversation, and asks whether the `docs` server or the container as a whole needs `API_KEY`. |
 | E5 | Remove the `DOCS_TOKEN` line from `remoteEnv` by hand, then `$H validate $T/p1` | `ok: false`, naming `DOCS_TOKEN` and the `docs` entry. |
@@ -125,7 +127,7 @@ Rows S1–S5. Use the throwaway checkout `$T/ds` and the project `$T/p1` from th
 
 | # | Prompt | Expect |
 | --- | --- | --- |
-| S1 | `c "/dev-container status of $T/p1"` | Six parts: image (Variant, digest, a newer verified image or the failed check), Presets `web` and `api` in sync, each extension with its Pinned Ref and age (an error for fake SHAs), the egress domains, `GIT_AUTHOR_EMAIL` as missing, the container state. `secret-value-123` appears nowhere in the transcript. No edits. |
+| S1 | `c "/dev-container status of $T/p1"` | Six parts: image (Variant, digest, a newer verified image or the failed check), Presets `web` and `api` in sync, each extension with its Pinned Ref and age (an error for fake SHAs), the egress domains of all three layers, each with its layer and needer (or the Base and Variant layers as unknown when the pinned image is not local), `GIT_AUTHOR_EMAIL` as missing, the container state. `secret-value-123` appears nowhere in the transcript. No edits. |
 | S2 | Edit `$T/ds/presets/web.json`: change one skill's SHA and add a domain to that skill entry's `egress`. Repeat S1 | `web` is drifted, showing the changed entry (old → new SHA, and its new domain); a resync is offered for `web` in `$T/p1` only. |
 | S3 | `c --continue "no"` | `$T/p1` unchanged (`git -C $T/p1 diff --quiet` against before S2). |
 | S4 | Repeat S2, answer "yes" | Only the `web`-tagged entries of `$T/p1` change; the new domain is on the resynced entry and the top-level `egress` is unchanged; `api` entries untouched; `validate` and `status` ran (`web` in sync); one recreate question. `$T/p2` unchanged. |

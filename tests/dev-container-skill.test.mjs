@@ -84,6 +84,11 @@ test('SC-11, SC-12: status finds the running container and reports a recreate pe
   assert.deepEqual(now.unknown, [], 'the derived image and the remoteEnv could be compared');
   assert.equal(now.pendingRecreate, false, JSON.stringify(now));
 
+  // The Base and Variant layers come from the digest-pinned image the project runs, not this checkout.
+  const full = h('status', dir, '--skip-image-check', '--domain', 'api.github.com');
+  assert.deepEqual(full.layers.read, [{ layer: 'Base' }, { layer: 'Variant', variant: 'node' }], JSON.stringify(full.layers));
+  assert.deepEqual(full.egress.check.allowedBy, [{ domain: 'github.com', layer: 'Base', neededBy: 'top-level egress' }]);
+
   // An agent-style edit, no recreate: the manifest now differs from what the container applied.
   const mfFile = join(dir, '.devcontainer/extensions.json');
   const mf = readFileSync(mfFile, 'utf8');

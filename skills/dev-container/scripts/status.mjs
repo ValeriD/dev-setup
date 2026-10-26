@@ -5,14 +5,19 @@
 // Live state only, no cache: the project's files, the Presets in this checkout,
 // committer dates of Pinned Refs (fetched with the installer's fetchBySha into a
 // fresh temp directory and only read), npm publish times, the registry (through
-// verify-image), and the running container (found by its devcontainer label).
+// verify-image), the Base and Variant layers in the pinned image (image-layers.mjs:
+// copied out of a never-started container, never pulled), and the running container
+// (found by its devcontainer label).
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_GIT_BASE, describeEntry, fetchBySha, repoUrl } from '../../../installer/src/index.mjs';
 import { lastObject, npmView } from './inspect.mjs';
-import { egressNeededBy, listPresets, LOCAL_ENV_REF, readJsonc, readProjectManifest } from './manifests.mjs';
+import { PROJECT, projectLayers } from './image-layers.mjs';
+import {
+  allowing, egressCoverage, egressDeclarations, listPresets, LOCAL_ENV_REF, readJsonc, readProjectManifest, secretDeclarations,
+} from './manifests.mjs';
 
 /** Written by the start-up step (base/egress/start.sh): the hash of the project manifest it applied, or "none". */
 export const APPLIED_HASH_PATH = '/run/dev-setup/applied-manifest';
@@ -31,14 +36,14 @@ const sha256 = (buf) => `sha256:${createHash('sha256').update(buf).digest('hex')
  * `ctx` carries `repo` plus the `validate` and `verifyImage` subcommands, handed over by
  * commands.mjs so this module does not import it back.
  */
-export function status([dir], { 'skip-image-check': skipImage }, ctx) {
+export function status([dir], { 'skip-image-check': skipImage, domain }, ctx) {
   const project = resolve(dir);
   const read = readProjectManifest(project);
   if (read.error) return { doc: { ok: false, dir: project, ...read } };
   const { manifest } = read;
   const validated = ctx.validate([project], {}, ctx).doc;
   const remoteEnv = readRemoteEnv(project);
-  const neededBy = egressNeededBy(manifest.extensions.map((entry, index) => ({ entry, index })));
+  const { image, layers } = projectLayers(project, manifest);
 
   return {
     doc: {
@@ -48,15 +53,42 @@ export function status([dir], { 'skip-image-check': skipImage }, ctx) {
       image: imageStatus(validated, skipImage, ctx),
       presets: presetStatus(ctx.repo, manifest),
       extensions: extensionAges(manifest.extensions),
-      egress: {
-        // Top-level domains are what the project itself needs; neededBy: entries that also list the domain.
-        topLevel: (manifest.egress ?? []).map((domain) => ({ domain, neededBy: neededBy.get(domain) ?? [] })),
-        entries: manifest.extensions.flatMap((e, i) => (e.egress ?? []).map((domain) => ({ domain, entry: describeEntry(e, i) }))),
-      },
-      env: hostEnv(validated.secrets ?? [], remoteEnv),
+      layers: layersDoc(image),
+      egress: egressStatus(image, layers, domain),
+      env: hostEnv(validated.secrets ?? [], image, remoteEnv),
       container: containerStatus(project, validated.image, remoteEnv),
     },
   };
+}
+
+// ---------- Layers and egress coverage ----------
+
+/** Which layers were read from the pinned image, or why they are unknown. */
+function layersDoc(image) {
+  if (!image.known) return { known: false, image: image.image, reason: image.reason };
+  return { known: true, image: image.image, read: image.layers.map(({ layer, variant }) => ({ layer, ...(variant ? { variant } : {}) })) };
+}
+
+/**
+ * Every egress domain of the three layers with who declares it and which parent domains
+ * already allow it. With `domain`: whether that host is already allowed, and by what;
+ * `allowed: null` when nothing in the project allows it and the image layers are unknown,
+ * and a `note` whenever they are unknown.
+ */
+function egressStatus(image, layers, domain) {
+  const declarations = egressDeclarations(layers);
+  const doc = { domains: egressCoverage(declarations) };
+  if (domain) {
+    const host = domain.toLowerCase();
+    const allowedBy = allowing(declarations, host);
+    doc.check = {
+      domain: host,
+      allowed: allowedBy.length ? true : image.known ? false : null,
+      allowedBy,
+      ...(image.known ? {} : { note: `Base coverage could not be checked: ${image.reason}` }),
+    };
+  }
+  return doc;
 }
 
 // ---------- Image ----------
@@ -203,15 +235,22 @@ function readRemoteEnv(project) {
 }
 
 /**
- * Which host variables the container expects and whether each is set on this host.
- * Names only: a value is never read into the output.
+ * Which host variables the container expects and whether each is set on this host: the
+ * Named Secrets of the Base and Variant layers (from the image) and of the project, then
+ * git identity. Names only: a value is never read into the output.
  */
-function hostEnv(secrets, remoteEnv) {
-  const secretDocs = secrets.map((s) => ({ name: s.name, neededBy: s.neededBy, hostEnv: s.hostEnv, set: s.hostEnv ? isSet(s.hostEnv) : false }));
-  const gitDocs = GIT_IDENTITY.map((name) => {
+function hostEnv(projectSecrets, image, remoteEnv) {
+  const layerSecrets = image.known ? secretDeclarations(image.layers) : [];
+  /** A variable passed by a remoteEnv `${localEnv:…}` line: its host variable, whether that is set, or why it is not passed. */
+  const passed = (name, why = '') => {
     const hostVar = localEnvName(remoteEnv, name);
-    return { name, hostEnv: hostVar, set: hostVar ? isSet(hostVar) : false, ...(hostVar ? {} : { note: `devcontainer.json has no remoteEnv "${name}": "\${localEnv:${name}}"` }) };
-  });
+    return { hostEnv: hostVar, set: hostVar ? isSet(hostVar) : false, ...(hostVar ? {} : { note: `devcontainer.json has no remoteEnv "${name}": "\${localEnv:${name}}"${why}` }) };
+  };
+  const secretDocs = [
+    ...layerSecrets.map(({ name, layer, neededBy }) => ({ name, layer, neededBy, ...passed(name, ', so the container does not receive it') })),
+    ...projectSecrets.map((s) => ({ name: s.name, layer: PROJECT, neededBy: s.neededBy, hostEnv: s.hostEnv, set: s.hostEnv ? isSet(s.hostEnv) : false })),
+  ];
+  const gitDocs = GIT_IDENTITY.map((name) => ({ name, ...passed(name) }));
   const missing = [...new Set([...secretDocs, ...gitDocs].filter((d) => !d.set).map((d) => d.hostEnv ?? d.name))];
   return { secrets: secretDocs, gitIdentity: gitDocs, missing, pat: patStatus(remoteEnv) };
 }

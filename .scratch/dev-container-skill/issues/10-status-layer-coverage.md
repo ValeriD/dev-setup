@@ -25,8 +25,31 @@
 - **Validation seam:** the helper CLI JSON.
 - **Coverage:** helper integration against a fixture image built `FROM scratch` with the two manifest files; the "unknown" case with an image that isn't local; checklist rows for "allow" of an already-covered domain.
 
-- [ ] `status` lists each egress domain with its layer and needer, across all three layers, read from the pinned image
-- [ ] `status` lists Base and Variant Named Secrets with whether each is set on the host (names only)
-- [ ] With the pinned image not present locally, `status` reports the layers as unknown and pulls nothing
-- [ ] No container is left after the layer read, and the image was never started
+- [x] `status` lists each egress domain with its layer and needer, across all three layers, read from the pinned image
+- [x] `status` lists Base and Variant Named Secrets with whether each is set on the host (names only)
+- [x] With the pinned image not present locally, `status` reports the layers as unknown and pulls nothing
+- [x] No container is left after the layer read, and the image was never started
 - [ ] "Allow" of a subdomain of an allowed domain writes nothing and names the covering layer
+
+## Comments
+
+**Implementation notes (agent, 2026-10-26):**
+
+- The image read is `readImageLayers(image)` in the new `skills/dev-container/scripts/image-layers.mjs`. It runs `docker image inspect` first, then `docker create --pull never --network none`, `docker cp /opt/dev-setup/manifests`, and `docker rm -v` in a `finally`. Every `*.json` other than `base.json` is a Variant layer named after its file. The manifests are checked with `validateManifest`. A missing image, a missing folder or an invalid manifest each give `{ known: false, reason }`. `pinnedImage(project)` reads `image` from devcontainer.json.
+- The coverage functions are pure and live in `manifests.mjs`, ready for 09: `egressDeclarations(layers)` (`{domain, layer, neededBy}`), `egressCoverage`, `allowing(declarations, host)` and `secretDeclarations(layers)`. They all use `covers`, which replaces the exact match `status` used before.
+- `status` JSON changed:
+  - It gains `layers`.
+  - `egress` is now `{ domains: [{domain, declaredBy, coveredBy}], check? }`, replacing `topLevel` and `entries`.
+  - `env.secrets[]` gains `layer`. A Base or Variant secret has a `note` when it has no `remoteEnv` line.
+  - A new `--domain <host>` gives `egress.check` with `{ allowed: true | false | null, allowedBy, note? }`. The allow flow in `egress-and-secrets.md` uses it, so the agent does not do suffix matching itself. `null` means nothing in the project allows the domain and Base coverage couldn't be checked. Whenever the layers are unknown, `note` says so, even when the project itself allows the domain. `projectLayers(project, manifest)` gives the known layers plus the project manifest, and is shared by `status` and `inspect`.
+- `inspect --project` (`projectContext`) now takes its Base and Variant domains from the image too, and no longer reads `extensions/base.json` from the checkout. It reports `project.layers`.
+- Tests:
+  - `status.test.mjs` builds a fixture image `FROM scratch` with a unique tag and removes it in `t.after`. The test checks there is no leftover container (`ps --filter ancestor`), and that `docker events` shows `create` and `destroy` but no `start`.
+  - The "unknown" case uses the fake ghcr digest and checks afterwards that the image is still absent.
+  - `tests/dev-container-skill.test.mjs` checks the real digest-pinned image: Base and Variant `node` are read, and `api.github.com` is allowed by Base `github.com`.
+  - A locally built fixture has no registry digest, so the helper test names it by tag. `validate` reports that, and `status` reads it anyway.
+- Box 5 is not ticked. The helper part is verified (`--domain sub.example.org` gives `allowed: true` with Base `example.org`). The conversation part is manual checklist rows E2, E2a and E2b, which have not been run.
+
+**Belongs elsewhere:**
+
+- An image built before `/opt/dev-setup/manifests` existed shows as "unknown" with a reason. There is no fallback, as specified.

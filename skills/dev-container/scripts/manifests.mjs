@@ -114,6 +114,43 @@ export const secretsNeededBy = (manifest) => secretDeclarers(manifest.extensions
 export const covers = (domain, host) => host === domain || host.endsWith(`.${domain}`);
 
 /**
+ * Every egress declaration of the given layers, in layer order: each entry's own `egress`
+ * and the layer's top-level egress (what that layer itself needs).
+ * @param {{layer: string, manifest: object}[]} layers
+ * @returns {{domain: string, layer: string, neededBy: string}[]}
+ */
+export function egressDeclarations(layers) {
+  return layers.flatMap(({ layer, manifest }) => [
+    ...(manifest.extensions ?? []).flatMap((e, i) => (e.egress ?? []).map((domain) => ({ domain, layer, neededBy: describeEntry(e, i) }))),
+    ...(manifest.egress ?? []).map((domain) => ({ domain, layer, neededBy: 'top-level egress' })),
+  ]);
+}
+
+/** The declarations that allow `host`: the host itself or a parent domain of it. */
+export const allowing = (declarations, host) => declarations.filter((d) => covers(d.domain, host));
+
+/**
+ * Per declared domain, in first-declared order: who declares it (layer and needer) and the
+ * declarations of a parent domain that already allow it.
+ * @returns {{domain: string, declaredBy: {layer: string, neededBy: string}[], coveredBy: {domain: string, layer: string, neededBy: string}[]}[]}
+ */
+export function egressCoverage(declarations) {
+  const domains = [...new Set(declarations.map((d) => d.domain))];
+  return domains.map((domain) => ({
+    domain,
+    declaredBy: declarations.filter((d) => d.domain === domain).map(({ layer, neededBy }) => ({ layer, neededBy })),
+    coveredBy: allowing(declarations, domain).filter((d) => d.domain !== domain),
+  }));
+}
+
+/**
+ * Every Named Secret of the given layers, one row per layer that declares it.
+ * @returns {{name: string, layer: string, neededBy: string[]}[]}
+ */
+export const secretDeclarations = (layers) =>
+  layers.flatMap(({ layer, manifest }) => [...secretsNeededBy({ extensions: [], ...manifest })].map(([name, neededBy]) => ({ name, layer, neededBy })));
+
+/**
  * The egress that goes with removing the entries at `indexes`: each removed entry's own
  * domains, once, with what keeps each allowed in the project layer (a staying entry's egress
  * or the top-level egress, the project's own needs, which removal never touches). Pure:

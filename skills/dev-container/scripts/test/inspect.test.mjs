@@ -303,6 +303,9 @@ test('decline writes nothing; approve writes the pinned entry and its egress, an
   assert.equal(r.code, 0, r.log);
   assert.deepEqual(r.doc.project.alreadyDeclared, []);
   assert.equal(r.doc.egress.detected.domains[0].allowedBy, 'docs.example.org', 'already allowed domains are marked');
+  // The pinned image is not local: Base and Variant coverage is unknown, never read from this checkout.
+  assert.equal(r.doc.project.layers.known, false);
+  assert.match(r.doc.project.layers.reason, /not in the local image store/);
   assert.deepEqual(snapshot(p), before, 'inspecting (and then declining) writes nothing');
 
   // Approve: the agent appends the entry, which carries its domains, and adds an agreed detected domain to it.

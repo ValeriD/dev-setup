@@ -5,7 +5,10 @@ Both change a Consuming Project's `.devcontainer/`: egress lives in the Extensio
 ## Allow a domain
 
 1. Reduce what the user gave to a plain lower-case hostname: drop the scheme, credentials, port, path and a leading `*.`. `https://API.Example.com:443/v1` becomes `api.example.com`. A domain also allows all its subdomains, so say so when the user asked for one host and you write its parent. The Egress Allowlist works by hostname: refuse IP addresses, `localhost` and single-label names, and explain why.
-2. If the project's top-level `egress`, or the Base layer's `egress` in `extensions/base.json` of the dev-setups checkout (`repo` from `H check`), already holds the domain or a parent of it, say it is already allowed and write nothing.
+2. Run `H status <dir> --skip-image-check --domain <domain>` and read `egress.check`. It covers all three layers; the Base and Variant layers are read from the image the project pins, never from this checkout.
+   - `allowed: true`: say it is already allowed and write nothing. Name each `allowedBy` domain with its `layer` (Base, Variant or Consuming Project) and `neededBy`, and say when it is a parent domain of the one asked for. If `note` is present, add that Base coverage couldn't be checked.
+   - `allowed: false`: no layer allows it; go on.
+   - `allowed: null`: the project does not allow it, and Base coverage couldn't be checked (show `note`: usually the pinned image is not local yet). Say so, then go on: an extra project domain is harmless.
 3. Otherwise add the domain to the top-level `egress` array of `.devcontainer/extensions.json` (create the array if needed): that list is what the project itself needs, and removing an extension never drops it. If the user says the domain is for one extension, add it to that entry's own `egress` instead, so it leaves with the entry. Leave every other entry's `egress` alone.
 
 **Done when `H validate <dir>` returns `ok: true` and its `egress` lists the domain (or the entry's `egress` does, when the user named an extension).**

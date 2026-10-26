@@ -58,8 +58,10 @@ const USAGE = `usage: dev-container.mjs <command> [args]
                                                 contains and propose its entry; SOURCE is owner/repo,
                                                 https://github.com/owner/repo, npm:PACKAGE[@RANGE] or an https MCP URL
   plan-remove DIR INDEX                         what removing extensions[INDEX] drops: the entry and its own egress (read-only)
-  status DIR [--skip-image-check]               Variant and image (newer verified image?), Preset drift and resync entries,
-                                                Pinned Ref ages, egress, unset host env names, pending recreate (read-only)
+  status DIR [--skip-image-check] [--domain D]  Variant and image (newer verified image?), Preset drift and resync entries,
+                                                Pinned Ref ages, egress and Named Secrets of all three layers (Base and
+                                                Variant read from the pinned image, never run or pulled), unset host env
+                                                names, pending recreate; --domain: whether D is already allowed (read-only)
   vscode-settings [--settings FILE]             check the host VS Code settings ADR 0003 relies on
   up DIR [--recreate]                           start (or recreate) the project's container
   first-lockfile DIR                            create the first pnpm lockfile inside the container
@@ -87,7 +89,7 @@ const COMMANDS = {
   },
   'plan-remove': { positionals: 2, options: {}, fn: planRemove },
   // status builds on validate and verify-image, handed over so status.mjs does not import this module.
-  status: { positionals: 1, options: { 'skip-image-check': { type: 'boolean' } }, fn: (a, o, ctx) => status(a, o, { ...ctx, validate, verifyImage }) },
+  status: { positionals: 1, options: { 'skip-image-check': { type: 'boolean' }, domain: { type: 'string' } }, fn: (a, o, ctx) => status(a, o, { ...ctx, validate, verifyImage }) },
   'vscode-settings': { positionals: 0, options: { settings: { type: 'string' } }, fn: vscodeSettings },
   up: { positionals: 1, options: { recreate: { type: 'boolean' } }, fn: up },
   'first-lockfile': { positionals: 1, options: {}, fn: firstLockfile },

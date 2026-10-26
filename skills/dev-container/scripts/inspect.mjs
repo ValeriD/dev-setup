@@ -11,7 +11,8 @@ import {
   CAPABILITIES, DEFAULT_GIT_BASE, describeEntry, externalSource, fetchBySha, pathInCheckout, repoUrl, schema, validateManifest,
 } from '../../../installer/src/index.mjs';
 import { UsageError } from './errors.mjs';
-import { covers, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
+import { projectLayers } from './image-layers.mjs';
+import { covers, egressDeclarations, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
 const DOMAIN = new RegExp(schema.definitions.domain.pattern);
@@ -309,14 +310,18 @@ function parseAgents(kind, agents) {
   return [...new Set(list)];
 }
 
-/** The project's allowed domains (Base layer and the project's manifest) and whether the entry conflicts with it. */
-function projectContext(repo, dir, entry, entryValid) {
+/**
+ * The project's allowed domains (the Base and Variant layers read from its pinned image, and
+ * its own manifest), whether those layers could be read, and whether the entry conflicts with it.
+ */
+function projectContext(dir, entry, entryValid) {
   if (!dir) return null;
   const read = readProjectManifest(resolve(dir));
   if (read.error) return { error: read.error, problems: read.problems };
   const { manifest } = read;
-  const base = readJson(join(repo, 'extensions/base.json')).value?.egress ?? [];
-  const allowed = [...new Set([...base, ...(manifest.egress ?? []), ...manifest.extensions.flatMap((e) => e.egress ?? [])])];
+  const { image, layers: all } = projectLayers(resolve(dir), manifest);
+  const allowed = [...new Set(egressDeclarations(all).map((d) => d.domain))];
+  const layers = image.known ? { known: true } : { known: false, reason: image.reason };
   // The same extension at any Pinned Ref: an update, not a second entry.
   const identity = (e) => {
     const { sha, version, ...where } = e.source ?? {};
@@ -325,14 +330,14 @@ function projectContext(repo, dir, entry, entryValid) {
   const existing = manifest.extensions.flatMap((e, i) => (identity(e) === identity(entry) ? [describeEntry(e, i)] : []));
   // The project manifest is valid (readProjectManifest), so every problem here is the new entry's clash.
   const conflicts = entryValid ? manifestProblems({ ...manifest, extensions: [...manifest.extensions, entry] }) : [];
-  return { allowed, alreadyDeclared: existing, conflicts };
+  return { allowed, layers, alreadyDeclared: existing, conflicts };
 }
 
 const allowedBy = (allowed, host) => allowed.find((d) => covers(d, host)) ?? null;
 
 // ---------- inspect ----------
 
-export function inspect([source], opts, { repo }) {
+export function inspect([source], opts) {
   const src = parseSource(source);
   if (src.type !== 'git' && (opts.ref || opts.path || opts.plugin)) throw new UsageError('--ref, --path and --plugin apply to git sources only');
   if (opts.env && src.type !== 'npm') throw new UsageError('--env applies to npm (stdio MCP) sources only');
@@ -353,7 +358,7 @@ export function inspect([source], opts, { repo }) {
   const onEntry = r.entry.egress ?? [];
 
   const reasons = [...refusals(r.entry), ...(r.reasons ?? [])];
-  const project = projectContext(repo, opts.project, r.entry, reasons.length === 0);
+  const project = projectContext(opts.project, r.entry, reasons.length === 0);
   if (project?.error) return { doc: { ok: false, source, error: `--project: ${project.error}`, problems: project.problems } };
 
   const allowed = project?.allowed ?? [];
@@ -372,7 +377,7 @@ export function inspect([source], opts, { repo }) {
     egress,
     warnings: r.warnings ?? [],
   };
-  if (project) Object.assign(doc, { project: { dir: resolve(opts.project), alreadyDeclared: project.alreadyDeclared, conflicts: project.conflicts } });
+  if (project) Object.assign(doc, { project: { dir: resolve(opts.project), layers: project.layers, alreadyDeclared: project.alreadyDeclared, conflicts: project.conflicts } });
   if (project?.conflicts.length) Object.assign(doc, { ok: false, refused: true, reasons: [...reasons, ...project.conflicts] });
   return { doc };
 }
