@@ -2,6 +2,7 @@
 // subcommands. Read-only: nothing here writes a file.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
 import { describeEntry, ManifestError, mergeLayers, schema, validateManifest } from '../../../installer/src/index.mjs';
 
 /** Strict JSON (Extension Manifests and Presets are plain JSON): { value } or { error }. */
@@ -12,6 +13,16 @@ export function readJson(file) {
     return { error: `not valid JSON: ${err.message}` };
   }
 }
+
+/** JSONC (devcontainer.json, VS Code settings): { value, errors }. */
+export function readJsonc(file) {
+  const errors = [];
+  const value = parseJsonc(readFileSync(file, 'utf8'), errors, { allowTrailingComma: true, disallowComments: false });
+  return { value, errors: errors.map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`) };
+}
+
+/** A remoteEnv `${localEnv:NAME}` with no default: a default would be a value committed to the repository. */
+export const LOCAL_ENV_REF = /^\$\{localEnv:([A-Za-z_][A-Za-z0-9_]*)\}$/;
 
 const LAYER = 'layer';
 

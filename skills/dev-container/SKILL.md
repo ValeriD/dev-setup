@@ -1,6 +1,6 @@
 ---
 name: dev-container
-description: Wire a project to a hardened dev-setups dev container from the host. Use when the user wants to onboard a project (a local folder, a GitHub URL, or a new repo) onto a dev container, migrate an existing project (its own dev container, npm or yarn lockfile) onto one, update its dev container image, allow an egress domain, add a secret (by host environment variable name) for an MCP server, add or remove an Agent Extension (skill, plugin, hook, MCP server) after reviewing it, or adopt, remove, save or edit a Preset of Agent Extensions.
+description: Wire a project to a hardened dev-setups dev container from the host. Use when the user wants to onboard a project (a local folder, a GitHub URL, or a new repo) onto a dev container, migrate an existing project (its own dev container, npm or yarn lockfile) onto one, update its dev container image, allow an egress domain, add a secret (by host environment variable name) for an MCP server, add or remove an Agent Extension (skill, plugin, hook, MCP server) after reviewing it, adopt, remove, save, edit or resync a Preset of Agent Extensions, or show a project's dev container status (image, Presets, Pinned Ref ages, egress, missing host variables, pending recreate).
 ---
 
 # dev-container
@@ -36,5 +36,4 @@ These hold in every operation:
 - **Egress and secrets**: allow a domain, or add a secret by name: read [references/egress-and-secrets.md](references/egress-and-secrets.md) and follow the matching section.
 - **Presets**: adopt one in a project, remove one from a project, save a project's extensions as a Preset, or edit a Preset: read [references/presets.md](references/presets.md) and follow the matching section.
 - **Add or remove one Agent Extension** (a skill, plugin, hook or MCP server, by name, repository, package or URL): read [references/extensions.md](references/extensions.md) and follow the matching section.
-
-Other operations (Preset resync, status) are not built yet. Say so plainly and stop.
+- **Status** ("what am I running", "is anything out of date") or **resync a Preset** in a project: read [references/status.md](references/status.md) and follow the matching section.

@@ -35,7 +35,7 @@ Branch on what the user asked for, then follow that section. Each ends on the co
 
 ## Edit a Preset
 
-Change only `presets/<name>.json`: its description, removing entries or egress domains, or adding an entry. Adding goes through the review in [extensions.md](extensions.md) (Add, steps 1 to 5, run without `--project`), then appends the entry, untagged, and the agreed domains to the Preset file instead of a project. Projects that adopted the Preset keep their copies until they are resynced one at a time; say so.
+Change only `presets/<name>.json`: its description, removing entries or egress domains, or adding an entry. Adding goes through the review in [extensions.md](extensions.md) (Add, steps 1 to 5, run without `--project`), then appends the entry, untagged, and the agreed domains to the Preset file instead of a project. Projects that adopted the Preset keep their copies until they are resynced one at a time ([status.md](status.md), **Resync a Preset**); say so.
 
 **Done when `H presets --name <name>` returns `ok: true` and that file is the only one you changed.**
 

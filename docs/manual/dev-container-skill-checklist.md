@@ -1,6 +1,6 @@
 # dev-container skill: conversational checklist
 
-The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration, SC-07 for egress and secrets, SC-08 for image updates). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
+The helper is covered by `npm run test:skill` and `tests/dev-container-skill.test.mjs`. This checklist covers what only the conversation decides (SC-01, SC-02, SC-12 to SC-15 for onboarding, SC-03 for migration, SC-07 for egress and secrets, SC-08 for image updates, SC-09 and SC-11 for status and Preset resync). It costs model calls and needs a Claude login, so it runs by hand, not in CI.
 
 ## Sandbox
 
@@ -33,7 +33,7 @@ Onboarding and updates accept only an image that `verify-image` verified, so che
 | 7 | `c "/dev-container $T/empty"` after `mkdir $T/empty` | `git init` ran; asks which Variant (no signals); ends with the `/setup-matt-pocock-skills` reminder. |
 | 8 | `c "/dev-container brand-new"` | `git init` under the projects root; asks before creating a GitHub repo. "no": `$T/gh.log` absent. "yes": `$T/gh.log` has `repo create brand-new --private ...`. |
 | 9 | `ln -sfn $T/nowhere $T/claude/skills/dev-container`, re-run 1 | The skill is gone or the agent reports the re-link instruction; nothing changes. Also copy the skill to `$T/copy/skills/dev-container` and link to that: the helper exits 3 with the re-link message. |
-| 10 | `c "/dev-container show the status of $T/empty"` | Says the operation is not built yet; no edits. |
+| 10 | `c "/dev-container show the status of $T/empty"` | Renders the image (or the failed check), Presets, extensions, egress, missing host variables (names only) and the container state; no edits. |
 | 11 | In the web-app clone, set `"image"` to an older published digest (from the `sha-<12>` tags), then `c "/dev-container update my dev container in <dir>"` | Shows old and new digest, the Claude Code/Codex/pnpm changes and the `git log` lines; asks once. "no": `devcontainer.json` unchanged. "yes": `image` is the new digest, `validate` ran, then one recreate question. |
 | 12 | Push any image to a local registry (`localhost:5000/dev-setup/node:latest`), point the `image` default in this checkout's `templates/node/devcontainer-template.json` at it (revert afterwards), then ask for an update | `verify-image` fails with `failed: signature`; the agent reports it, offers no workaround, and `devcontainer.json` is unchanged. |
 
@@ -116,3 +116,15 @@ Rows X1–X6. Sources come from a local bare repo through the helper's test seam
 | X4 | `c "/dev-container add that plugin for codex too in $T/p1"` | Refuses, explaining that Codex plugins are unsupported (D3); no edits. Same for `c "/dev-container add https://10.0.0.1/mcp to $T/p1"`: refused, no edits. |
 | X5 | `c "/dev-container add the remote MCP https://mcp.tools.example.com/v1 with token env TOOLS_TOKEN to $T/p1"` | Entry `mcp-remote` with `egress: ["mcp.tools.example.com"]` and `bearerTokenEnv: "TOOLS_TOKEN"`; `devcontainer.json` gains `"TOOLS_TOKEN": "${localEnv:TOOLS_TOKEN}"`; names `TOOLS_TOKEN` to export, never asks for its value; `validate` ran. |
 | X6 | `c "/dev-container remove the acme/x plugin from $T/p1"` | Shows the plan, proposes dropping `search.example.com`, asks once. After yes: the entry and that domain are gone; the `mcp-remote` entry from X5 and its egress stay; `validate` ran. |
+
+## Status and Preset resync (SC-09, SC-11, SC-12)
+
+Rows S1–S5. Use the throwaway checkout `$T/ds` and the project `$T/p1` from the Presets section (P1 adopted `web` and `api`), plus a second project `$T/p2` that adopted `web` the same way. Export `GIT_AUTHOR_NAME=t` (leave `GIT_AUTHOR_EMAIL` unset) and `DOCS_TOKEN=secret-value-123` before starting `claude`.
+
+| # | Prompt | Expect |
+| --- | --- | --- |
+| S1 | `c "/dev-container status of $T/p1"` | Six parts: image (Variant, digest, a newer verified image or the failed check), Presets `web` and `api` in sync, each extension with its Pinned Ref and age (an error for fake SHAs), the egress domains, `GIT_AUTHOR_EMAIL` as missing, the container state. `secret-value-123` appears nowhere in the transcript. No edits. |
+| S2 | Edit `$T/ds/presets/web.json`: change one skill's SHA and add a domain to its `egress`. Repeat S1 | `web` is drifted, showing the changed entry (old → new SHA) and the missing domain; a resync is offered for `web` in `$T/p1` only. |
+| S3 | `c --continue "no"` | `$T/p1` unchanged (`git -C $T/p1 diff --quiet` against before S2). |
+| S4 | Repeat S2, answer "yes" | Only the `web`-tagged entries of `$T/p1` change; the new domain is in its top-level `egress`; `api` entries untouched; `validate` and `status` ran (`web` in sync); one recreate question. `$T/p2` unchanged. |
+| S5 | Start `$T/p1`'s container, allow a new domain and answer "no" to the recreate, then ask for the status | Container `running`, recreate pending: "extensions.json changed after the container started". After `H up $T/p1 --recreate`, nothing is pending. |
