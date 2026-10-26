@@ -36,6 +36,7 @@ for (const [name, versions] of Object.entries(spec)) {
       name,
       version,
       scripts: v.scripts,
+      bin: v.bin,
       dist: {
         tarball: `${base}/${name}/-/${name}-${version}.tgz`,
         integrity: `sha512-${createHash('sha512').update(tgz).digest('base64')}`,

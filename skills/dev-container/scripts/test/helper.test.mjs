@@ -424,12 +424,19 @@ test('a broken or foreign skill link in the Claude config exits with the re-link
   assert.equal(good.doc.repo, REPO);
 });
 
-test('no helper source runs git commit or executes files', () => {
-  for (const f of ['dev-container.mjs', 'commands.mjs']) {
+test('the helper only spawns fixed programs, never commits, and inspect never runs anything inside a fetched tree', () => {
+  for (const f of readdirSync(SCRIPTS).filter((x) => x.endsWith('.mjs'))) {
     const src = readFileSync(join(SCRIPTS, f), 'utf8');
+    for (const m of src.matchAll(/\bspawn(?:Sync)?\(\s*([^,]+),/g)) {
+      assert.match(m[1], /^'(git|docker|npx|npm)'$/, `${f}: spawn of ${m[1]}`);
+    }
+    assert.doesNotMatch(src, /\bexec(File)?(Sync)?\(|\bfork\(/, `${f} spawns only fixed programs through spawnSync`);
     assert.doesNotMatch(src, /\bcommit\b/, `${f} must not run git commit, directly or through sh -c`);
-    assert.doesNotMatch(src, /\bexec(File)?(Sync)?\(/, `${f} spawns only fixed programs through spawnSync`);
   }
+  // The dynamic proof (fixture scripts that would leave a marker) is in inspect.test.mjs.
+  const inspectSrc = readFileSync(join(SCRIPTS, 'inspect.mjs'), 'utf8');
+  assert.doesNotMatch(inspectSrc, /\bcwd\b/, 'inspect runs nothing with a fetched tree as working directory');
+  assert.doesNotMatch(inspectSrc, /\bimport\(/, 'inspect never loads fetched code');
 });
 
 test('the devcontainer CLI pin matches the acceptance suite and CI', async () => {
