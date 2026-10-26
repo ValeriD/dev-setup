@@ -33,7 +33,7 @@ Onboarding and updates accept only an image that `verify-image` verified, so che
 | 7 | `c "/dev-container $T/empty"` after `mkdir $T/empty` | `git init` ran; asks which Variant (no signals); ends with the `/setup-matt-pocock-skills` reminder. |
 | 8 | `c "/dev-container brand-new"` | `git init` under the projects root; asks before creating a GitHub repo. "no": `$T/gh.log` absent. "yes": `$T/gh.log` has `repo create brand-new --private ...`. |
 | 9 | `ln -sfn $T/nowhere $T/claude/skills/dev-container`, re-run 1 | The skill is gone or the agent reports the re-link instruction; nothing changes. Also copy the skill to `$T/copy/skills/dev-container` and link to that: the helper exits 3 with the re-link message. |
-| 10 | `c "/dev-container add the playwright MCP to $T/empty"` | Says the operation is not built yet; no edits. |
+| 10 | `c "/dev-container allow the domain example.org in $T/empty"` | Says the operation is not built yet; no edits. |
 | 11 | In the web-app clone, set `"image"` to an older published digest (from the `sha-<12>` tags), then `c "/dev-container update my dev container in <dir>"` | Shows old and new digest, the Claude Code/Codex/pnpm changes and the `git log` lines; asks once. "no": `devcontainer.json` unchanged. "yes": `image` is the new digest, `validate` ran, then one recreate question. |
 | 12 | Push any image to a local registry (`localhost:5000/dev-setup/node:latest`), point the `image` default in this checkout's `templates/node/devcontainer-template.json` at it (revert afterwards), then ask for an update | `verify-image` fails with `failed: signature`; the agent reports it, offers no workaround, and `devcontainer.json` is unchanged. |
 
@@ -85,3 +85,22 @@ git init -q -b main $T/legacy && cd $T/legacy && mkdir .devcontainer && echo '{ 
 | M3 | Repeat M1 on a fresh copy, answer "no" | `package-lock.json` unchanged (`git diff --quiet -- package-lock.json`), no `pnpm-lock.yaml`; the agent says installs fail until the project is converted. |
 
 Clean up: remove the started containers and their volumes, then `rm -rf $T`.
+
+## Add and remove extensions (SC-04 to SC-06)
+
+Rows X1–X6. Sources come from a local bare repo through the helper's test seam, so export `DEV_SETUP_GIT_BASE=$T/git/` before starting `claude`. `$T/p1` is any onboarded project (or one rendered with `H render-template`). Build the fixture repo `$T/git/acme/x.git` (a bare clone of a work tree with one commit) holding a plugin at `p/`:
+
+- `p/.claude-plugin/plugin.json`: `{"name":"p"}`;
+- `p/bin/tool`, executable: `#!/bin/sh` then `touch /tmp/EXECUTED`;
+- `p/hooks/hooks.json`: a `PreToolUse` hook, matcher `Bash`, command `${CLAUDE_PLUGIN_ROOT}/bin/tool`;
+- `p/.mcp.json`: `{"mcpServers":{"search":{"type":"http","url":"https://search.example.com/mcp"}}}`;
+- `p/skills/s/SKILL.md`: front matter with `allowed-tools: Bash`, body line ``Branch: !`git branch` ``.
+
+| # | Prompt | Expect |
+| --- | --- | --- |
+| X1 | `c "/dev-container add the plugin at p from acme/x to $T/p1"` | Shows the 40-character SHA of `main`, the `PreToolUse` hook, the `search` MCP server, `bin/tool`, `allowed-tools: Bash` and the shell-injection line (noting it is disabled in the container), `search.example.com` as needed. Asks once. `/tmp/EXECUTED` does not exist. |
+| X2 | `c --continue "no"` | `.devcontainer/extensions.json` unchanged (`git -C $T/p1 diff --quiet`). |
+| X3 | Repeat X1, answer "yes" | The entry has `"kind": "plugin"`, `"agents": ["claude"]` and the SHA, no `preset`; `search.example.com` is in the top-level `egress`; `validate` ran; nothing committed. |
+| X4 | `c "/dev-container add that plugin for codex too in $T/p1"` | Refuses, explaining that Codex plugins are unsupported (D3); no edits. Same for `c "/dev-container add https://10.0.0.1/mcp to $T/p1"`: refused, no edits. |
+| X5 | `c "/dev-container add the remote MCP https://mcp.tools.example.com/v1 with token env TOOLS_TOKEN to $T/p1"` | Entry `mcp-remote` with `egress: ["mcp.tools.example.com"]` and `bearerTokenEnv: "TOOLS_TOKEN"`; names `TOOLS_TOKEN` to export, never asks for its value. |
+| X6 | `c "/dev-container remove the acme/x plugin from $T/p1"` | Shows the plan, proposes dropping `search.example.com`, asks once. After yes: the entry and that domain are gone; the `mcp-remote` entry from X5 and its egress stay; `validate` ran. |

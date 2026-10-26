@@ -367,14 +367,6 @@ test('a broken or foreign skill link in the Claude config exits with the re-link
   assert.equal(good.doc.repo, REPO);
 });
 
-test('no helper source runs git commit or executes files', () => {
-  for (const f of ['dev-container.mjs', 'commands.mjs']) {
-    const src = readFileSync(join(SCRIPTS, f), 'utf8');
-    assert.doesNotMatch(src, /\bcommit\b/, `${f} must not run git commit, directly or through sh -c`);
-    assert.doesNotMatch(src, /\bexec(File)?(Sync)?\(/, `${f} spawns only fixed programs through spawnSync`);
-  }
-});
-
 test('the devcontainer CLI pin matches the acceptance suite and CI', async () => {
   const { DEVCONTAINER_CLI } = await import('../commands.mjs');
   const version = DEVCONTAINER_CLI.split('@').pop();

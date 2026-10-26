@@ -21,7 +21,7 @@ const readJson = (file, what) => {
 };
 
 /** The repo (owner/repo) and optional subdirectory a marketplace plugin's external source points at. */
-function externalSource(src) {
+export function externalSource(src) {
   if (!src || typeof src !== 'object') throw new Error('unsupported plugin source in the marketplace');
   const kind = src.source;
   if (!['github', 'url', 'git-subdir'].includes(kind)) throw new Error(`external plugin source type "${kind}" is not supported (use github, url or git-subdir on github.com)`);
