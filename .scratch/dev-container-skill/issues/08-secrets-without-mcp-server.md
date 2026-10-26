@@ -8,7 +8,7 @@
 
 **Blocked by:** 11 (Per-entry egress for every kind), because both change the schema and ADR 0004
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 

@@ -27,7 +27,7 @@ The destinations a container may reach; everything else is blocked. Assembled fr
 _Avoid_: Whitelist, firewall rules
 
 **Named Secret**:
-A host environment variable that an Extension Manifest names and the container receives by name only. Its value never appears in the catalogue, a Consuming Project's files, or an image.
+A host environment variable that an Extension Manifest names and the container receives by name only. Its value never appears in the catalogue, a Consuming Project's files, or an image. It is either declared by the MCP server that uses it, or **container-wide**: declared for the whole container, because the project itself (not one Agent Extension) needs it.
 _Avoid_: Credential, token, env var
 
 ### Agents
