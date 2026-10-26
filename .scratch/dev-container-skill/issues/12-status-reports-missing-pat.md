@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -20,6 +20,11 @@
 - **Validation seam:** the helper CLI JSON.
 - **Coverage:** helper integration, extending `status.test.mjs`: unset, set (the value never appears in the output), and a project with no PAT line (no note).
 
-- [ ] With the PAT host variable unset, `status` includes a note naming the variable
-- [ ] With it set, there is no note, and the value never appears in the output
-- [ ] A `devcontainer.json` without a `DEV_SETUP_GITHUB_PAT` line produces no note
+- [x] With the PAT host variable unset, `status` includes a note naming the variable
+- [x] With it set, there is no note, and the value never appears in the output
+- [x] A `devcontainer.json` without a `DEV_SETUP_GITHUB_PAT` line produces no note
+
+## Comments
+
+- Output shape: `env.pat` is `{ name, hostEnv, set, note? }`. It is `null` when `devcontainer.json` has no `DEV_SETUP_GITHUB_PAT` line that is a `${localEnv:…}` reference. The PAT is deliberately left out of `env.missing`, so the skill shows it as a note after the list.
+- The status tests now set `DEV_SETUP_GITHUB_PAT` (and the test's `MY_PAT`) to empty, so a PAT exported on the developer's host cannot change the results.
