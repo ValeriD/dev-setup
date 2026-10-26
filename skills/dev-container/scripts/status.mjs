@@ -18,6 +18,8 @@ import { egressNeededBy, listPresets, LOCAL_ENV_REF, readJsonc, readProjectManif
 export const APPLIED_HASH_PATH = '/run/dev-setup/applied-manifest';
 /** Host variables commits inside the container need (design: "Host git identity"). */
 export const GIT_IDENTITY = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL'];
+/** The container variable the Template's remoteEnv maps to the host PAT variable (option `patEnvVar`). */
+export const PAT_ENV = 'DEV_SETUP_GITHUB_PAT';
 const DAY = 86400e3;
 
 const gitBase = () => process.env.DEV_SETUP_GIT_BASE || DEFAULT_GIT_BASE;
@@ -211,12 +213,28 @@ function readRemoteEnv(project) {
 function hostEnv(secrets, remoteEnv) {
   const secretDocs = secrets.map((s) => ({ name: s.name, neededBy: s.neededBy, hostEnv: s.hostEnv, set: s.hostEnv ? isSet(s.hostEnv) : false }));
   const gitDocs = GIT_IDENTITY.map((name) => {
-    const ref = typeof remoteEnv?.[name] === 'string' ? remoteEnv[name].match(LOCAL_ENV_REF) : null;
-    const hostVar = ref ? ref[1] : null;
+    const hostVar = localEnvName(remoteEnv, name);
     return { name, hostEnv: hostVar, set: hostVar ? isSet(hostVar) : false, ...(hostVar ? {} : { note: `devcontainer.json has no remoteEnv "${name}": "\${localEnv:${name}}"` }) };
   });
   const missing = [...new Set([...secretDocs, ...gitDocs].filter((d) => !d.set).map((d) => d.hostEnv ?? d.name))];
-  return { secrets: secretDocs, gitIdentity: gitDocs, missing };
+  return { secrets: secretDocs, gitIdentity: gitDocs, missing, pat: patStatus(remoteEnv) };
+}
+
+/**
+ * The host variable behind remoteEnv's DEV_SETUP_GITHUB_PAT line, by name only. An unset
+ * one is a note, not a `missing` entry: only `git push` needs it. null without such a line.
+ */
+function patStatus(remoteEnv) {
+  const hostVar = localEnvName(remoteEnv, PAT_ENV);
+  if (!hostVar) return null;
+  const set = isSet(hostVar);
+  return { name: PAT_ENV, hostEnv: hostVar, set, ...(set ? {} : { note: `${hostVar} unset: \`git push\` from the container will fail` }) };
+}
+
+/** The host variable a remoteEnv line `"<name>": "${localEnv:VAR}"` passes, or null. */
+function localEnvName(remoteEnv, name) {
+  const ref = typeof remoteEnv?.[name] === 'string' ? remoteEnv[name].match(LOCAL_ENV_REF) : null;
+  return ref ? ref[1] : null;
 }
 
 // ---------- Container ----------
