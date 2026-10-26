@@ -104,6 +104,7 @@ const lint = (s) => ({ kind: 'skill', agents: ['claude'], source: { github: 'acm
 const searchMcp = { kind: 'mcp', agents: ['claude'], name: 'search', source: { npm: 'search-mcp', version: '1.0.0' }, env: ['SEARCH_TOKEN'], egress: ['api.search.example.com'] };
 const remote = { kind: 'mcp-remote', agents: ['claude'], name: 'docs', url: 'https://docs.example.com/mcp', egress: ['docs.example.com'] };
 const tag = (name, entries) => entries.map((e) => ({ ...e, preset: name }));
+const withEgress = (e, egress) => ({ ...e, egress });
 
 let n = 0;
 function project(extensions, egress, remoteEnv = {}, image = IMAGE) {
@@ -119,8 +120,8 @@ function project(extensions, egress, remoteEnv = {}, image = IMAGE) {
 }
 
 test('status reports Pinned Ref ages, egress, and unset host env names without printing a value', () => {
-  setPreset('web', { description: 'Web.', extensions: [lint(sha.skills[0])], egress: ['cdn.example.com'] });
-  const p = project([...tag('web', [lint(sha.skills[0])]), searchMcp, remote], ['cdn.example.com'], { SEARCH_TOKEN: '${localEnv:SEARCH_TOKEN}' });
+  setPreset('web', { description: 'Web.', extensions: [withEgress(lint(sha.skills[0]), ['cdn.example.com'])] });
+  const p = project([...tag('web', [withEgress(lint(sha.skills[0]), ['cdn.example.com'])]), searchMcp, remote], ['cdn.example.com', 'mine.example.com'], { SEARCH_TOKEN: '${localEnv:SEARCH_TOKEN}' });
   const before = readFileSync(join(p, '.devcontainer/extensions.json'), 'utf8');
 
   const r = h(['status', p, '--skip-image-check'], { SEARCH_TOKEN: SECRET_VALUE, GIT_AUTHOR_NAME: 'Dev' });
@@ -140,8 +141,8 @@ test('status reports Pinned Ref ages, egress, and unset host env names without p
   assert.equal(rem.pinnedRef, null);
   assert.match(rem.note, /D2/);
 
-  assert.deepEqual(d.egress.topLevel, [{ domain: 'cdn.example.com', neededBy: ['Preset "web"'] }]);
-  assert.deepEqual(d.egress.entries.map((e) => e.domain), ['api.search.example.com', 'docs.example.com']);
+  assert.deepEqual(d.egress.topLevel, [{ domain: 'cdn.example.com', neededBy: ['extensions[0] (skill "acme/skills/skills/lint")'] }, { domain: 'mine.example.com', neededBy: [] }]);
+  assert.deepEqual(d.egress.entries.map((e) => e.domain), ['cdn.example.com', 'api.search.example.com', 'docs.example.com']);
 
   assert.deepEqual(d.env.secrets.map((s) => [s.name, s.hostEnv, s.set]), [['SEARCH_TOKEN', 'SEARCH_TOKEN', true]]);
   assert.deepEqual(d.env.gitIdentity.map((g) => [g.name, g.set]), [['GIT_AUTHOR_NAME', true], ['GIT_AUTHOR_EMAIL', false]]);
@@ -180,40 +181,52 @@ test('status notes an unset PAT host variable by name, never its value, and only
 });
 
 test('SC-09: after a Preset edit, status reports drift with a per-entry diff and the exact resync entries', () => {
-  const v1 = { description: 'Web.', extensions: [lint(sha.skills[0]), remote], egress: ['cdn.example.com'] };
+  const v1 = { description: 'Web.', extensions: [withEgress(lint(sha.skills[0]), ['cdn.example.com']), remote] };
   setPreset('site', v1);
   const own = { ...lint(sha.skills[1]), name: 'own-lint' };
-  const p = project([own, ...tag('site', v1.extensions)], ['cdn.example.com', 'mine.example.com']);
+  const p = project([own, ...tag('site', v1.extensions)], ['mine.example.com']);
+  const file = join(p, '.devcontainer/extensions.json');
+  /** Resync as references/status.md says: the tagged entries are replaced in place by resync.entries. */
+  const resync = (site) => {
+    const mf = JSON.parse(readFileSync(file, 'utf8'));
+    mf.extensions = mf.extensions.flatMap((e, i) => (i === site.indexes[0] ? site.resync.entries : site.indexes.includes(i) ? [] : [e]));
+    writeFileSync(file, JSON.stringify(mf, null, 2));
+  };
 
   const inSync = h(['status', p, '--skip-image-check']);
   assert.equal(inSync.code, 0, inSync.log);
   assert.equal(inSync.doc.presets[0].state, 'in-sync');
   assert.deepEqual(inSync.doc.presets[0].indexes, [1, 2]);
-  assert.deepEqual(inSync.doc.egress.topLevel.map((t) => [t.domain, t.neededBy]), [['cdn.example.com', ['Preset "site"']], ['mine.example.com', []]]);
 
-  // Edit the Preset: the skill moves to a newer SHA, the remote server goes, an MCP server and a domain arrive.
-  setPreset('site', { description: 'Web.', extensions: [lint(sha.skills[1]), searchMcp], egress: ['cdn.example.com', 'fonts.example.com'] });
+  // Edit the Preset: the skill moves to a newer SHA and needs one more domain, the remote server goes, an MCP server arrives.
+  const lintV2 = withEgress(lint(sha.skills[1]), ['cdn.example.com', 'fonts.example.com']);
+  setPreset('site', { description: 'Web.', extensions: [lintV2, searchMcp] });
   const r = h(['status', p, '--skip-image-check']);
   assert.equal(r.code, 0, r.log);
   const [site] = r.doc.presets;
   assert.equal(site.state, 'drifted');
-  assert.deepEqual(site.diff.changed.map((x) => [x.index, x.from.source.sha, x.to.source.sha]), [[1, sha.skills[0], sha.skills[1]]]);
+  assert.deepEqual(site.diff.changed.map((x) => [x.index, x.from.source.sha, x.to.source.sha, x.to.egress]), [[1, sha.skills[0], sha.skills[1], ['cdn.example.com', 'fonts.example.com']]]);
   assert.deepEqual(site.diff.added, [searchMcp]);
   assert.deepEqual(site.diff.removed.map((x) => [x.index, x.entry.name]), [[2, 'docs']]);
-  assert.deepEqual(site.diff.egressMissing, ['fonts.example.com']);
-  assert.deepEqual(site.resync.entries, tag('site', [lint(sha.skills[1]), searchMcp]));
+  assert.deepEqual(Object.keys(site.diff).sort(), ['added', 'changed', 'removed'], 'no top-level egress to diff');
+  assert.deepEqual(site.resync, { entries: tag('site', [lintV2, searchMcp]) });
 
-  // Resync as references/status.md says: the tagged entries are replaced in place by resync.entries.
-  const file = join(p, '.devcontainer/extensions.json');
-  const mf = JSON.parse(readFileSync(file, 'utf8'));
-  const first = site.indexes[0];
-  mf.extensions = mf.extensions.flatMap((e, i) => (i === first ? site.resync.entries : site.indexes.includes(i) ? [] : [e]));
-  mf.egress = [...mf.egress, ...site.resync.egressAdd];
-  writeFileSync(file, JSON.stringify(mf, null, 2));
+  resync(site);
   const after = h(['status', p, '--skip-image-check']);
   assert.equal(after.doc.presets[0].state, 'in-sync', after.log);
   assert.deepEqual(after.doc.extensions.map((e) => [e.index, e.preset ?? null, e.pinnedRef.value]),
     [[0, null, sha.skills[1]], [1, 'site', sha.skills[1]], [2, 'site', '1.0.0']], 'own entry first and untouched, Preset entries where they were');
+  assert.deepEqual(after.doc.egress.topLevel, [{ domain: 'mine.example.com', neededBy: [] }], 'the project\'s own domain is untouched');
+
+  // An entry whose only change is a dropped domain is drift too, and resyncing removes the domain with it.
+  setPreset('site', { description: 'Web.', extensions: [withEgress(lint(sha.skills[1]), ['cdn.example.com']), searchMcp] });
+  const dropped = h(['status', p, '--skip-image-check']).doc.presets[0];
+  assert.equal(dropped.state, 'drifted');
+  assert.deepEqual(dropped.diff.changed.map((x) => [x.index, x.from.egress, x.to.egress]), [[1, ['cdn.example.com', 'fonts.example.com'], ['cdn.example.com']]]);
+  resync(dropped);
+  const synced = h(['status', p, '--skip-image-check']).doc;
+  assert.equal(synced.presets[0].state, 'in-sync');
+  assert.deepEqual(synced.egress.entries.map((e) => e.domain), ['cdn.example.com', 'api.search.example.com']);
 });
 
 test('status names a Preset that is gone or invalid instead of offering a resync', () => {

@@ -171,7 +171,7 @@ test('inspect resolves HEAD to a SHA and lists everything a plugin runs, reaches
   assert.equal(r.code, 0, r.log);
   const d = r.doc;
   assert.deepEqual(d.resolved, { ref: 'HEAD', refName: 'HEAD', sha: sha.pluginsHead });
-  assert.deepEqual(d.entry, { kind: 'plugin', agents: ['claude'], source: { github: 'acme/plugins', path: 'plugins/rich', sha: sha.pluginsHead } });
+  assert.deepEqual(d.entry, { kind: 'plugin', agents: ['claude'], source: { github: 'acme/plugins', path: 'plugins/rich', sha: sha.pluginsHead }, egress: ['search.example.com'] }, 'the host its MCP server certainly reaches goes on the entry');
   const inv = d.inventory;
   assert.deepEqual(inv.hooks, [{ file: 'hooks/hooks.json', event: 'PreToolUse', matcher: 'Bash', type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh' }]);
   assert.deepEqual(inv.mcpServers.map((s) => [s.name, s.type, s.url ?? s.command]).sort(), [['inline', 'stdio', 'node'], ['local', 'stdio', 'node'], ['search', 'http', 'https://search.example.com/mcp']]);
@@ -183,8 +183,7 @@ test('inspect resolves HEAD to a SHA and lists everything a plugin runs, reaches
   assert.deepEqual(inv.allowedTools, [{ file: 'skills/deploy/SKILL.md', allowedTools: 'Bash(git:*), Read' }]);
   assert.deepEqual(inv.shellInjection.map((s) => s.line), [8, 9]);
   assert.equal(inv.hosts.heuristic, true);
-  assert.deepEqual(d.egress.target, 'top-level', 'a plugin entry has no egress field');
-  assert.deepEqual(d.egress.needed, [{ domain: 'search.example.com', allowedBy: null }]);
+  assert.deepEqual(d.egress.onEntry, [{ domain: 'search.example.com', allowedBy: null }]);
   assert.deepEqual(d.egress.detected.domains.map((x) => x.domain), ['docs.example.org']);
   assert.equal(d.egress.detected.heuristic, true);
   assert.match(d.warnings.join('\n'), /disableSkillShellExecution/);
@@ -222,6 +221,7 @@ test('inspect finds skills and hooks, asks for a hook event, and offers candidat
   assert.equal(hook.code, 0, hook.log);
   assert.deepEqual(hook.doc.entry, { kind: 'hook', agents: ['claude'], event: 'PostToolUse', matcher: 'Edit', source: { github: 'acme/plugins', path: 'hooks/fmt.sh', sha: sha.pluginsHead } });
   assert.deepEqual(hook.doc.inventory.scripts, [{ file: 'fmt.sh', executable: true, interpreter: '/bin/sh' }]);
+  assert.deepEqual(hook.doc.egress.onEntry, [], 'nothing certain to reach, so no entry egress');
 
   const none = h('inspect', 'acme/plugins');
   assert.equal(none.code, 1);
@@ -266,7 +266,7 @@ test('mcp-remote gets its host as entry egress; validate refuses one without egr
   const r = h('inspect', 'https://mcp.tools.example.com/v1', '--name', 'tools', '--bearer-token-env', 'TOOLS_TOKEN');
   assert.equal(r.code, 0, r.log);
   assert.deepEqual(r.doc.entry, { kind: 'mcp-remote', agents: ['claude', 'codex'], name: 'tools', url: 'https://mcp.tools.example.com/v1', egress: ['mcp.tools.example.com'], bearerTokenEnv: 'TOOLS_TOKEN' });
-  assert.equal(r.doc.egress.target, 'entry');
+  assert.deepEqual(r.doc.egress.onEntry, [{ domain: 'mcp.tools.example.com', allowedBy: null }]);
   assert.equal(h('inspect', 'https://mcp.example.com/', '--bearer-token-env', 'ghp_value').code, 2, 'a value is not a name');
 
   const { egress, ...noEgress } = r.doc.entry;
@@ -305,18 +305,18 @@ test('decline writes nothing; approve writes the pinned entry and its egress, an
   assert.equal(r.doc.egress.detected.domains[0].allowedBy, 'docs.example.org', 'already allowed domains are marked');
   assert.deepEqual(snapshot(p), before, 'inspecting (and then declining) writes nothing');
 
-  // Approve: the agent appends the entry and the needed domains to the top-level egress.
+  // Approve: the agent appends the entry, which carries its domains, and adds an agreed detected domain to it.
   const mf = manifestOf(p);
-  mf.extensions.push(r.doc.entry);
-  mf.egress.push(...r.doc.egress.needed.map((x) => x.domain));
+  mf.extensions.push({ ...r.doc.entry, egress: [...r.doc.entry.egress, 'docs.example.org'] });
   writeFileSync(join(p, '.devcontainer/extensions.json'), JSON.stringify(mf, null, 2));
   const v = h('validate', p);
   assert.equal(v.code, 0, v.log);
   assert.equal(v.doc.entries, 1);
+  assert.deepEqual(v.doc.egress, ['docs.example.org'], 'the top-level egress is untouched');
 
   const again = h('inspect', 'acme/plugins', '--path', 'plugins/rich', '--project', p);
   assert.match(again.doc.project.alreadyDeclared.join(), /extensions\[0\] \(plugin/);
-  assert.deepEqual(again.doc.egress.needed, [{ domain: 'search.example.com', allowedBy: 'search.example.com' }]);
+  assert.deepEqual(again.doc.egress.onEntry, [{ domain: 'search.example.com', allowedBy: 'search.example.com' }]);
 });
 
 test('inspect --project refuses an entry that clashes with the project, e.g. a skill name declared twice', () => {
@@ -329,53 +329,47 @@ test('inspect --project refuses an entry that clashes with the project, e.g. a s
   assert.equal(r.doc.reasons.length, 1, 'each problem is reported once');
 });
 
-test('plan-remove drops the entry and only the egress nothing else needs, and writes nothing', () => {
-  const rich = h('inspect', 'acme/plugins', '--path', 'plugins/rich').doc.entry;
-  const remote = { kind: 'mcp-remote', agents: ['claude'], name: 'search', url: 'https://search.example.com/mcp', egress: ['search.example.com'] };
-  const tools = { kind: 'mcp-remote', agents: ['claude'], name: 'tools', url: 'https://tools.example.com/mcp', egress: ['tools.example.com'] };
-  const p = project([rich, remote, tools], ['search.example.com', 'docs.example.org', 'tools.example.com', 'mine.example.com']);
+test('plan-remove drops the entry with its own egress, says which domains stay allowed, and writes nothing', () => {
+  const rich = h('inspect', 'acme/plugins', '--path', 'plugins/rich').doc.entry; // egress: search.example.com
+  const remote = { kind: 'mcp-remote', agents: ['claude'], name: 'search', url: 'https://api.search.example.com/mcp', egress: ['api.search.example.com'] };
+  const tools = { kind: 'mcp-remote', agents: ['claude'], name: 'tools', url: 'https://tools.example.com/mcp', egress: ['tools.example.com', 'cdn.tools.example.com'] };
+  const hook = { kind: 'hook', agents: ['claude'], event: 'Stop', source: { github: 'acme/plugins', path: 'hooks/fmt.sh', sha: sha.pluginsHead }, egress: ['hooks.example.com'] };
+  const p = project([rich, remote, tools, hook], ['tools.example.com', 'mine.example.com']);
   const before = snapshot(p);
 
   const r = h('plan-remove', p, '0');
   assert.equal(r.code, 0, r.log);
+  assert.deepEqual(r.doc, { ok: true, dir: p, remove: { index: 0, entry: r.doc.remove.entry }, dropsWithEntry: [{ domain: 'search.example.com', stillAllowedBy: [] }] });
   assert.match(r.doc.remove.entry, /plugin/);
-  assert.deepEqual(r.doc.egress, [], 'search.example.com (its MCP server) is still needed');
-  assert.deepEqual(r.doc.heuristicEgress, ['docs.example.org'], 'a host only seen in its files is proposed as a heuristic');
-  assert.deepEqual(r.doc.keepEgress, [{ domain: 'search.example.com', neededBy: ['extensions[1] (mcp-remote "search")'] }]);
-
-  const t = h('plan-remove', p, '2');
-  assert.deepEqual(t.doc.dropsWithEntry, [{ domain: 'tools.example.com', stillAllowedBy: ['top-level egress'] }]);
-  assert.deepEqual(t.doc.egress, ['tools.example.com'], 'its own domain, repeated at top level, goes too');
+  // A staying entry's parent domain keeps a subdomain allowed.
+  assert.deepEqual(h('plan-remove', p, '1').doc.dropsWithEntry, [{ domain: 'api.search.example.com', stillAllowedBy: ['extensions[0] (plugin "acme/plugins/plugins/rich")'] }]);
+  // The project's own top-level domain (or a parent of it) keeps it allowed, and is never part of the plan.
+  assert.deepEqual(h('plan-remove', p, '2').doc.dropsWithEntry, [
+    { domain: 'tools.example.com', stillAllowedBy: ['top-level egress'] },
+    { domain: 'cdn.tools.example.com', stillAllowedBy: ['top-level egress'] },
+  ]);
+  assert.deepEqual(h('plan-remove', p, '3').doc.dropsWithEntry, [{ domain: 'hooks.example.com', stillAllowedBy: [] }]);
   assert.deepEqual(snapshot(p), before, 'the plan writes nothing');
-
   assert.equal(h('plan-remove', p, '7').code, 2);
-  // Applying the first plan as the agent would leaves a valid manifest.
+
+  // Applying the plan as the agent would (delete the entry) leaves a valid manifest with the top-level egress as it was.
   const mf = manifestOf(p);
   mf.extensions.splice(0, 1);
-  mf.egress = mf.egress.filter((d) => !r.doc.heuristicEgress.includes(d));
   writeFileSync(join(p, '.devcontainer/extensions.json'), JSON.stringify(mf));
-  assert.equal(h('validate', p).code, 0);
+  const v = h('validate', p);
+  assert.equal(v.code, 0, v.log);
+  assert.deepEqual(v.doc.egress, ['tools.example.com', 'mine.example.com']);
 });
 
-test('plan-remove keeps a top-level domain that a staying skill or plugin names in its pinned content', () => {
-  const rich = h('inspect', 'acme/plugins', '--path', 'plugins/rich').doc.entry;
-  const searcher = h('inspect', 'acme/plugins', '--path', 'skills/searcher').doc.entry;
-  const p = project([rich, searcher], ['search.example.com']);
-  const r = h('plan-remove', p, '0');
+test('plan-remove reads only the manifest: an entry whose pinned content is unreachable plans the same, without a fetch', () => {
+  const gone = { kind: 'skill', agents: ['claude'], preset: 'web', source: { github: 'acme/gone', path: 's', sha: 'e'.repeat(40) }, egress: ['x.example.com'] };
+  const stay = { kind: 'skill', agents: ['claude'], source: { github: 'acme/gone', path: 't', sha: 'f'.repeat(40) } };
+  const r = h('plan-remove', project([gone, stay], ['x.example.com']), '0');
   assert.equal(r.code, 0, r.log);
-  assert.deepEqual(r.doc.egress, []);
-  assert.deepEqual(r.doc.keepEgress, [{ domain: 'search.example.com', neededBy: ['extensions[1] (skill "acme/plugins/skills/searcher") (named in its pinned content)'] }]);
-  // Alone, the plugin's MCP host is certain to go with it.
-  assert.deepEqual(h('plan-remove', project([rich], ['search.example.com']), '0').doc.egress, ['search.example.com']);
-});
-
-test('plan-remove notes a Preset-tagged entry and still plans when the pinned content cannot be fetched', () => {
-  const gone = { kind: 'skill', agents: ['claude'], preset: 'web', source: { github: 'acme/gone', path: 's', sha: 'e'.repeat(40) } };
-  const r = h('plan-remove', project([gone], ['x.example.com']), '0');
-  assert.equal(r.code, 0, r.log);
-  assert.match(r.doc.note, /cannot fetch/);
+  assert.deepEqual(r.doc.dropsWithEntry, [{ domain: 'x.example.com', stillAllowedBy: ['top-level egress'] }]);
+  assert.equal(r.doc.remove.preset, 'web');
   assert.match(r.doc.presetNote, /Preset "web"/);
-  assert.deepEqual(r.doc.egress, []);
+  assert.equal(r.doc.note, undefined, 'nothing was fetched, so nothing failed to fetch');
 });
 
 test('MIN_RELEASE_AGE_DAYS matches the image pnpm policy', async () => {

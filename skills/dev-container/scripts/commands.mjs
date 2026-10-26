@@ -9,8 +9,8 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { describeEntry, schema, secretNames } from '../../../installer/src/index.mjs';
-import { countTags, egressNeededBy, listPresets, LOCAL_ENV_REF, manifestProblems, readJson, readJsonc, readProjectManifest } from './manifests.mjs';
-import { inspect, planRemove } from './inspect.mjs';
+import { countTags, egressGoing, listPresets, LOCAL_ENV_REF, manifestProblems, readJson, readJsonc, readProjectManifest } from './manifests.mjs';
+import { inspect } from './inspect.mjs';
 import { status } from './status.mjs';
 import { UsageError } from './errors.mjs';
 
@@ -51,13 +51,13 @@ const USAGE = `usage: dev-container.mjs <command> [args]
   validate DIR                                  check .devcontainer/devcontainer.json and extensions.json
                                                 (incl. a remoteEnv \${localEnv:…} entry for every named secret)
   presets [--name NAME]                         list Presets (presets/*.json) with descriptions and problems
-  plan-remove-preset DIR NAME                   which entries and egress domains removing a Preset drops (read-only)
+  plan-remove-preset DIR NAME                   which entries removing a Preset drops, and their egress (read-only)
   inspect SOURCE [--ref REF] [--path PATH] [--plugin NAME] [--kind KIND] [--agents claude,codex]
           [--name NAME] [--event EVENT] [--matcher M] [--env NAME]... [--bearer-token-env NAME] [--project DIR]
                                                 resolve a Pinned Ref, fetch read-only, list what the extension
                                                 contains and propose its entry; SOURCE is owner/repo,
                                                 https://github.com/owner/repo, npm:PACKAGE[@RANGE] or an https MCP URL
-  plan-remove DIR INDEX                         what removing extensions[INDEX] drops, with egress nothing else needs (read-only)
+  plan-remove DIR INDEX                         what removing extensions[INDEX] drops: the entry and its own egress (read-only)
   status DIR [--skip-image-check]               Variant and image (newer verified image?), Preset drift and resync entries,
                                                 Pinned Ref ages, egress, unset host env names, pending recreate (read-only)
   vscode-settings [--settings FILE]             check the host VS Code settings ADR 0003 relies on
@@ -502,7 +502,10 @@ function presets(_, { name }, { repo }) {
   return { doc: { ok: one.problems.length === 0, preset: one } };
 }
 
-function planRemovePreset([dir, name], _, { repo }) {
+// Removal plans read only the project manifest, never fetched content: an entry's egress is
+// its own, and the top-level egress is what the project itself needs, which removal keeps.
+
+function planRemovePreset([dir, name]) {
   const project = resolve(dir);
   const read = readProjectManifest(project);
   if (read.error) return { doc: { ok: false, ...read } };
@@ -511,23 +514,36 @@ function planRemovePreset([dir, name], _, { repo }) {
   const entries = manifest.extensions;
   const tags = countTags(entries);
   if (!tags[name]) return { doc: { ok: false, error: `no entry in ${mfFile} is tagged "preset": "${name}"`, presets: tags } };
-  const remove = entries.flatMap((e, index) => (e.preset === name ? [{ index, entry: describeEntry(e, index) }] : []));
-
-  // Top-level egress carries no tag, so the domains the Preset file lists today are the
-  // candidates. One stays when an entry that stays, or another adopted Preset, needs it.
-  const neededBy = egressNeededBy(repo, entries.flatMap((entry, index) => (entry.preset === name ? [] : [{ entry, index }])));
-  const preset = listPresets(repo).find((p) => p.name === name && !p.problems.length);
-  const candidates = (preset?.egress ?? []).filter((d) => (manifest.egress ?? []).includes(d));
-
+  const indexes = entries.flatMap((e, index) => (e.preset === name ? [index] : []));
   return {
     doc: {
       ok: true,
       dir: project,
       preset: name,
-      remove,
-      egress: candidates.filter((d) => !neededBy.has(d)),
-      keepEgress: candidates.filter((d) => neededBy.has(d)).map((d) => ({ domain: d, neededBy: neededBy.get(d) })),
-      ...(preset ? {} : { note: `presets/${name}.json is missing or invalid, so which top-level egress domains it brought in is unknown` }),
+      remove: indexes.map((index) => ({ index, entry: describeEntry(entries[index], index) })),
+      dropsWithEntries: egressGoing(manifest, indexes),
+    },
+  };
+}
+
+function planRemove([dir, index]) {
+  const project = resolve(dir);
+  const read = readProjectManifest(project);
+  if (read.error) return { doc: { ok: false, ...read } };
+  const { manifest } = read;
+  const entries = manifest.extensions;
+  const i = Number(index);
+  if (!/^\d+$/.test(index) || i >= entries.length) {
+    throw new UsageError(`INDEX must be one of: ${entries.map((e, n) => `${n} = ${describeEntry(e, n)}`).join('; ') || '(the manifest has no entries)'}`);
+  }
+  const entry = entries[i];
+  return {
+    doc: {
+      ok: true,
+      dir: project,
+      remove: { index: i, entry: describeEntry(entry, i), ...(entry.preset ? { preset: entry.preset } : {}) },
+      dropsWithEntry: egressGoing(manifest, [i]),
+      ...(entry.preset ? { presetNote: `this entry was copied from Preset "${entry.preset}"; removing it alone leaves the project out of sync with that Preset` } : {}),
     },
   };
 }

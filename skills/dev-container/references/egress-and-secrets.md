@@ -6,9 +6,9 @@ Both change a Consuming Project's `.devcontainer/`: egress lives in the Extensio
 
 1. Reduce what the user gave to a plain lower-case hostname: drop the scheme, credentials, port, path and a leading `*.`. `https://API.Example.com:443/v1` becomes `api.example.com`. A domain also allows all its subdomains, so say so when the user asked for one host and you write its parent. The Egress Allowlist works by hostname: refuse IP addresses, `localhost` and single-label names, and explain why.
 2. If the project's top-level `egress`, or the Base layer's `egress` in `extensions/base.json` of the dev-setups checkout (`repo` from `H check`), already holds the domain or a parent of it, say it is already allowed and write nothing.
-3. Otherwise add the domain to the top-level `egress` array of `.devcontainer/extensions.json` (create the array if needed). Leave every entry's own `egress` alone: those belong to the entry.
+3. Otherwise add the domain to the top-level `egress` array of `.devcontainer/extensions.json` (create the array if needed): that list is what the project itself needs, and removing an extension never drops it. If the user says the domain is for one extension, add it to that entry's own `egress` instead, so it leaves with the entry. Leave every other entry's `egress` alone.
 
-**Done when `H validate <dir>` returns `ok: true` and its `egress` lists the domain.**
+**Done when `H validate <dir>` returns `ok: true` and its `egress` lists the domain (or the entry's `egress` does, when the user named an extension).**
 
 ## Add a secret
 

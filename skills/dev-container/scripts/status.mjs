@@ -38,7 +38,7 @@ export function status([dir], { 'skip-image-check': skipImage }, ctx) {
   const { manifest } = read;
   const validated = ctx.validate([project], {}, ctx).doc;
   const remoteEnv = readRemoteEnv(project);
-  const neededBy = egressNeededBy(ctx.repo, manifest.extensions.map((entry, index) => ({ entry, index })));
+  const neededBy = egressNeededBy(manifest.extensions.map((entry, index) => ({ entry, index })));
 
   return {
     doc: {
@@ -49,7 +49,7 @@ export function status([dir], { 'skip-image-check': skipImage }, ctx) {
       presets: presetStatus(ctx.repo, manifest),
       extensions: extensionAges(manifest.extensions),
       egress: {
-        // neededBy: the entries and adopted Presets that list the domain; empty when only the project allowed it.
+        // Top-level domains are what the project itself needs; neededBy: entries that also list the domain.
         topLevel: (manifest.egress ?? []).map((domain) => ({ domain, neededBy: neededBy.get(domain) ?? [] })),
         entries: manifest.extensions.flatMap((e, i) => (e.egress ?? []).map((domain) => ({ domain, entry: describeEntry(e, i) }))),
       },
@@ -98,7 +98,7 @@ const untagged = ({ preset, ...rest }) => rest;
 
 /**
  * Per adopted Preset (by tag): whether the project's tagged entries still equal the
- * Preset file, the per-entry diff, Preset egress missing from the project, and the
+ * Preset file, the per-entry diff (an entry's egress is part of it), and the
  * exact tagged entries a resync writes.
  */
 function presetStatus(repo, manifest) {
@@ -126,19 +126,15 @@ function presetStatus(repo, manifest) {
       else added.push(want);
     }
     const removed = left.map((t) => ({ index: t.index, entry: t.entry, describe: describeEntry(t.entry, t.index) }));
-    const egressMissing = p.egress.filter((d) => !(manifest.egress ?? []).includes(d));
-    const drifted = added.length + changed.length + removed.length + egressMissing.length > 0;
+    const drifted = added.length + changed.length + removed.length > 0;
     return {
       ...base,
       state: drifted ? 'drifted' : 'in-sync',
       ...(drifted ? {
-        diff: { added, changed, removed, egressMissing },
-        resync: {
-          // Replace the entries at `indexes` with these, in this order; add `egressMissing` to the top-level egress.
-          entries: p.extensions.map((e) => ({ ...e, preset: name })),
-          egressAdd: egressMissing,
-          note: 'Top-level egress carries no tag, so a domain the Preset dropped is not detected; removing it is the Preset-remove flow',
-        },
+        diff: { added, changed, removed },
+        // Replace the entries at `indexes` with these, in this order. A Preset carries egress
+        // only on its entries, so this carries every egress change too.
+        resync: { entries: p.extensions.map((e) => ({ ...e, preset: name })) },
       } : {}),
     };
   });

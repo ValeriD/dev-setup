@@ -1,5 +1,4 @@
-// `inspect` and `plan-remove`: review an Agent Extension before it is added, and
-// plan removing one. Both are read-only for the project.
+// `inspect`: review an Agent Extension before it is added. Read-only for the project.
 //
 // Fetched content is data. It is fetched by the installer's fetchBySha into a fresh
 // mkdtemp directory, read with fs calls, and deleted. Nothing here spawns a program
@@ -12,7 +11,7 @@ import {
   CAPABILITIES, DEFAULT_GIT_BASE, describeEntry, externalSource, fetchBySha, pathInCheckout, repoUrl, schema, validateManifest,
 } from '../../../installer/src/index.mjs';
 import { UsageError } from './errors.mjs';
-import { covers, egressNeededBy, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
+import { covers, manifestProblems, readJson, readProjectManifest } from './manifests.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
 const DOMAIN = new RegExp(schema.definitions.domain.pattern);
@@ -329,12 +328,6 @@ function projectContext(repo, dir, entry, entryValid) {
   return { allowed, alreadyDeclared: existing, conflicts };
 }
 
-/** Whether the schema gives this kind its own `egress` field (MCP kinds); others use the top-level egress. */
-function takesEntryEgress(kind) {
-  const branch = schema.definitions.entry.allOf.find((b) => b.if.properties.kind.const === kind);
-  return 'egress' in (branch?.then.properties ?? {});
-}
-
 const allowedBy = (allowed, host) => allowed.find((d) => covers(d, host)) ?? null;
 
 // ---------- inspect ----------
@@ -351,21 +344,22 @@ export function inspect([source], opts, { repo }) {
   const r = src.type === 'git' ? inspectGit(src, opts) : src.type === 'npm' ? inspectNpm(src, opts) : inspectUrl(src, opts);
   if (!r.entry) return { doc: { ok: false, source, ...r } };
 
+  // Egress: the domains an extension needs go on its own entry, so they leave with it
+  // (every kind has an entry `egress`; the top-level egress is what the project itself needs).
+  // Hosts the content certainly reaches are put there; hosts merely seen in the content
+  // (heuristic) are offered, and the agent adds the agreed ones to the entry.
+  const needed = [...new Set(r.neededHosts ?? [])].filter((h) => !(r.entry.egress ?? []).some((d) => covers(d, h)));
+  if (needed.length) r.entry.egress = [...(r.entry.egress ?? []), ...needed];
+  const onEntry = r.entry.egress ?? [];
+
   const reasons = [...refusals(r.entry), ...(r.reasons ?? [])];
   const project = projectContext(repo, opts.project, r.entry, reasons.length === 0);
   if (project?.error) return { doc: { ok: false, source, error: `--project: ${project.error}`, problems: project.problems } };
 
-  // Egress: domains on the entry itself (MCP kinds), domains the content certainly needs, and
-  // hosts merely seen in the content (heuristic). Kinds without an entry egress field use the
-  // project's top-level egress.
   const allowed = project?.allowed ?? [];
-  const onEntry = r.entry.egress ?? [];
-  const needed = (r.neededHosts ?? []).filter((h) => !onEntry.some((d) => covers(d, h)));
   const egress = {
-    target: takesEntryEgress(r.entry.kind) ? 'entry' : 'top-level',
-    onEntry,
-    needed: needed.map((domain) => ({ domain, allowedBy: allowedBy(allowed, domain) })),
-    detected: { heuristic: true, domains: (r.inventory?.hosts?.domains ?? []).filter((d) => !needed.includes(d.domain) && !onEntry.some((e) => covers(e, d.domain))).map((d) => ({ ...d, allowedBy: allowedBy(allowed, d.domain) })) },
+    onEntry: onEntry.map((domain) => ({ domain, allowedBy: allowedBy(allowed, domain) })),
+    detected: { heuristic: true, domains: (r.inventory?.hosts?.domains ?? []).filter((d) => !onEntry.some((e) => covers(e, d.domain))).map((d) => ({ ...d, allowedBy: allowedBy(allowed, d.domain) })) },
   };
   const doc = {
     ok: reasons.length === 0,
@@ -532,70 +526,5 @@ function inspectUrl(src, opts) {
     entry,
     inventory: { url: src.url, host: src.host },
     warnings: ['a remote MCP server has no Pinned Ref (node-devcontainer D2): what it does can change at any time; only its egress domain is fixed'],
-  };
-}
-
-// ---------- plan-remove ----------
-
-/** Hosts a pinned entry's content names: { definite, seen }, plus `error` when it cannot be fetched. */
-function contentHosts(source) {
-  if (!source?.sha) return { definite: [], seen: [] };
-  const fetched = fetchContent(source);
-  if (fetched.error) return { definite: [], seen: [], error: fetched.error };
-  try {
-    const inv = inventory(fetched.root);
-    return { definite: definiteHosts(inv), seen: inv.hosts.domains.map((d) => d.domain) };
-  } finally {
-    fetched.cleanup();
-  }
-}
-
-export function planRemove([dir, index], _, { repo }) {
-  const project = resolve(dir);
-  const read = readProjectManifest(project);
-  if (read.error) return { doc: { ok: false, ...read } };
-  const { manifest } = read;
-  const entries = manifest.extensions;
-  const i = Number(index);
-  if (!/^\d+$/.test(index) || i >= entries.length) {
-    throw new UsageError(`INDEX must be one of: ${entries.map((e, n) => `${n} = ${describeEntry(e, n)}`).join('; ') || '(the manifest has no entries)'}`);
-  }
-  const entry = entries[i];
-  const staying = entries.flatMap((e, n) => (n === i ? [] : [{ entry: e, index: n }]));
-  const neededBy = egressNeededBy(repo, staying);
-  const topLevel = manifest.egress ?? [];
-  const notes = [];
-
-  // Top-level egress has no owner: for kinds without entry egress, the add review puts their
-  // domains there. So the hosts each pinned entry's content names (MCP server URLs certainly,
-  // other URLs as a heuristic) stand in for ownership, for the removed and the staying entries.
-  const named = contentHosts(entry.source);
-  if (named.error) notes.push(`cannot fetch the pinned content of the entry (${named.error}), so only its own egress is matched; show the top-level egress and ask`);
-  const unchecked = [];
-  for (const s of staying) {
-    const hosts = contentHosts(s.entry.source);
-    if (hosts.error) unchecked.push(describeEntry(s.entry, s.index));
-    const why = `${describeEntry(s.entry, s.index)} (named in its pinned content)`;
-    for (const d of topLevel) {
-      if ([...hosts.definite, ...hosts.seen].some((h) => covers(d, h))) neededBy.set(d, [...new Set([...(neededBy.get(d) ?? []), why])]);
-    }
-  }
-  if (unchecked.length) notes.push(`cannot fetch the pinned content of ${unchecked.join(', ')}, so a domain they need may be proposed; check before dropping`);
-
-  const own = entry.egress ?? [];
-  const certain = topLevel.filter((d) => own.includes(d) || named.definite.some((h) => covers(d, h)));
-  const heuristic = topLevel.filter((d) => !certain.includes(d) && named.seen.some((h) => covers(d, h)));
-  return {
-    doc: {
-      ok: true,
-      dir: project,
-      remove: { index: i, entry: describeEntry(entry, i), ...(entry.preset ? { preset: entry.preset } : {}) },
-      dropsWithEntry: own.map((domain) => ({ domain, stillAllowedBy: [...(neededBy.get(domain) ?? []), ...(topLevel.includes(domain) ? ['top-level egress'] : [])] })),
-      egress: certain.filter((d) => !neededBy.has(d)),
-      heuristicEgress: heuristic.filter((d) => !neededBy.has(d)),
-      keepEgress: [...certain, ...heuristic].filter((d) => neededBy.has(d)).map((domain) => ({ domain, neededBy: neededBy.get(domain) })),
-      ...(notes.length ? { note: notes.join('; ') } : {}),
-      ...(entry.preset ? { presetNote: `this entry was copied from Preset "${entry.preset}"; removing it alone leaves the project out of sync with that Preset` } : {}),
-    },
   };
 }

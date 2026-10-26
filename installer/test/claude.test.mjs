@@ -68,7 +68,7 @@ function install(mode, ...extensions) {
   if (mode === 'build') args.push('--manifest', f('layer.json', { extensions }));
   else args.push('--manifest', f('base.json', { extensions: [] }), '--project', f('project.json', { extensions }));
   const r = spawnSync('node', args, { encoding: 'utf8' });
-  return { code: r.status, err: r.stderr, p };
+  return { code: r.status, err: r.stderr, p, allow: join(d, 'allow.txt') };
 }
 const json = (f) => JSON.parse(readFileSync(f, 'utf8'));
 
@@ -91,6 +91,17 @@ test('build: the base file keeps the policy and gains a sha-pinned directory mar
   assert.deepEqual(json(join(mkt, '.claude-plugin/marketplace.json')).plugins, [{ name: 'hi', source: './plugins/hi' }]);
   assert.ok(existsSync(join(mkt, 'plugins/hi/skills/hi/SKILL.md')));
   assert.equal(json(join(mkt, 'pins.json')).hi.sha, sha.plugins);
+});
+
+test('a skill, plugin or hook entry carries its own egress, and every layer\'s entry egress reaches the allowlist', () => {
+  const skill = { kind: 'skill', agents: ['claude'], source: { github: 'acme/plugins', path: 'plugins/hi/skills/hi', sha: sha.plugins }, egress: ['skill.example.com'] };
+  for (const mode of ['build', 'start']) {
+    const r = install(mode, skill, direct({ egress: ['plugin.example.com'] }), hook({ egress: ['hook.example.com', 'skill.example.com'] }));
+    assert.equal(r.code, 0, r.err);
+    const domains = readFileSync(r.allow, 'utf8').split('\n').filter((l) => l && !l.startsWith('#'));
+    assert.deepEqual(domains, ['skill.example.com', 'plugin.example.com', 'hook.example.com'], mode);
+  }
+  assert.match(install('build', direct({ egress: ['https://x.example.com'] })).err, /egress\/0 must match pattern/);
 });
 
 test('build with no plugins still names an (empty) marketplace in the strict list', () => {
