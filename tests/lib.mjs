@@ -46,9 +46,10 @@ export const builtRevision = () => process.env.DEV_SETUP_TEST_REVISION ?? headRe
 export function buildImage() {
   if (process.env.DEV_SETUP_TEST_SKIP_BUILD) return; // CI builds once and tests that image
   const dir = join(REPO, 'variants/node');
-  // Labels the image with this checkout's commit, as CI does with GITHUB_SHA.
+  // Labels the image with this checkout's commit, as CI does with GITHUB_SHA, and with the run label
+  // (passed down to derived images) so teardown can find the build's untagged copies.
   const env = { ...process.env, DEV_SETUP_REVISION: builtRevision() };
-  must(cli(['build', '--workspace-folder', dir, '--config', join(dir, 'devcontainer.json'), '--image-name', IMAGE], { env }), 'image build');
+  must(cli(['build', '--workspace-folder', dir, '--config', join(dir, 'devcontainer.json'), '--image-name', IMAGE, ...runLabelArgs()], { env }), 'image build');
 }
 
 export function headRevision() {
