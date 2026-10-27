@@ -122,7 +122,10 @@ test('SC-12: Codex runs a shell command with no sandbox errors and no extra priv
   assert.doesNotMatch(r.out + r.err, /bwrap|namespace|landlock|sandbox.*(error|fail)/i);
   assert.match(r.out, /sandbox: danger-full-access/);
   const ran = ok(a, 'cat /tmp/codex-ran.txt');
-  assert.match(ran, /^1000$/m);
+  // The devcontainer CLI remaps `node` to the host UID (1000 locally, 1001 on GitHub runners).
+  const uid = ok(a, 'id -u').trim();
+  assert.notEqual(uid, '0');
+  assert.match(ran, new RegExp(`^${uid}$`, 'm'));
   assert.match(ran, /CapEff:\s+0+$/m);
 });
 
