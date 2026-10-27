@@ -171,24 +171,33 @@ export const secretDeclarations = (layers) =>
 /**
  * The Named Secrets that go with removing the entries at `indexes`: each removed MCP entry's
  * names, once, with what still declares each in the project manifest (a staying MCP entry, or
- * "container-wide" for the top-level `secrets`). Pure: reads only the manifest.
+ * "container-wide" for the top-level `secrets`), then each Base or Variant layer in `imageLayers`
+ * that declares it too, as "<layer>: <declarer>". Pure.
+ * @param {{layer: string, manifest: object}[]} [imageLayers]
  * @returns {{name: string, stillDeclaredBy: string[]}[]}
  */
-export function secretsGoing(manifest, indexes) {
+export function secretsGoing(manifest, indexes, imageLayers = []) {
+  const fromLayers = secretDeclarations(imageLayers);
   const removed = new Set(indexes);
   const staying = secretsNeededBy({ ...manifest, extensions: manifest.extensions.map((e, i) => (removed.has(i) ? { kind: 'removed' } : e)) });
   const going = secretsNeededBy({ extensions: manifest.extensions.map((e, i) => (removed.has(i) ? e : { kind: 'staying' })) });
-  return [...going.keys()].map((name) => ({ name, stillDeclaredBy: staying.get(name) ?? [] }));
+  return [...going.keys()].map((name) => ({
+    name,
+    stillDeclaredBy: [...(staying.get(name) ?? []), ...fromLayers.filter((d) => d.name === name).flatMap((d) => d.neededBy.map((by) => `${d.layer}: ${by}`))],
+  }));
 }
 
 /**
  * The egress that goes with removing the entries at `indexes`: each removed entry's own
  * domains, once, with what keeps each allowed in the project layer (a staying entry's egress
  * or the top-level egress, the project's own needs, which removal never touches). Pure:
- * reads only the manifest.
+ * or the top-level egress, the project's own needs, which removal never touches), then each
+ * declaration in the Base or Variant `imageLayers` that allows it, as "<layer>: <needer>". Pure.
+ * @param {{layer: string, manifest: object}[]} [imageLayers]
  * @returns {{domain: string, stillAllowedBy: string[]}[]}
  */
-export function egressGoing(manifest, indexes) {
+export function egressGoing(manifest, indexes, imageLayers = []) {
+  const fromLayers = egressDeclarations(imageLayers);
   const removed = new Set(indexes);
   const staying = egressNeededBy(manifest.extensions.flatMap((entry, index) => (removed.has(index) ? [] : [{ entry, index }])));
   const topLevel = manifest.egress ?? [];
@@ -198,6 +207,7 @@ export function egressGoing(manifest, indexes) {
     stillAllowedBy: [
       ...new Set([...staying].filter(([d]) => covers(d, domain)).flatMap(([, by]) => by)),
       ...(topLevel.some((d) => covers(d, domain)) ? [TOP_LEVEL_EGRESS] : []),
+      ...allowing(fromLayers, domain).map((d) => `${d.layer}: ${d.neededBy}`),
     ],
   }));
 }

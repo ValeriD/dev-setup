@@ -425,6 +425,49 @@ test('plan-remove-secret refuses a name an MCP entry declares; plan-remove keeps
   assert.deepEqual(v.doc.secrets.map((x) => x.name), ['SEARCH_TOKEN', 'SHARED_TOKEN', 'BASE_TOKEN']);
 });
 
+test('plan-remove and plan-remove-preset name the Base or Variant layer that still allows a dropped domain or declares a dropped secret; unknown layers give a note, not a refusal', () => {
+  const image = layersImage();
+  const e = {
+    ...searchMcp, preset: 'web', env: ['SEARCH_TOKEN', 'BASE_TOKEN'],
+    egress: ['api.search.example.com', 'github.com', 'docs.example.org', 'variant-docs.example.net'],
+  };
+  const env = { SEARCH_TOKEN: '${localEnv:SEARCH_TOKEN}', BASE_TOKEN: '${localEnv:BASE_TOKEN}' };
+  const p = project([e], undefined, env);
+  pinImage(p, image);
+  const before = files(p);
+  const expectedDrops = [
+    { domain: 'api.search.example.com', stillAllowedBy: [] },
+    { domain: 'github.com', stillAllowedBy: ['Base: top-level egress'] },
+    { domain: 'docs.example.org', stillAllowedBy: ['Base: top-level egress'] },
+    { domain: 'variant-docs.example.net', stillAllowedBy: ['Variant: extensions[0] (mcp-remote "vdocs")'] },
+  ];
+  const expectedSecrets = [
+    { name: 'SEARCH_TOKEN', stillDeclaredBy: [], remoteEnv: 'delete', unsetOnHost: 'SEARCH_TOKEN' },
+    { name: 'BASE_TOKEN', stillDeclaredBy: ['Base: container-wide'], remoteEnv: 'keep' },
+  ];
+  const rm = h(['plan-remove', p, '0']);
+  assert.equal(rm.code, 0, rm.log);
+  assert.deepEqual(rm.doc.layers, { known: true, image });
+  assert.deepEqual(rm.doc.dropsWithEntry, expectedDrops);
+  assert.deepEqual(rm.doc.secretsWithEntry, expectedSecrets);
+  const pr = h(['plan-remove-preset', p, 'web']);
+  assert.equal(pr.code, 0, pr.log);
+  assert.deepEqual(pr.doc.dropsWithEntries, expectedDrops);
+  assert.deepEqual(pr.doc.secretsWithEntries, expectedSecrets);
+  assert.deepEqual(files(p), before, 'the plans write nothing');
+
+  // Image not local: both plans go ahead, say the layers were not checked, and pull nothing.
+  const q = project([e], undefined, env);
+  for (const args of [['plan-remove', q, '0'], ['plan-remove-preset', q, 'web']]) {
+    const r = h(args);
+    assert.equal(r.code, 0, r.log);
+    assert.equal(r.doc.layers.known, false);
+    assert.match(r.doc.note, /could not be checked/);
+    assert.deepEqual((r.doc.dropsWithEntry ?? r.doc.dropsWithEntries).map((d) => d.stillAllowedBy), [[], [], [], []]);
+  }
+  assert.notEqual(spawnSync('docker', ['image', 'inspect', IMAGE], { stdio: 'ignore' }).status, 0, 'nothing was pulled');
+});
+
 test('status names a Preset that is gone or invalid instead of offering a resync', () => {
   const p = project(tag('gone', [lint(sha.skills[0])]).concat(tag('bad', [{ ...lint(sha.skills[1]), name: 'lint2' }])));
   setPreset('bad', { extensions: [] });
