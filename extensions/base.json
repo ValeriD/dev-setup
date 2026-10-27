@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/valerid/dev-setup/main/installer/extensions.schema.json",
+  "$schema": "https://raw.githubusercontent.com/ValeriD/dev-setup/main/installer/extensions.schema.json",
   "notes": [
     "Base Extension Layer. Its egress list is the Base Egress Allowlist; the installer assembles the allowlist file the start-up step consumes (base/egress/start.sh).",
     "A domain also covers all its subdomains. The first domain is used by the start-up self-test, so keep a reliably reachable host first.",

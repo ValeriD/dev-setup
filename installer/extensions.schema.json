@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/valerid/dev-setup/main/installer/extensions.schema.json",
+  "$id": "https://raw.githubusercontent.com/ValeriD/dev-setup/main/installer/extensions.schema.json",
   "title": "Dev Setup Extension Manifest",
   "description": "Declares one Extension Layer: Agent Extensions with a Pinned Ref, extra Egress Allowlist domains and container-wide Named Secrets.",
   "type": "object",

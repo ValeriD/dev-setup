@@ -1,4 +1,4 @@
 {
-  "$schema": "https://raw.githubusercontent.com/valerid/dev-setup/main/installer/extensions.schema.json",
+  "$schema": "https://raw.githubusercontent.com/ValeriD/dev-setup/main/installer/extensions.schema.json",
   "extensions": []
 }

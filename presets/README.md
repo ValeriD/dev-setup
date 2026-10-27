@@ -4,7 +4,7 @@ A Preset is a named, reusable set of Agent Extensions. Each `<name>.json` here i
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/valerid/dev-setup/main/installer/extensions.schema.json",
+  "$schema": "https://raw.githubusercontent.com/ValeriD/dev-setup/main/installer/extensions.schema.json",
   "description": "What this set is for, in one line.",
   "extensions": [
     { "kind": "skill", "agents": ["claude", "codex"], "source": { "github": "owner/repo", "path": "skills/x", "sha": "<40-char commit SHA>" }, "egress": ["example.com"] }
