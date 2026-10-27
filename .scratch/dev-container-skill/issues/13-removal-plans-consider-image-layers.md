@@ -1,18 +1,31 @@
 # 13: Removal plans consider the Base and Variant layers
 
-**What to build:** When I remove an extension or a Preset, the plan says which of its domains the Base or Variant layer still allows. I then know whether the domain stays reachable after the removal.
+**What to build:**
+- When I remove an extension or a Preset, the plan says which of its domains the Base or Variant layer still allows, so I know whether each domain stays reachable.
+- A secret's `remoteEnv` line is kept when the Base or Variant layer also declares that name.
+- When the pinned image isn't local, the plan goes ahead and says the Base and Variant layers couldn't be checked.
 
-**Blocked by:** 10 (`status` shows which layer covers secrets and egress)
+**Blocked by:** None (10 is done)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Context
+## Technical context
 
-Found while building 11:
-- `plan-remove` and `plan-remove-preset` look only at the project manifest. An empty `stillAllowedBy` means "the project layer stops allowing it". The design's "Removing an MCP entry" flow says domains a Base or Variant layer still needs are kept, but no ticket owns that part: 09 adds only secrets to `plan-remove`, and 10 covers `status`.
-- `status` matches top-level domains to entries exactly, while `egressGoing` uses `covers` (subdomains). These should agree.
+**Design:** `.scratch/manifest-followups/design.md`, "Second follow-up decisions" Q1 and Q2, plus the "Removing an MCP entry" flow.
 
-## Open questions (for grilling)
+- **Modules:** the skill helper's `plan-remove` and `plan-remove-preset`; skill references `extensions.md` and `presets.md` (how to say "still allowed by Base/Variant" and the unknown note).
+- **Implementation anchors:**
+  - `skills/dev-container/scripts/image-layers.mjs` `projectLayers`;
+  - `manifests.mjs` `egressGoing`, `secretsGoing`, `egressDeclarations`, `allowing` and `secretDeclarations`;
+  - `commands.mjs` `plan-remove-secret`'s `remoteEnvKeptFor` (the pattern to follow);
+  - the fixture image in `scripts/test/status.test.mjs`.
+- **Reuse:** ticket 10's image-layer read and coverage functions; `covers`.
+- **Dependency direction:** unchanged.
+- **Must not introduce:** running or pulling the image; reading the Base or Variant layers from the checkout; a refusal when the layers are unknown; any value handling.
+- **Validation seam:** the helper CLI JSON.
+- **Coverage:** helper integration with the shared fixture image (a domain still allowed by Base or Variant, a secret also declared by Base, and the unknown case); checklist rows X-series and P-series for removal updated.
 
-- Should `egressGoing` take the image layers from 10, and answer "unknown" when the image isn't local, the same as `status`?
-- Should this fold into 09 when it's implemented, or stay separate?
+- [ ] `plan-remove` names Base or Variant in `stillAllowedBy` for a dropped domain those layers still allow
+- [ ] `plan-remove-preset` does the same for every entry it removes
+- [ ] A removed MCP entry's secret that a Base or Variant layer also declares keeps its `remoteEnv` line, naming that layer
+- [ ] With the pinned image not local, both plans succeed with a note and pull nothing

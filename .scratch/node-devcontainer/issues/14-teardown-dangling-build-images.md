@@ -1,16 +1,25 @@
 # 14: Teardown removes the run's untagged build images
 
-**What to build:** A test run that builds the image leaves no untagged (dangling) images from that build behind.
+**What to build:** A test run that builds the image leaves none of that build's images behind, including the untagged full-size copies. It still never touches an image the caller supplied or anything that isn't the run's.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:** None (node 12 is done)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Context
+## Technical context
 
-Found while building skill 08. After `npm test`, four untagged images labelled with the checkout's revision were left. All were created during the image build, probably the devcontainer CLI's intermediate feature-layer images. Node 12's teardown removes the run tag and the derived `vsc-…` images, but not these. Under the design's constraint ("never remove what can't be attributed to the run") they were left alone.
+**Design:** `.scratch/manifest-followups/design.md`, "Second follow-up decisions" Q4 and Q5, plus the existing "Test teardown" flow and D1.
 
-## Open questions (for grilling)
+- **Facts found while grilling:**
+  - The leftovers are about 1.4 GB untagged copies of the final image, with identical labels and no revision label, several per run. They are not the BuildKit cache.
+  - `devcontainer build` (CLI 0.89.0) accepts `--label`, and labels pass down to images derived from it, such as the CLI's `vsc-…-uid` images.
+- **Modules:** the test harness (`tests/lib.mjs` `buildImage`; the teardown in `tests/global-setup.mjs`); `tests/cleanup.test.mjs`.
+- **Reuse:** the run id and run label (`dev-setup.test-run=<id>`) from node 12.
+- **Must not introduce:** a global prune, removal by name prefix, or removal of a supplied `DEV_SETUP_TEST_IMAGE`. The CI path (`DEV_SETUP_TEST_SKIP_BUILD`) builds nothing, so it labels nothing.
+- **Validation seam:** Docker state before and after a run.
+- **Coverage:** extend `tests/cleanup.test.mjs`: after teardown, no image with the run label exists, tagged or not.
 
-- Can the build attribute them to the run? For example, pass a `dev-setup.test-run=<id>` label into the build, or record the image IDs present before and after the build step.
-- Or is this the BuildKit layer cache, which belongs to `docker builder prune` rather than to the suite?
+- [ ] The run's image build carries `dev-setup.test-run=<id>`
+- [ ] After `npm test`, no image with that run's label remains, tagged or untagged
+- [ ] With `DEV_SETUP_TEST_KEEP=1` the labelled images are kept and listed
+- [ ] A supplied image and other projects' images survive

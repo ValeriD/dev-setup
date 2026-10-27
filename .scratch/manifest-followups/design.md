@@ -151,3 +151,19 @@ spec: >
 - **D1:** test runs are identified by a per-run folder for their projects, a run label on the registry stub and a run tag on the image. We don't label every resource, because the devcontainer CLI can't add arbitrary container labels without replacing its own.
 - **D2:** a Preset file is refused if it has top-level `secrets`, the same as for top-level `egress`.
 - **D3:** the image-revision test compares against the revision recorded at build time. This is in scope for node 12.
+
+## Second follow-up decisions (2026-10-27)
+
+Grilled after tickets 08–12 and node 12–13 landed. These need no new modules; they reuse ticket 10's image-layer read and coverage functions.
+
+- **Q1 (skill 13):**
+  - `plan-remove` and `plan-remove-preset` take the Base and Variant layers from the pinned image (`projectLayers`).
+  - A dropped domain's `stillAllowedBy` names the layer.
+  - When the layers are unknown, the plan goes ahead with a note, as `plan-disallow` does (E1).
+- **Q2 (skill 13):** their secrets part keeps a `remoteEnv` line that a Base or Variant layer also declares (Q20, as `plan-remove-secret` does).
+- **E2 (skill 14):** `plan-disallow` of a domain that appears in the project's own top-level `egress` but is also covered by a parent domain removes the redundant line. It notes that the domain stays reachable through the parent. A domain still needed by the Base or Variant layer, or by an entry, is still refused.
+- **Q4 and Q5 (node 14):**
+  - The run's image build gets `--label dev-setup.test-run=<id>`; the devcontainer CLI's `build` supports `--label`, and labels pass down to derived images.
+  - Teardown removes every image carrying that run label, untagged ones included.
+  - The cleanup test asserts none survive.
+  - A supplied `DEV_SETUP_TEST_IMAGE` is still never removed.
