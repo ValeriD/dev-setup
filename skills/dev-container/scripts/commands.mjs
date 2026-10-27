@@ -598,8 +598,10 @@ function planRemove([dir, index]) {
 /**
  * Disallowing a domain removes it from the project's top-level `egress`, the only place the
  * user's own domains live. Refused, naming the needer, when anything else would keep it
- * allowed: the Base or Variant layer (read from the pinned image), an entry's own `egress`, or
- * a declared parent domain. Removing a domain an entry needs is removing that entry.
+ * allowed: the Base or Variant layer (read from the pinned image), or an entry's own `egress`
+ * (own or a parent domain). A parent domain in the project's own top-level `egress` does not
+ * refuse: the line is redundant, removed, and the plan names the covering domain. Removing a
+ * domain an entry needs is removing that entry.
  */
 function planDisallow([dir, domain]) {
   const project = resolve(dir);
@@ -610,7 +612,10 @@ function planDisallow([dir, domain]) {
   const { image, layers } = projectLayers(project, manifest);
   const declarations = egressDeclarations(layers);
   const isThis = (d) => d.layer === PROJECT && d.neededBy === TOP_LEVEL_EGRESS && d.domain === host;
-  const neededBy = allowing(declarations, host).filter((d) => !isThis(d));
+  const allowers = allowing(declarations, host).filter((d) => !isThis(d));
+  const isTopParent = (d) => d.layer === PROJECT && d.neededBy === TOP_LEVEL_EGRESS && d.domain !== host;
+  const neededBy = allowers.filter((d) => !isTopParent(d));
+  const coveredBy = allowers.filter(isTopParent);
   const head = { dir: project, domain: host, layers: layersDoc(image) };
 
   if (!(manifest.egress ?? []).includes(host)) {
@@ -635,6 +640,8 @@ function planDisallow([dir, domain]) {
     doc: {
       ok: true, ...head,
       remove: { from: TOP_LEVEL_EGRESS, domain: host },
+      // A project top-level parent domain keeps it reachable: the removed line was redundant.
+      ...(coveredBy.length ? { coveredBy, coveredNote: `${host} stays reachable through ${coveredBy.map((d) => d.domain).join(', ')}` } : {}),
       // A subdomain declared elsewhere stays allowed on its own.
       subdomainsStayAllowed: declarations.filter((d) => d.domain !== host && covers(host, d.domain)),
       ...(image.known ? {} : { note: `the Base and Variant layers could not be checked (${image.reason}); one of them may still allow ${host}` }),

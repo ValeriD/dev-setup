@@ -4,7 +4,7 @@
 
 **Blocked by:** None (09 is done)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -17,6 +17,12 @@
 - **Validation seam:** the helper CLI JSON.
 - **Coverage:** helper integration, extending the `plan-disallow` test in `scripts/test/status.test.mjs`; checklist row for disallowing a redundant line.
 
-- [ ] A subdomain line covered only by another project top-level line is removed, with a note naming the covering domain
-- [ ] A subdomain covered by a Base or Variant domain, or by an entry's `egress`, is still refused, naming the needer
-- [ ] After the plan is applied, `status --domain` shows the subdomain still allowed by the parent
+- [x] A subdomain line covered only by another project top-level line is removed, with a note naming the covering domain
+- [x] A subdomain covered by a Base or Variant domain, or by an entry's `egress`, is still refused, naming the needer
+- [x] After the plan is applied, `status --domain` shows the subdomain still allowed by the parent
+
+## Comments
+
+- `plan-disallow` now ignores project top-level parent domains when refusing; they come back as `coveredBy` plus `coveredNote` on the `ok: true` plan (separate from the existing `note`, which is about unknown layers). A parent on an entry, Base or Variant still refuses.
+- The old test case refusing `img.shop.example.io` under a project parent was replaced by an entry-parent refusal (`sub.cdn.example.com`) and a new redundant-line case.
+- Checklist row added as E9b to avoid renumbering later rows.
