@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { IMAGE, run, projectDir, runLabelArgs } from '../lib.mjs';
+import { IMAGE, run, projectDir, runLabelArgs, RUN_LABEL } from '../lib.mjs';
 
 const BASE = 'registry:2.8.3'; // already pulled for the registry stub; its entrypoint is overridden below
 
@@ -21,11 +21,14 @@ test('creates run resources', async () => {
   const project = run('docker', ['create', '--label', `devcontainer.local_folder=${dir}`, '-v', `${volume}:/v`, '--entrypoint', 'sleep', derived, 'infinity']).out.trim();
   // Stands in for the registry stub: carries the run label only, plus an anonymous volume.
   const labelled = run('docker', ['create', ...runLabelArgs(), '-v', '/anon', '--entrypoint', 'sleep', BASE, 'infinity']).out.trim();
-  assert.ok(project && labelled);
+  // Stands in for the build's untagged copies: an image with no tag that carries the run label.
+  const dockerfile = `FROM ${BASE}\nLABEL ${RUN_LABEL}=${n}\n`;
+  const built = run('docker', ['build', '-q', '--label', `${RUN_LABEL}=${n}`, '-'], { input: dockerfile }).out.trim();
+  assert.ok(project && labelled && built.startsWith('sha256:'));
   const anon = run('docker', ['inspect', labelled, '--format', '{{range .Mounts}}{{.Name}} {{end}}']).out.trim().split(/\s+/).filter(Boolean);
   writeFileSync(
     process.env.PROBE_OUT,
-    JSON.stringify({ dir, root: process.env.DEV_SETUP_TEST_ROOT, image: IMAGE, derived, volume, anon, containers: [project, labelled] }),
+    JSON.stringify({ dir, root: process.env.DEV_SETUP_TEST_ROOT, image: IMAGE, derived, volume, anon, containers: [project, labelled], untagged: built }),
   );
   const wait = Number(process.env.PROBE_SLEEP ?? 0);
   if (wait) await new Promise((r) => setTimeout(r, wait * 1000));

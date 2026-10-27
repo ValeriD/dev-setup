@@ -47,9 +47,14 @@ export async function globalTeardown() {
   const labelled = lines(docker('ps', '-aq', '--filter', `label=${RUN_LABEL}=${id}`));
   const owned = [...new Set([...projects, ...labelled])];
 
+  // Every image carrying the run label, tagged or not (the build's untagged copies), except a supplied one.
+  const suppliedId = supplied ? docker('image', 'inspect', image, '--format', '{{.Id}}') : '';
+  const labelledImages = () =>
+    lines(docker('images', '-a', '-q', '--no-trunc', '--filter', `label=${RUN_LABEL}=${id}`)).filter((i) => i !== suppliedId);
+
   if (process.env.DEV_SETUP_TEST_KEEP) {
     console.log(
-      `DEV_SETUP_TEST_KEEP: kept run ${id}\n  folders: ${root}\n  image: ${image}${supplied ? ' (supplied)' : ''}\n  containers: ${owned.join(' ') || 'none'}`,
+      `DEV_SETUP_TEST_KEEP: kept run ${id}\n  folders: ${root}\n  image: ${image}${supplied ? ' (supplied)' : ''}\n  containers: ${owned.join(' ') || 'none'}\n  labelled images: ${labelledImages().join(' ') || 'none'}`,
     );
     return;
   }
@@ -67,5 +72,15 @@ export async function globalTeardown() {
   for (const v of volumes) run('docker', ['volume', 'rm', '-f', v]);
   for (const i of images) run('docker', ['rmi', i]);
   if (!supplied) run('docker', ['rmi', image]);
+  // Untagged build copies: a child cannot go before the images built on it, so repeat while any pass removes one.
+  for (let left = labelledImages(); left.length; ) {
+    for (const i of left) {
+      for (const tag of lines(docker('image', 'inspect', i, '--format', '{{range .RepoTags}}{{println .}}{{end}}'))) run('docker', ['rmi', tag]);
+      run('docker', ['rmi', i]);
+    }
+    const next = labelledImages();
+    if (next.length === left.length) break;
+    left = next;
+  }
   rmSync(root, { recursive: true, force: true });
 }

@@ -49,6 +49,7 @@ function forget(r) {
   for (const c of r.containers) run('docker', ['rm', '-fv', c]);
   run('docker', ['volume', 'rm', '-f', r.volume]);
   run('docker', ['rmi', r.derived]);
+  run('docker', ['rmi', r.untagged]);
   if (r.image.startsWith('dev-setup-node:test-')) run('docker', ['rmi', r.image]);
   rmSync(r.root, { recursive: true, force: true });
 }
@@ -59,9 +60,10 @@ const left = (r) => ({
   volume: has('volume', r.volume),
   anon: r.anon.length > 0 && r.anon.every((v) => has('volume', v)),
   image: has('image', r.image),
+  untagged: has('image', r.untagged),
   root: existsSync(r.root),
 });
-const gone = { containers: 0, derived: false, volume: false, anon: false, image: false, root: false };
+const gone = { containers: 0, derived: false, volume: false, anon: false, image: false, untagged: false, root: false };
 
 // An unrelated project's container and volume (its folder label is under no run root).
 const bystander = { name: `bystander-${uniq}`, vol: `bystander-vol-${uniq}` };
@@ -76,6 +78,7 @@ test('a passing run leaves nothing behind and spares unrelated resources', async
   assert.equal(r.code, 0, r.log);
   assert.deepEqual(left(r.rec), gone);
   assert.ok(has('container', bystander.name) && has('volume', bystander.vol), 'unrelated container and volume survive');
+  assert.ok(has('image', BASE), 'an unlabelled image survives');
 });
 
 test('a failing run leaves nothing behind either', async () => {
@@ -88,9 +91,10 @@ test('a failing run leaves nothing behind either', async () => {
 test('DEV_SETUP_TEST_KEEP=1 keeps everything and says what was kept', async () => {
   const r = await child('keep', { DEV_SETUP_TEST_KEEP: '1' });
   assert.equal(r.code, 0, r.log);
-  assert.deepEqual(left(r.rec), { containers: 2, derived: true, volume: true, anon: true, image: true, root: true });
+  assert.deepEqual(left(r.rec), { containers: 2, derived: true, volume: true, anon: true, image: true, untagged: true, root: true });
   assert.match(r.log, /DEV_SETUP_TEST_KEEP: kept run/);
   assert.ok(r.log.includes(r.rec.root) && r.log.includes(r.rec.image));
+  assert.ok(r.log.includes(r.rec.untagged.replace('sha256:', '')), 'the labelled untagged image is listed');
 });
 
 test('a supplied image survives the run; the rest is removed', async () => {

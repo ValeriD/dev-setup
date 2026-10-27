@@ -4,7 +4,7 @@
 
 **Blocked by:** None (node 12 is done)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -19,7 +19,14 @@
 - **Validation seam:** Docker state before and after a run.
 - **Coverage:** extend `tests/cleanup.test.mjs`: after teardown, no image with the run label exists, tagged or not.
 
-- [ ] The run's image build carries `dev-setup.test-run=<id>`
-- [ ] After `npm test`, no image with that run's label remains, tagged or untagged
-- [ ] With `DEV_SETUP_TEST_KEEP=1` the labelled images are kept and listed
-- [ ] A supplied image and other projects' images survive
+- [x] The run's image build carries `dev-setup.test-run=<id>`
+- [x] After `npm test`, no image with that run's label remains, tagged or untagged
+- [x] With `DEV_SETUP_TEST_KEEP=1` the labelled images are kept and listed
+- [x] A supplied image and other projects' images survive
+
+## Comments
+
+- The build gets the run label through `runLabelArgs()`; teardown lists images with `docker images -a --filter label=dev-setup.test-run=<id>` and removes each (its tags first, then the id), repeating while a pass removes any, since a copy cannot go before the images built on it. No `-f`.
+- A supplied `DEV_SETUP_TEST_IMAGE` is excluded by image id, so it survives even if a build into that tag labelled it.
+- `DEV_SETUP_TEST_KEEP=1` now also prints the labelled image ids.
+- Coverage: `tests/fixtures/harness-probe.mjs` builds an untagged labelled image; `cleanup.test.mjs` asserts it is gone after pass/fail/parallel runs, kept and listed under KEEP, and that an unlabelled image survives.
