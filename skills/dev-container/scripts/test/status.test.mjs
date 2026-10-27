@@ -319,7 +319,7 @@ test('status reads the Base and Variant layers from the pinned image without run
 
 test('plan-disallow refuses a domain the Base or Variant layer, an entry or a parent domain needs, naming the needer; otherwise it removes it from the top level', () => {
   const image = layersImage();
-  const top = ['github.com', 'variant-docs.example.net', 'cdn.example.com', 'api.example.org', 'img.shop.example.io', 'mine.example.com', 'shop.example.io'];
+  const top = ['github.com', 'variant-docs.example.net', 'cdn.example.com', 'api.example.org', 'img.shop.example.io', 'mine.example.com', 'shop.example.io', 'sub.cdn.example.com'];
   const p = project([withEgress(lint(sha.skills[0]), ['cdn.example.com'])], top);
   pinImage(p, image);
   const before = files(p);
@@ -336,12 +336,19 @@ test('plan-disallow refuses a domain the Base or Variant layer, an entry or a pa
   assert.deepEqual(refused('variant-docs.example.net'), [{ domain: 'variant-docs.example.net', layer: 'Variant', neededBy: 'extensions[0] (mcp-remote "vdocs")' }]);
   assert.deepEqual(refused('cdn.example.com'), [{ domain: 'cdn.example.com', layer: 'Consuming Project', neededBy: 'extensions[0] (skill "acme/skills/skills/lint")' }]);
   assert.deepEqual(refused('API.example.org'), [{ domain: 'example.org', layer: 'Base', neededBy: 'top-level egress' }], 'a Base parent domain keeps it allowed');
-  assert.deepEqual(refused('img.shop.example.io'), [{ domain: 'shop.example.io', layer: 'Consuming Project', neededBy: 'top-level egress' }], 'a project parent domain keeps it allowed');
+  assert.deepEqual(refused('sub.cdn.example.com'), [{ domain: 'cdn.example.com', layer: 'Consuming Project', neededBy: 'extensions[0] (skill "acme/skills/skills/lint")' }], 'an entry parent domain keeps it allowed');
 
   const ok = plan('mine.example.com');
   assert.equal(ok.code, 0, ok.log);
   assert.deepEqual(ok.doc, { ok: true, dir: p, domain: 'mine.example.com', layers: { known: true, image }, remove: { from: 'top-level egress', domain: 'mine.example.com' }, subdomainsStayAllowed: [] });
   assert.deepEqual(plan('shop.example.io').doc.subdomainsStayAllowed, [{ domain: 'img.shop.example.io', layer: 'Consuming Project', neededBy: 'top-level egress' }]);
+
+  // A subdomain line under another project top-level line is redundant: removed, naming the covering domain.
+  const redundant = plan('img.shop.example.io');
+  assert.equal(redundant.code, 0, redundant.log);
+  assert.deepEqual(redundant.doc.remove, { from: 'top-level egress', domain: 'img.shop.example.io' });
+  assert.deepEqual(redundant.doc.coveredBy, [{ domain: 'shop.example.io', layer: 'Consuming Project', neededBy: 'top-level egress' }]);
+  assert.match(redundant.doc.coveredNote, /stays reachable through shop\.example\.io/);
 
   // Not a project top-level domain: nothing to remove, with what allows it.
   const elsewhere = plan('example.org');
@@ -353,8 +360,9 @@ test('plan-disallow refuses a domain the Base or Variant layer, an entry or a pa
   // Applying the plan as the agent would leaves a valid manifest without the domain.
   const mf = join(p, '.devcontainer/extensions.json');
   const m = JSON.parse(readFileSync(mf, 'utf8'));
-  m.egress = m.egress.filter((d) => d !== 'mine.example.com');
+  m.egress = m.egress.filter((d) => d !== 'mine.example.com' && d !== 'img.shop.example.io');
   writeFileSync(mf, JSON.stringify(m));
+  assert.equal(h(['status', p, '--skip-image-check', '--domain', 'img.shop.example.io']).doc.egress.check.allowed, true, 'still allowed by the parent');
   // Catches a plan that misses a needer status sees (the two filter the same declarations differently).
   assert.equal(h(['status', p, '--skip-image-check', '--domain', 'mine.example.com']).doc.egress.check.allowed, false);
 
