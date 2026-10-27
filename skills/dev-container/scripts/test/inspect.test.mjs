@@ -342,7 +342,11 @@ test('plan-remove drops the entry with its own egress, says which domains stay a
 
   const r = h('plan-remove', p, '0');
   assert.equal(r.code, 0, r.log);
-  assert.deepEqual(r.doc, { ok: true, dir: p, remove: { index: 0, entry: r.doc.remove.entry }, dropsWithEntry: [{ domain: 'search.example.com', stillAllowedBy: [] }], secretsWithEntry: [] });
+  // The fixture's pinned image is not local: the Base and Variant layers are unknown, and the plan says so.
+  const { layers, note, ...plan } = r.doc;
+  assert.deepEqual(plan, { ok: true, dir: p, remove: { index: 0, entry: r.doc.remove.entry }, dropsWithEntry: [{ domain: 'search.example.com', stillAllowedBy: [] }], secretsWithEntry: [] });
+  assert.equal(layers.known, false);
+  assert.match(note, /could not be checked/);
   assert.match(r.doc.remove.entry, /plugin/);
   // A staying entry's parent domain keeps a subdomain allowed.
   assert.deepEqual(h('plan-remove', p, '1').doc.dropsWithEntry, [{ domain: 'api.search.example.com', stillAllowedBy: ['extensions[0] (plugin "acme/plugins/plugins/rich")'] }]);

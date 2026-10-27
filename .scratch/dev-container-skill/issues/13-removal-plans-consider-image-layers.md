@@ -7,7 +7,7 @@
 
 **Blocked by:** None (10 is done)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -25,7 +25,13 @@
 - **Validation seam:** the helper CLI JSON.
 - **Coverage:** helper integration with the shared fixture image (a domain still allowed by Base or Variant, a secret also declared by Base, and the unknown case); checklist rows X-series and P-series for removal updated.
 
-- [ ] `plan-remove` names Base or Variant in `stillAllowedBy` for a dropped domain those layers still allow
-- [ ] `plan-remove-preset` does the same for every entry it removes
-- [ ] A removed MCP entry's secret that a Base or Variant layer also declares keeps its `remoteEnv` line, naming that layer
-- [ ] With the pinned image not local, both plans succeed with a note and pull nothing
+- [x] `plan-remove` names Base or Variant in `stillAllowedBy` for a dropped domain those layers still allow
+- [x] `plan-remove-preset` does the same for every entry it removes
+- [x] A removed MCP entry's secret that a Base or Variant layer also declares keeps its `remoteEnv` line, naming that layer
+- [x] With the pinned image not local, both plans succeed with a note and pull nothing
+
+## Comments
+
+- Layer matches in `stillAllowedBy` and `stillDeclaredBy` are strings `Base: <needer>` or `Variant: <needer>`, matching the existing string lists. Both plans now also carry `layers` and, when the image is not local, a `note`.
+- The existing `plan-remove` assertion in `inspect.test.mjs` was updated for the new `layers` and `note` fields; a new test in `status.test.mjs` covers all four boxes.
+- Updated `extensions.md`, `presets.md`, `ARCHITECTURE.md` and checklist rows P3 and X6 (wording only; the manual rows were not run).

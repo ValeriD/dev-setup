@@ -17,8 +17,9 @@ Branch on what the user asked for, then follow that section. Each ends on the co
 
 1. Run `H plan-remove-preset <dir> <name>`. It is read-only and says:
    - `remove`: every entry tagged with the Preset (by index in `extensions`);
-   - `dropsWithEntries`: the domains on those entries, which go with them, each with `stillAllowedBy` (a staying entry's egress or the top-level `egress`); empty means the project layer stops allowing it;
-   - `secretsWithEntries`: the Named Secrets those entries declare, each with `stillDeclaredBy` and `remoteEnv` (`delete`, `keep` or `none`), as in **Remove** of [extensions.md](extensions.md).
+   - `dropsWithEntries`: the domains on those entries, which go with them, each with `stillAllowedBy` (a staying entry's egress, the top-level `egress`, or `Base: …` / `Variant: …`); empty means the domain stops being reachable;
+   - `secretsWithEntries`: the Named Secrets those entries declare, each with `stillDeclaredBy` and `remoteEnv` (`delete`, `keep` or `none`), as in **Remove** of [extensions.md](extensions.md);
+   - `note`, when `layers.known` is false: the Base and Variant layers couldn't be checked; say so, as in **Remove** of [extensions.md](extensions.md).
 2. Show that plan in words, naming the domains that stop being allowed and the `remoteEnv` lines that go, and ask once to apply it.
 3. On yes, delete the `remove` entries from `.devcontainer/extensions.json`, and the `remoteEnv` line of each secret with `remoteEnv: delete` (as in **Remove** of [extensions.md](extensions.md), never showing a value; say the user can unset `unsetOnHost` on the host). Everything else stays untouched, the top-level `egress` and `secrets` included: they are what the project itself needs.
 

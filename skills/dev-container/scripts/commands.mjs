@@ -514,9 +514,10 @@ function presets(_, { name }, { repo }) {
 
 // Removal plans read only the project manifest (and the names in devcontainer.json's
 // `remoteEnv`), never fetched content: an entry's egress is its own, and the top-level egress
-// is what the project itself needs, which removal keeps. A Named Secret's `remoteEnv` line
-// goes only with its last declaration in the manifest (an MCP entry or the top-level
-// `secrets`). The agent makes the edits; nothing here writes.
+// is what the project itself needs, which removal keeps. The Base and Variant layers come
+// from the pinned image when it is local (otherwise the plan says they are unknown). A Named
+// Secret's `remoteEnv` line goes only with its last declaration (an MCP entry, the top-level
+// `secrets`, or a Base or Variant layer). The agent makes the edits; nothing here writes.
 
 /**
  * What happens to a secret's `remoteEnv` line once a declaration goes: "keep" while something
@@ -530,9 +531,15 @@ function remoteEnvFate(remoteEnv, name, stillDeclared) {
   return { remoteEnv: 'delete', ...(hostEnv ? { unsetOnHost: hostEnv } : {}) };
 }
 
-const secretsPlan = (project, manifest, indexes) => {
+/** The image layers' state for a plan's output: read, or unknown with the reason. */
+const layersDoc = (image) => (image.known ? { known: true, image: image.image } : { known: false, image: image.image, reason: image.reason });
+
+const unknownLayersNote = (image) =>
+  `the Base and Variant layers could not be checked (${image.reason}); one of them may still allow a dropped domain or declare a dropped secret, so its remoteEnv line may still be needed`;
+
+const secretsPlan = (project, manifest, indexes, imageLayers) => {
   const remoteEnv = readRemoteEnv(project);
-  return secretsGoing(manifest, indexes).map((s) => ({ ...s, ...remoteEnvFate(remoteEnv, s.name, s.stillDeclaredBy.length > 0) }));
+  return secretsGoing(manifest, indexes, imageLayers).map((s) => ({ ...s, ...remoteEnvFate(remoteEnv, s.name, s.stillDeclaredBy.length > 0) }));
 };
 
 function planRemovePreset([dir, name]) {
@@ -545,14 +552,18 @@ function planRemovePreset([dir, name]) {
   const tags = countTags(entries);
   if (!tags[name]) return { doc: { ok: false, error: `no entry in ${mfFile} is tagged "preset": "${name}"`, presets: tags } };
   const indexes = entries.flatMap((e, index) => (e.preset === name ? [index] : []));
+  const { image } = projectLayers(project, manifest);
+  const imageLayers = image.known ? image.layers : [];
   return {
     doc: {
       ok: true,
       dir: project,
       preset: name,
+      layers: layersDoc(image),
       remove: indexes.map((index) => ({ index, entry: describeEntry(entries[index], index) })),
-      dropsWithEntries: egressGoing(manifest, indexes),
-      secretsWithEntries: secretsPlan(project, manifest, indexes),
+      dropsWithEntries: egressGoing(manifest, indexes, imageLayers),
+      secretsWithEntries: secretsPlan(project, manifest, indexes, imageLayers),
+      ...(image.known ? {} : { note: unknownLayersNote(image) }),
     },
   };
 }
@@ -568,20 +579,21 @@ function planRemove([dir, index]) {
     throw new UsageError(`INDEX must be one of: ${entries.map((e, n) => `${n} = ${describeEntry(e, n)}`).join('; ') || '(the manifest has no entries)'}`);
   }
   const entry = entries[i];
+  const { image } = projectLayers(project, manifest);
+  const imageLayers = image.known ? image.layers : [];
   return {
     doc: {
       ok: true,
       dir: project,
+      layers: layersDoc(image),
       remove: { index: i, entry: describeEntry(entry, i), ...(entry.preset ? { preset: entry.preset } : {}) },
-      dropsWithEntry: egressGoing(manifest, [i]),
-      secretsWithEntry: secretsPlan(project, manifest, [i]),
+      dropsWithEntry: egressGoing(manifest, [i], imageLayers),
+      secretsWithEntry: secretsPlan(project, manifest, [i], imageLayers),
+      ...(image.known ? {} : { note: unknownLayersNote(image) }),
       ...(entry.preset ? { presetNote: `this entry was copied from Preset "${entry.preset}"; removing it alone leaves the project out of sync with that Preset` } : {}),
     },
   };
 }
-
-/** The image layers' state for a plan's output: read, or unknown with the reason. */
-const layersDoc = (image) => (image.known ? { known: true, image: image.image } : { known: false, image: image.image, reason: image.reason });
 
 /**
  * Disallowing a domain removes it from the project's top-level `egress`, the only place the
