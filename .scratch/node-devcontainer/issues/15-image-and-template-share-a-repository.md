@@ -21,3 +21,12 @@ In CI run 40681113721 (2026-10-28, commit 1f7afa5), the first successful publish
 - Which one moves: the Template (for example namespace `valerid/dev-setup/templates`, giving `ghcr.io/valerid/dev-setup/templates/node`) or the image (for example `ghcr.io/valerid/dev-setup/images/node`)?
 - What happens to the already published `latest`, `0`, `0.1` and `0.1.5` tags on `ghcr.io/valerid/dev-setup/node`?
 - Should the acceptance suite or CI check that the image's `latest` is an image after publishing?
+
+## Comments
+
+2026-10-28: the user answered "yes" to the first round of recommendations:
+- Q1: move the Template to namespace `valerid/dev-setup/templates`; the image keeps its name.
+- Q2: the next publish moves `latest` back to the image, and the user deletes the stray `0`, `0.1` and `0.1.5` tags by hand.
+- Q3: CI checks after the Template job that `node:latest` is still the image it just published.
+
+The user asked for this ticket to go through grilling together with the `ci-efficiency` tickets.
