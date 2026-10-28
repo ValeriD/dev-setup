@@ -47,13 +47,13 @@ Covered: Template apply and start, no sudo/capabilities/setuid, pinned Agent ver
 
 ## Release pipeline
 
-`.github/workflows/ci.yml`. Pull requests run the pin check (`scripts/check-pins.mjs`: every `uses:` needs a full commit SHA, every base image a digest) and the acceptance suite. A push to `main` additionally builds and pushes `ghcr.io/valerid/dev-setup/node` (tags `sha-<12>` and `latest`), signs the digest with cosign keyless, attaches SBOM and provenance attestations (also pushed to the registry), verifies them, then publishes the Template `ghcr.io/valerid/dev-setup/node` with its `image` option defaulting to `ghcr.io/valerid/dev-setup/node@sha256:...`. Only `GITHUB_TOKEN` is used. The image is built once per run: the acceptance suite tests it (`DEV_SETUP_TEST_SKIP_BUILD=1` skips the suite's own build), then that same image is saved, loaded in the publish job, tagged and pushed.
+`.github/workflows/ci.yml`. Pull requests run the pin check (`scripts/check-pins.mjs`: every `uses:` needs a full commit SHA, every base image a digest) and the acceptance suite. A push to `main` additionally builds and pushes `ghcr.io/valerid/dev-setup/node` (tags `sha-<12>` and `latest`), signs the digest with cosign keyless, attaches SBOM and provenance attestations (also pushed to the registry), verifies them, then publishes the Template `ghcr.io/valerid/dev-setup/templates/node` (no git tag per version) with its `image` option defaulting to `ghcr.io/valerid/dev-setup/node@sha256:...`, and fails the run unless `node:latest` is still the image it published. Only `GITHUB_TOKEN` is used. The image is built once per run: the acceptance suite tests it (`DEV_SETUP_TEST_SKIP_BUILD=1` skips the suite's own build), then that same image is saved, loaded in the publish job, tagged and pushed.
 
 ### Manual steps (one-time)
 
 1. Create the GitHub repository `ValeriD/dev-setup`, add it as a remote and push `main`.
 2. Repository settings, Actions, General: allow GitHub Actions; leave workflow permissions at read-only (the workflow requests what it needs).
-3. After the first green run on `main`, make both GHCR packages public: Packages, `dev-setup/node` (image) and the Template package (`dev-setup/node` Template, it may appear as a separate package), Package settings, Change visibility, Public. Until then the Template and image cannot be pulled anonymously, and the `devcontainers/action` publish may need the package linked to the repository.
+3. After the first green run on `main`, make both GHCR packages public: Packages, `dev-setup/node` (image) and the Template package (`dev-setup/templates/node`), Package settings, Change visibility, Public. Until then the Template and image cannot be pulled anonymously, and the `devcontainers/action` publish may need the package linked to the repository.
 4. Verify from a machine with no login (`DIGEST` from the run summary or `docker buildx imagetools inspect ghcr.io/valerid/dev-setup/node:latest`):
 
 ```sh
@@ -67,7 +67,7 @@ gh attestation verify oci://$IMG --repo ValeriD/dev-setup
 cosign verify-attestation --type slsaprovenance1 $IMG \
   --certificate-identity-regexp '^https://github.com/ValeriD/dev-setup/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-npx -y @devcontainers/cli@0.89.0 templates apply -w /tmp/proj -t ghcr.io/valerid/dev-setup/node:0.1.1
+npx -y @devcontainers/cli@0.89.0 templates apply -w /tmp/proj -t ghcr.io/valerid/dev-setup/templates/node:0.1.1
 grep image /tmp/proj/.devcontainer/devcontainer.json   # must show @sha256:...
 ```
 
