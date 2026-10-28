@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 (same harness files, and a stable baseline for timings)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -28,10 +28,10 @@
 - **Validation seam:** per-test durations from `npm test` output, before and after.
 - **Coverage:** the existing suite. Keep the migrate change only if the measurement shows it helps; record both numbers.
 
-- [ ] The CLI is resolved once per run, and the pin stays in one place
-- [ ] SC-06, SC-09 and SC-12 durations before and after are recorded in Comments
-- [ ] Migrate duration before and after is recorded; the retry change is kept only if it helps
-- [ ] `npm test` passes 52 of 52, and Docker lists are equal before and after
+- [x] The CLI is resolved once per run, and the pin stays in one place
+- [x] SC-06, SC-09 and SC-12 durations before and after are recorded in Comments
+- [x] Migrate duration before and after is recorded; the retry change is kept only if it helps
+- [x] `npm test` passes 52 of 52, and Docker lists are equal before and after
 
 ## Comments
 
@@ -41,3 +41,8 @@
 - Migrate keeps the same steps but uses a fixture project with fewer dependencies.
 
 During `/to-design`, Q4 turned out to describe today's state already; the user approved the replacement scope above (Q10). Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.
+
+2026-10-28 implemented (three `npm test` runs, same machine, 3 files at once, 52 of 52 each, `docker images -a --no-trunc` and `docker ps -a` equal to before after every run):
+- Per-test durations, before (unchanged main) / after: SC-06 privilege 9.2s / 4.9s, SC-09 8.7s / 5.3s, SC-12 7.3s / 4.2s, SC-06 firewall 13.9s / 6.3s. Suite wall time 3m45s / 3m26s.
+- Migrate: 101.1s before, 96.5s with the CLI change and `fetch-retries=0` on the failing import, 97.3s with the CLI change only. The retry change does not help (pnpm retries were not the cost), so it was not kept; migrate's time is elsewhere.
+- The CLI is installed once by `tests/global-setup.mjs` (`installCli` in `tests/lib.mjs`, where the pin stays) into the run root and passed as `DEV_SETUP_TEST_CLI`. `tests/plugins.test.mjs` had a second `npx` copy of the pin; it now uses the exported `cli`.

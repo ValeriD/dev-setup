@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { RUN_LABEL, DEFAULT_IMAGE, headRevision, buildRunImage, run } from './lib.mjs';
+import { RUN_LABEL, DEFAULT_IMAGE, headRevision, buildRunImage, installCli, run } from './lib.mjs';
 
 let state;
 
@@ -24,7 +24,10 @@ export async function globalSetup() {
   } catch {
     // not a git checkout: the revision test is skipped by the test itself
   }
+  // The pinned devcontainer CLI, installed once into the run root; files call it directly instead of through npx.
+  const cliBin = installCli(join(root, 'cli'));
   Object.assign(process.env, {
+    DEV_SETUP_TEST_CLI: cliBin,
     DEV_SETUP_TEST_RUN: id,
     DEV_SETUP_TEST_ROOT: root,
     DEV_SETUP_TEST_IMAGE: image,

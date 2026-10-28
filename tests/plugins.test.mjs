@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { IMAGE, run, buildImage, startTemplateRegistry, createProject, up, exec, removeProject, projectDir } from './lib.mjs';
+import { IMAGE, run, cli, buildImage, startTemplateRegistry, createProject, up, exec, removeProject, projectDir } from './lib.mjs';
 
 const root = projectDir('dev-setup-plugins-');
 const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' }).trim();
@@ -143,7 +143,7 @@ test('a project plugin entry without a SHA makes `up` fail naming the entry', ()
   const bad = entry('proj-plug');
   bad.source.sha = 'main';
   setManifest(p, { extensions: [bad] });
-  const r = run('npx', ['-y', '@devcontainers/cli@0.89.0', 'up', '--workspace-folder', p.dir]);
+  const r = cli(['up', '--workspace-folder', p.dir]);
   assert.notEqual(r.code, 0);
   assert.match(r.out + r.err, /extensions\[0\] \(plugin "acme\/plug\/plugins\/proj-plug"\).*not a full 40-character commit SHA/s);
   p.containerId = run('docker', ['ps', '-aq', '--filter', `label=devcontainer.local_folder=${p.dir}`]).out.trim().split('\n')[0] || null;
