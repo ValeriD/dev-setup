@@ -25,3 +25,5 @@
 2026-10-28 created after ci 07's measurement. Migrate test alone: 94.4s before, 24.1s after; Docker image and container lists equal before and after.
 
 2026-10-28 full `npm test` on main after merging ci 08 and ci 09: 54 of 54 (ci 08 added two tests to `tests/renovate.test.mjs`), wall 158s against 202s before, migrate 24.5s. `test:skill` 51 of 51, `test:installer` 52 of 52. Docker image and container lists equal before and after.
+
+2026-10-28 CI push run 40772050811: 54 of 54, suite 1m54s, migrate 16.6s, acceptance job 2m32s (3m38s before, 8m21s at the start of ci-efficiency). Publish and template skipped (test change only).
