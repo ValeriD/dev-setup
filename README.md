@@ -1,23 +1,30 @@
-# dev-setups
+# dev-setup
 
-Hardened, reusable development containers with Claude Code and Codex preinstalled. See `CONTEXT.md` for terms and `ARCHITECTURE.md` for the current shape.
+Hardened dev containers with Claude Code and Codex preinstalled. Each project gets its own agents, skills, plugins, hooks and MCP servers inside its container, so your host Claude setup stays clean.
 
-## Node variant
+Only Node exists so far.
 
-- Image: `variants/node/` (build config), Template: `templates/node/`.
-- Tool versions and the base image digest are pinned in `variants/node/Dockerfile`.
+## What you get
 
-## Installer tests
+Inside the container:
 
-```sh
-(cd installer && pnpm install --frozen-lockfile) && npm run test:installer
-```
+- **Agents:** Claude Code and Codex at pinned versions, with auto-update off. `claude-yolo` and `codex-yolo` skip the permission prompts.
+- **No root:** you work as `node`. There is no sudo, every capability is dropped, and `no-new-privileges` is on.
+- **Limited network:** outbound traffic is limited to an allowlist. If the allowlist can't be applied, the container stops.
+- **No host credentials:** the container sees no host SSH agent and no host git credentials. GitHub access is opt-in, through a fine-grained token for that one repository.
+- **Read-only setup files:** the project's `.git/hooks`, `.git/config`, `.devcontainer` and `.vscode` are read-only, so an agent can't change its own sandbox.
+- **Safer installs:** pnpm is enforced, and new package versions are held back for 7 days.
+- **Agent Extensions:** these are skills, plugins, hooks and MCP servers, declared in `.devcontainer/extensions.json` and pinned to exact commits. They are installed when the container starts.
+- **Secrets:** only their names are written down. You set the values on your host.
+- **Logins:** your Claude and Codex logins survive a rebuild, and each project has its own.
 
-Integration tests of the extension installer CLI against local bare-repo fixtures. No network at test time.
+Terms such as Variant, Template and Preset are defined in [`CONTEXT.md`](CONTEXT.md). Why things work the way they do is recorded in [`docs/adr/`](docs/adr/).
 
-## `/dev-container` skill (host)
+## Use it in a project
 
-Onboards a project (local folder, GitHub URL or new repo) to a Variant from your host Claude Code. Install once from this checkout:
+### With the `/dev-container` skill (recommended)
+
+Install the skill once from this checkout:
 
 ```sh
 (cd installer && npx -y pnpm@11.0.0 install --frozen-lockfile)
@@ -25,72 +32,70 @@ Onboards a project (local folder, GitHub URL or new repo) to a Variant from your
 ln -s "$PWD/skills/dev-container" ~/.claude/skills/dev-container
 ```
 
-The skill finds this repository through the symlink, so keep the checkout where it is; if you move it, re-link with `ln -sfn`. Helper tests (temp dirs only, no Docker): `npm run test:skill`. The container path is covered by `tests/dev-container-skill.test.mjs` in the acceptance suite. Conversational behaviour is checked by hand with `docs/manual/dev-container-skill-checklist.md`.
+Then, in Claude Code on your host, run `/dev-container`. It can:
+- set up a local folder, a GitHub URL or a new repository;
+- migrate a project that has its own dev container or an npm or yarn lockfile;
+- update the image;
+- add or remove egress domains, secret names, Agent Extensions and Presets;
+- show the project's status.
 
-## Acceptance suite
+It never commits. The skill finds this repository through the symlink, so if you move the checkout, run `ln -sfn` again.
 
-Needs Docker and Node 24 (the devcontainer CLI is fetched with `npx` at an exact version).
+### By hand
 
 ```sh
-npm test
+npx -y @devcontainers/cli@0.89.0 templates apply -w . -t ghcr.io/valerid/dev-setup/templates/node
+npx -y @devcontainers/cli@0.89.0 up --workspace-folder .
 ```
 
-It builds the image under a tag of its own (`dev-setup-node:test-<run id>`, so parallel runs don't collide), starts a throwaway local registry, applies the Template to a fresh git folder, starts the container and probes it as `node`. Afterwards, pass or fail, it removes only what the run created: containers, the derived `vsc-…-uid` images, volumes, the registry, the run's image tag and its temp folders. Other projects' Docker resources are never touched. `DEV_SETUP_TEST_KEEP=1 npm test` keeps everything for debugging and prints what was kept. An image given in `DEV_SETUP_TEST_IMAGE` (CI sets it with `DEV_SETUP_TEST_SKIP_BUILD=1`) is used as is and never removed.
+On your host, before you start the container:
+- `DEV_SETUP_GITHUB_PAT` (optional): a GitHub token scoped to this repository only.
+- `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`: your git identity, so commits made in the container carry your name.
 
-Covered: Template apply and start, no sudo/capabilities/setuid, pinned Agent versions, auto-update off, normal vs yolo modes, Codex running a shell command (against a local mock model endpoint, no login), read-only git/devcontainer paths, login volume persistence and separation.
+VS Code's "Reopen in Container" works too, but VS Code passes more of the host into the container than the CLI does ([checklist](docs/manual/vscode-reopen-in-container.md)).
 
-### Manual checklist (not automatable)
+## Work on this repository
 
-- Real `claude` login, then rebuild the container: still logged in; second project: logged out.
-- `codex login --device-auth` works headlessly and survives a rebuild.
-- "Reopen in Container" in VS Code works with the same Template (SC-02).
+| Command | What it tests | Needs |
+|---|---|---|
+| `npm run test:installer` | the Agent Extension installer | Node 24 |
+| `npm run test:skill` | the skill's helper scripts | Node 24 |
+| `npm test` | the whole image: build, Template, hardening, extensions, the skill against a real container | Docker, about 4 min |
 
-## Release pipeline
+`npm test` deletes only the Docker containers, images and volumes it created. `DEV_SETUP_TEST_KEEP=1` keeps them so you can debug. Logins, VS Code and the skill's conversations are checked by hand: [`docs/manual/`](docs/manual/).
 
-`.github/workflows/ci.yml`. A first `changes` job works out what the commit touched, and the other jobs run only when needed:
+Work is tracked as tickets in `.scratch/<feature>/issues/`. The code layout is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-| What changed | What runs |
+## How releases work
+
+GitHub Actions (`.github/workflows/ci.yml`) runs only the jobs a change needs:
+
+| Change | What runs |
 |---|---|
-| Docs or tickets only | Pins and unit tests |
-| Tests only (`tests/`, `skills/dev-container/`, `package.json`, `.github/`, `renovate.json`) | Pins, unit tests and acceptance; nothing is published |
-| `templates/` only, on `main` | Acceptance, then the Template alone, pointing at the cosign-verified image now at `latest` |
-| Image inputs (`base/`, `installer/`, `extensions/`, `variants/node/`), the weekly schedule or a manual run | Everything, as below |
+| Docs or tickets | pin check and unit tests |
+| Tests, the skill or CI config | the above, plus the full acceptance suite. Nothing is published. |
+| `templates/` only | the acceptance suite, then the Template is published against the current image |
+| Image inputs, the Monday rebuild, or a manual run | everything: test, then publish and sign the image and the Template |
 
-A force push, a first push or an unreachable base counts as "everything changed".
+A publish produces:
+- the image `ghcr.io/valerid/dev-setup/node`, tagged `latest` and `sha-<commit>`, signed with cosign, with SBOM and provenance attestations;
+- the Template `ghcr.io/valerid/dev-setup/templates/node`, whose default `image` is that exact digest.
 
-Pull requests run the pin check (`scripts/check-pins.mjs`: every `uses:` needs a full commit SHA, every base image a digest) and, when anything but docs changed, the acceptance suite. A push to `main` that runs everything additionally builds and pushes `ghcr.io/valerid/dev-setup/node` (tags `sha-<12>` and `latest`), signs the digest with cosign keyless, attaches SBOM and provenance attestations (also pushed to the registry), verifies them, then publishes the Template `ghcr.io/valerid/dev-setup/templates/node` (no git tag per version) with its `image` option defaulting to `ghcr.io/valerid/dev-setup/node@sha256:...`, and fails the run unless `node:latest` is still the image it published. Only `GITHUB_TOKEN` is used. The image is built once per run: the acceptance suite tests it (`DEV_SETUP_TEST_SKIP_BUILD=1` skips the suite's own build), then that same image is saved, loaded in the publish job, tagged and pushed.
+The Monday rebuild picks up OS security patches. Renovate opens PRs for every pinned version and Pinned Ref. Nothing is merged automatically.
 
-### Manual steps (one-time)
-
-1. Create the GitHub repository `ValeriD/dev-setup`, add it as a remote and push `main`.
-2. Repository settings, Actions, General: allow GitHub Actions; leave workflow permissions at read-only (the workflow requests what it needs).
-3. After the first green run on `main`, make both GHCR packages public: Packages, `dev-setup/node` (image) and the Template package (`dev-setup/templates/node`), Package settings, Change visibility, Public. Until then the Template and image cannot be pulled anonymously, and the `devcontainers/action` publish may need the package linked to the repository.
-4. Verify from a machine with no login (`DIGEST` from the run summary or `docker buildx imagetools inspect ghcr.io/valerid/dev-setup/node:latest`):
+### Check an image yourself
 
 ```sh
-IMG=ghcr.io/valerid/dev-setup/node@$DIGEST
-docker pull $IMG
+IMG=ghcr.io/valerid/dev-setup/node@sha256:<digest>
 cosign verify $IMG \
   --certificate-identity-regexp '^https://github.com/ValeriD/dev-setup/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 gh attestation verify oci://$IMG --repo ValeriD/dev-setup
-# attestations pushed to the registry, no gh CLI needed (not yet exercised; adjust --type/flags if cosign differs):
-cosign verify-attestation --type slsaprovenance1 $IMG \
-  --certificate-identity-regexp '^https://github.com/ValeriD/dev-setup/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-npx -y @devcontainers/cli@0.89.0 templates apply -w /tmp/proj -t ghcr.io/valerid/dev-setup/templates/node:0.1.1
-grep image /tmp/proj/.devcontainer/devcontainer.json   # must show @sha256:...
 ```
 
-The dev-container skill runs the same checks with a stricter identity (`ci.yml` on `refs/heads/main` only) through `verify-image`; its success-path check is in `docs/manual/dev-container-skill-checklist.md`.
+The skill runs a stricter version of this check before it writes any digest to a project.
 
-## Updates (Renovate) and weekly rebuild
+### One-time setup still open
 
-`renovate.json` makes Renovate open PRs for the base image digest, GitHub Action SHAs, the pinned pnpm, Claude Code, Codex and devcontainers CLI versions, `installer/` npm dependencies, and the Pinned Ref `sha` of every Extension Manifest entry (`github` skill/plugin sources and plugin marketplaces; git-refs datasource, tracks `HEAD`). npm updates wait 7 days (`minimumReleaseAge`) to match the pnpm policy. Nothing is auto-merged; Pinned Ref and Agent version PRs are explicitly excluded from any future auto-merge rule. `tests/renovate.test.mjs` checks the managers against the repo files.
-
-The `ci` workflow also runs weekly (Mondays 04:17 UTC, default branch) as a full build, acceptance run and publish, so OS security patches (`apt-get install` runs uncached) reach the image without a code change.
-
-### Manual steps
-
-5. Install the Renovate GitHub App (https://github.com/apps/renovate) on `ValeriD/dev-setup` (repository access: only this repo). It picks up `renovate.json`, opens an onboarding-free first batch of PRs, and the Dependency Dashboard issue.
-6. Validate the config locally any time: `npx -y -p renovate@44.181.6 renovate-config-validator --strict renovate.json`.
+1. Make the GHCR packages `dev-setup/node`, `dev-setup/templates/node` and `dev-setup/templates` public. Until then, nobody can pull them without logging in.
+2. Install the [Renovate app](https://github.com/apps/renovate) on this repository only.
