@@ -1,20 +1,40 @@
-# 07: Find what makes the migrate test slow
+# 07: Turn off pnpm retries in the migrate test
 
-**What to build:** The migrate test (`tests/dev-container-skill.test.mjs`, "migrate: an npm project with its own dev container moves to the Template…") takes much less than its current ~97s, and still proves the same thing.
+**What to build:** The migrate test (`tests/dev-container-skill.test.mjs`, "migrate: an npm project with its own dev container moves to the Template…") takes about 22s instead of about 94s, and still proves the same thing.
 
-**Blocked by:** None. It needs grilling first.
+**Blocked by:** None (can start immediately)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Found (2026-10-28, ci-efficiency 03)
+## Technical context
 
-- With 3 files at once on the local machine, migrate took 101.1s before ci 03, 97.3s with the CLI resolved once, and 96.5s with pnpm `fetch-retries=0` on the expected-failure import. The retry guess was wrong, so that change was not kept.
-- It is the slowest test by far. The next slowest are about 30s.
-- The test calls the skill helper. The helper runs the devcontainer CLI through its own `npx -y @devcontainers/cli@0.89.0` (`skills/dev-container/scripts/commands.mjs` `DEVCONTAINER_CLI`): `up --recreate`, `import-lockfile` twice and `frozen-install`, each with `npx` start-up and possibly a container exec with `userEnvProbe`.
-- ci-efficiency 03 was not allowed to change the helper's `npx` use.
+**Design:** `.scratch/ci-efficiency/design.md` (migrate row). The grilling below replaces its "once measuring confirms" condition.
 
-## Open questions for grilling
+- **Measured (2026-10-28):**
+  - Per step: the expected-failure `import-lockfile` call takes 73.2s of 94.4s; `up --recreate` 9.7s; the other 12 steps about 11s together.
+  - Run directly on the host against a dead registry, `pnpm import` takes 70.9s with default retries and 0.9s with `pnpm_config_fetch_retries=0`. The cost is pnpm's retry backoff (10s, then 60s).
+  - ci 03's attempt did not reach pnpm: `devcontainer exec` does not pass host env into the container.
+- **Modules:** only the migrate test's fixture project.
+- **Change:** add `fetch-retries=0` to the fixture's `.npmrc`, next to `registry=`. It applies to the successful import too; that is harmless because the stub runs then.
+- **Must not introduce:**
+  - changes to the skill helper (it keeps `npx`, Q2);
+  - changes to the image or the Variant's pnpm env;
+  - a separate test for the failed import (Q3);
+  - a timing assertion;
+  - weaker assertions.
+- **Docker safety:** never prune globally. Only this run's labelled or tagged resources may be removed. Other projects' resources on this machine are never touched.
+- **Validation seam:** the migrate test's duration in `npm test` output, before and after.
 
-- Measure first: which steps take the time? Candidates are `up --recreate` (a full container start with egress), the two `import-lockfile` calls, `frozen-install`, and `npx` start-up in the helper.
-- May the helper take the CLI path from an env variable (as the suite now does with `DEV_SETUP_TEST_CLI`), or must it always use `npx` because it runs on the user's host?
-- Is the failed-import half (stub killed, files untouched) worth its own, cheaper test?
+- [ ] The fixture `.npmrc` sets `fetch-retries=0`; the test's assertions are unchanged
+- [ ] The failed import still fails, and package.json and the npm lockfile stay as they were
+- [ ] Migrate duration before and after is recorded in Comments
+- [ ] `npm test` passes 52 of 52, and Docker lists are equal before and after
+
+## Comments
+
+2026-10-28 grilling, all recommendations accepted:
+- Q1: retries off through the fixture's `.npmrc`.
+- Q2: the helper keeps `npx`; no env override for its CLI.
+- Q3: the failed import stays in the migrate test with the same assertions, no timing assertion.
+- Q4: ci 03 gets a correcting Comment.
+Rewritten from needs-triage to ready-for-agent.

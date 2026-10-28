@@ -1,23 +1,49 @@
 # 08: Renovate updates every devcontainer CLI pin together
 
-**What to build:** A new `@devcontainers/cli` version arrives as one Renovate PR that updates every place the version is pinned, and that PR passes CI.
+**What to build:** A new `@devcontainers/cli` version arrives as one Renovate PR that updates every place the version is pinned, and that PR passes CI. A new pin location that Renovate doesn't track fails a test.
 
-**Blocked by:** None. It needs grilling first.
+**Blocked by:** None (can start immediately)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Found (2026-10-28, ci-efficiency 03)
+## Technical context
 
-The version `0.89.0` is pinned in three places:
-- `.github/workflows/ci.yml` `CLI_VERSION`;
-- `tests/lib.mjs` `CLI_SPEC`;
-- `skills/dev-container/scripts/commands.mjs` `DEVCONTAINER_CLI`.
+**Design:** `renovate.json` custom managers and `tests/renovate.test.mjs` (node-devcontainer 11). No separate design document.
 
-`renovate.json`'s regex manager matches only `CLI_VERSION:`, so Renovate would bump `ci.yml` alone.
+- **Found (2026-10-28):** the version `0.89.0` is pinned in four places:
+  - `.github/workflows/ci.yml` `CLI_VERSION`;
+  - `tests/lib.mjs` `CLI_SPEC`;
+  - `skills/dev-container/scripts/commands.mjs` `DEVCONTAINER_CLI`;
+  - `README.md`, the two "By hand" commands.
 
-`skills/dev-container/scripts/test/helper.test.mjs` ("the devcontainer CLI pin matches the acceptance suite and CI") asserts all three agree. Every Renovate PR for the CLI would therefore fail until someone edits the other two by hand.
+  The only manager matches `CLI_VERSION:`. `helper.test.mjs` asserts that the first three agree, so a Renovate PR would fail today.
+- **Modules:**
+  - `renovate.json`: one regex manager for `@devcontainers/cli` replaces the `CLI_VERSION:` one. It matches `CLI_VERSION: X` in workflows and `@devcontainers/cli@X` in `tests/lib.mjs`, `skills/dev-container/scripts/commands.mjs` and `README.md`.
+    - Renovate puts every update of the same dependency and version on one branch.
+    - If the native npm manager or the workflow manager would also pick up a location, avoid a duplicate update, for example by restricting files.
+  - `tests/renovate.test.mjs`:
+    - The manager's regex hits each of the four files, and every version found is the same.
+    - A repo-wide search for `@devcontainers/cli@<version>` and `CLI_VERSION:` (excluding `.git`, `node_modules`, `.scratch` and the test itself) finds no file that the manager doesn't cover.
+  - `skills/dev-container/scripts/test/helper.test.mjs`: the agreement check also covers `README.md`.
+  - `tests/lib.mjs`: correct the comment on `CLI_SPEC` (it is not "the one pin"); no code change.
+- **Reuse:** Renovate custom regex managers; the existing `run`/`patternMatches` helpers in `tests/renovate.test.mjs`.
+- **Must not introduce:**
+  - a shared pins file read by code or CI (Q5);
+  - unpinned CLI commands in the README (Q6);
+  - auto-merge.
+- **Validation seam:** `npm run test:skill`, `node --test tests/pins.test.mjs tests/renovate.test.mjs`, and `npx -y -p renovate@44.181.6 renovate-config-validator --strict renovate.json`.
 
-## Open questions for grilling
+- [ ] One Renovate manager covers all four pin locations
+- [ ] `tests/renovate.test.mjs` proves each location is matched with the same version, and fails on an untracked location
+- [ ] `helper.test.mjs`'s agreement check includes the README
+- [ ] The `tests/lib.mjs` comment is accurate
+- [ ] The test commands above pass, and the validator passes with `--strict`
 
-- Should the regex manager cover all three files, or should two of them read the version from one source, for example `tests/lib.mjs` and the helper reading it from a shared file?
-- Does `tests/renovate.test.mjs` need a case proving the managers match each pin?
+## Comments
+
+2026-10-28 grilling, all recommendations accepted:
+- Q5: separate literal pins, one manager over all four files.
+- Q6: the README stays pinned and is kept in sync.
+- Q7: a per-file match test plus a repo-wide search for untracked locations.
+- Q8: Sonnet agent, in parallel with ci 07.
+Rewritten from needs-triage to ready-for-agent.
