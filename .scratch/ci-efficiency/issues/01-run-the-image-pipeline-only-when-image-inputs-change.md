@@ -35,7 +35,7 @@ A force push, a first push or an unreachable base counts as "everything changed"
 - **Validation seam:** job lists of real CI runs; `actionlint` locally (the `rhysd/actionlint` image is present).
 - **Coverage:** no suite change. Check the `changes` logic locally by running its shell against a few commit ranges of this repo: docs-only, test-only, image, and `templates/`-only, if one exists, or a constructed diff list.
 
-- [ ] A docs-only change runs only `changes` and `pins`
+- [x] A docs-only change runs only `changes` and `pins`
 - [x] A test-only change runs acceptance and publishes nothing
 - [ ] An image change, the weekly schedule and `workflow_dispatch` publish as before
 - [ ] A `templates/`-only change on `main` publishes only the Template, pointing at the verified current `latest` (left unticked until such a change runs)
@@ -98,3 +98,5 @@ Not run locally, to confirm in CI: the PR merge-base branch (`origin/$BASE_REF` 
 - Push run 40742878096 (test inputs changed, no image inputs): `changes`, `pins` and `acceptance` ran; `publish` and `template` were skipped. Acceptance job 3m38s, against 8m21s before.
 - Manual run 40742897800 (`workflow_dispatch`): everything ran and published. Image `ghcr.io/valerid/dev-setup/node@sha256:7691d5c9…79c1`, signed and attested; Template published from the publish digest (`TEMPLATE_ONLY: false`).
 - Still unproven: docs-only, image-change and schedule paths, template-only path, force/first push.
+
+2026-10-28 docs-only push run 40745481789 (README, ARCHITECTURE, tickets): only `changes` and `pins` ran; acceptance, publish and template were skipped.
