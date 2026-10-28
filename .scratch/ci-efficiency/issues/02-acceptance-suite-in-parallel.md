@@ -23,3 +23,4 @@
 
 2026-10-28 grilling, all recommendations accepted:
 - Q3: run 3 test files at once in CI and locally. An env variable overrides it, for example 1 for debugging.
+- Q9 (round 2): no serial group at the start. SC-04 and fail closed run in parallel like the rest. A file moves to serial only after it is seen to flake.

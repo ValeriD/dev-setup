@@ -22,3 +22,4 @@
 
 2026-10-28 grilling, all recommendations accepted:
 - Q7: set `disable-repo-tagging: true` and keep the version as `0.1.<run number>`. Once ticket 01 is in, a new version appears only when the image or the Template really changed.
+- Q8 (round 2): a `templates/`-only change publishes the Template alone, pointing at the current image's digest (see 01).

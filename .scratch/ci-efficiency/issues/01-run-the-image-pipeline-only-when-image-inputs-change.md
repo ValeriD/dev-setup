@@ -30,3 +30,4 @@
   - Any other change runs only pins and the unit tests.
   - The weekly schedule and a manual run always publish.
 - Q2: a first `changes` job compares against the base with `git diff` and outputs the groups. Later jobs skip on its output. No workflow-level `paths` filter and no third-party action.
+- Q8 (round 2): a change to `templates/` alone builds and tests. It then publishes only the Template, pointing at the digest of the image now published as `latest`, with no new image. This needs node-devcontainer 15's separate Template name and its guard that `latest` is the image.
