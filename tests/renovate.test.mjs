@@ -2,6 +2,7 @@
 // locations and Pinned Ref / Agent version updates are never auto-merged.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +11,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(root, f), 'utf8');
 const config = JSON.parse(read('renovate.json'));
 const manager = (dep) => config.customManagers.find((m) => m.depNameTemplate === dep || m.datasourceTemplate === dep);
-const run = (m, text) => [...text.matchAll(new RegExp(m.matchStrings[0], 'g'))].map((x) => x.groups);
+const run = (m, text) => m.matchStrings.flatMap((s) => [...text.matchAll(new RegExp(s, 'g'))].map((x) => x.groups));
 const patternMatches = (m, file) => m.managerFilePatterns.some((p) => new RegExp(p.slice(1, -1)).test(file));
 
 test('regex managers match the Dockerfile ARG pins', () => {
@@ -31,6 +32,35 @@ test('regex managers match the workflow pins', () => {
     const m = config.customManagers.find((x) => x.depNameTemplate === dep && patternMatches(x, wf));
     assert.match(run(m, ci)[0].currentValue, /^\d+\.\d+\.\d+$/, dep);
   }
+});
+
+const CLI_FILES = ['.github/workflows/ci.yml', 'tests/lib.mjs', 'skills/dev-container/scripts/commands.mjs', 'README.md'];
+
+test('one manager updates the devcontainer CLI version in every file that pins it', () => {
+  const managers = config.customManagers.filter((x) => x.depNameTemplate === '@devcontainers/cli');
+  assert.equal(managers.length, 1);
+  const versions = CLI_FILES.map((f) => {
+    assert.ok(patternMatches(managers[0], f), f);
+    const hits = run(managers[0], read(f));
+    assert.ok(hits.length > 0, f);
+    return [...new Set(hits.map((h) => h.currentValue))];
+  });
+  for (const v of versions) assert.deepEqual(v, versions[0]);
+  assert.match(versions[0][0], /^\d+\.\d+\.\d+$/);
+});
+
+test('every file pinning the devcontainer CLI is covered by the manager', () => {
+  const m = config.customManagers.find((x) => x.depNameTemplate === '@devcontainers/cli');
+  // Files that mention the pin shape without pinning: this test, the config itself, and the agreement check.
+  const self = new Set(['tests/renovate.test.mjs', 'renovate.json', 'skills/dev-container/scripts/test/helper.test.mjs']);
+  // Tracked files only, so local worktrees and installed dependencies are not scanned.
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
+  const uncovered = tracked.filter((f) => !f.startsWith('.scratch/') && !self.has(f)).filter((f) => {
+    const text = readFileSync(join(root, f));
+    if (text.includes(0)) return false;
+    return /@devcontainers\/cli@\d|CLI_VERSION:/.test(text.toString('utf8')) && !patternMatches(m, f);
+  });
+  assert.deepEqual(uncovered, []);
 });
 
 test('the cosign container pin in the skill helper is tracked with its tag and digest', () => {

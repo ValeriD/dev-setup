@@ -38,10 +38,18 @@
       "depNameTemplate": "pnpm"
     },
     {
-      "description": "devcontainers CLI version pinned in the workflow env",
+      "description": "devcontainers CLI version pinned in the workflow env, the acceptance suite, the dev-container skill helper and the README",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
-      "matchStrings": ["CLI_VERSION: (?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/",
+        "/^tests/lib\\.mjs$/",
+        "/^skills/dev-container/scripts/commands\\.mjs$/",
+        "/^README\\.md$/"
+      ],
+      "matchStrings": [
+        "CLI_VERSION: (?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "@devcontainers/cli@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
       "datasourceTemplate": "npm",
       "depNameTemplate": "@devcontainers/cli"
     },

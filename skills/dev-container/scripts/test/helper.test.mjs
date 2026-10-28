@@ -476,11 +476,12 @@ test('the helper only spawns fixed programs, never commits, and inspect never ru
   }
 });
 
-test('the devcontainer CLI pin matches the acceptance suite and CI', async () => {
+test('the devcontainer CLI pin matches the acceptance suite, CI and README', async () => {
   const { DEVCONTAINER_CLI } = await import('../commands.mjs');
   const version = DEVCONTAINER_CLI.split('@').pop();
   assert.ok(readFileSync(join(REPO, 'tests/lib.mjs'), 'utf8').includes(`'${DEVCONTAINER_CLI}'`));
   assert.ok(readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8').includes(`CLI_VERSION: ${version}`));
+  assert.ok(readFileSync(join(REPO, 'README.md'), 'utf8').includes(`${DEVCONTAINER_CLI}`));
 });
 
 test('verify-image has no option that skips a check', () => {

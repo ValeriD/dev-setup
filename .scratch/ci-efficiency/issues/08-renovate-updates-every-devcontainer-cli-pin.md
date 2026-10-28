@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -33,11 +33,11 @@
   - auto-merge.
 - **Validation seam:** `npm run test:skill`, `node --test tests/pins.test.mjs tests/renovate.test.mjs`, and `npx -y -p renovate@44.181.6 renovate-config-validator --strict renovate.json`.
 
-- [ ] One Renovate manager covers all four pin locations
-- [ ] `tests/renovate.test.mjs` proves each location is matched with the same version, and fails on an untracked location
-- [ ] `helper.test.mjs`'s agreement check includes the README
-- [ ] The `tests/lib.mjs` comment is accurate
-- [ ] The test commands above pass, and the validator passes with `--strict`
+- [x] One Renovate manager covers all four pin locations
+- [x] `tests/renovate.test.mjs` proves each location is matched with the same version, and fails on an untracked location
+- [x] `helper.test.mjs`'s agreement check includes the README
+- [x] The `tests/lib.mjs` comment is accurate
+- [x] The test commands above pass, and the validator passes with `--strict`
 
 ## Comments
 
@@ -47,3 +47,5 @@
 - Q7: a per-file match test plus a repo-wide search for untracked locations.
 - Q8: Sonnet agent, in parallel with ci 07.
 Rewritten from needs-triage to ready-for-agent.
+
+2026-10-28: Implemented. One `@devcontainers/cli` regex manager (two matchStrings) now covers `.github/workflows/*.yml`, `tests/lib.mjs`, `skills/dev-container/scripts/commands.mjs` and `README.md`. `tests/renovate.test.mjs` proves it matches all four with one version and scans the repo for uncovered pins (it fails on a scratch file holding a pin). The helper agreement test now includes `README.md`. The `CLI_SPEC` comment is corrected. No shared pins file, README stays pinned, no auto-merge.

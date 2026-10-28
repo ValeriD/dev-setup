@@ -14,7 +14,7 @@ export const DEFAULT_IMAGE = 'dev-setup-node:test';
 export const IMAGE = process.env.DEV_SETUP_TEST_IMAGE ?? DEFAULT_IMAGE;
 export const RUN_LABEL = 'dev-setup.test-run';
 export const runLabelArgs = () => (process.env.DEV_SETUP_TEST_RUN ? ['--label', `${RUN_LABEL}=${process.env.DEV_SETUP_TEST_RUN}`] : []);
-const CLI_SPEC = '@devcontainers/cli@0.89.0'; // the one pin; tests/renovate.test.mjs and Renovate read it here
+const CLI_SPEC = '@devcontainers/cli@0.89.0'; // one of several pins; Renovate updates them together (renovate.json), and helper.test.mjs checks they agree
 const REGISTRY_IMAGE = 'registry:2.8.3';
 
 export function run(cmd, args, opts = {}) {
