@@ -131,6 +131,9 @@ test('migrate: an npm project with its own dev container moves to the Template o
     '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile" } }\n',
     '.devcontainer/Dockerfile': 'FROM node:24\n',
     '.npmrc': 'registry=http://127.0.0.1:4873/\n',
+    // pnpm 11 reads only registry and auth keys from .npmrc; other settings go here. No retries, so the
+    // import meant to fail fails at once instead of after pnpm's 70s backoff.
+    'pnpm-workspace.yaml': 'fetchRetries: 0\n',
     'package.json': JSON.stringify({ name: 'legacy', version: '1.0.0', dependencies: { scripty: '^1.0.0', plain: '^1.0.0' } }, null, 2) + '\n',
   };
   mkdirSync(join(legacy, '.devcontainer'));

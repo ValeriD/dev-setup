@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 ## Technical context
 
@@ -38,3 +38,5 @@
 - Q3: the failed import stays in the migrate test with the same assertions, no timing assertion.
 - Q4: ci 03 gets a correcting Comment.
 Rewritten from needs-triage to ready-for-agent.
+
+2026-10-28 implemented as written on a worktree branch (not merged): `fetch-retries=0` in the fixture `.npmrc`, full `npm test` 52 of 52, Docker lists equal, but migrate took 94.7s against 94.4s. pnpm 11 reads only registry and auth keys from `.npmrc`; measured on the host, `.npmrc` `fetch-retries=0` gives 70.9s and `pnpm-workspace.yaml` `fetchRetries: 0` gives 0.9s. Superseded by ci 09, which uses `pnpm-workspace.yaml`.
