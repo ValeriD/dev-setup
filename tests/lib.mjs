@@ -43,13 +43,23 @@ export function projectDir(prefix) {
 /** The revision the run labels its image with: recorded once at the start of the run. */
 export const builtRevision = () => process.env.DEV_SETUP_TEST_REVISION ?? headRevision();
 
+/**
+ * Makes sure the image under test exists. Under `npm test` global setup built it once for the run, so this only checks.
+ * A file run on its own (no run id) builds it; CI builds ahead and sets DEV_SETUP_TEST_SKIP_BUILD.
+ */
 export function buildImage() {
-  if (process.env.DEV_SETUP_TEST_SKIP_BUILD) return; // CI builds once and tests that image
+  if (process.env.DEV_SETUP_TEST_SKIP_BUILD) return;
+  if (!process.env.DEV_SETUP_TEST_RUN) return buildRunImage(IMAGE);
+  must(run('docker', ['image', 'inspect', IMAGE]), `run image ${IMAGE} (global setup builds it; run the suite with npm test)`);
+}
+
+/** Builds `image`. The tag is a parameter because global setup picks it after this module is loaded. */
+export function buildRunImage(image) {
   const dir = join(REPO, 'variants/node');
   // Labels the image with this checkout's commit, as CI does with GITHUB_SHA, and with the run label
   // (passed down to derived images) so teardown can find the build's untagged copies.
   const env = { ...process.env, DEV_SETUP_REVISION: builtRevision() };
-  must(cli(['build', '--workspace-folder', dir, '--config', join(dir, 'devcontainer.json'), '--image-name', IMAGE, ...runLabelArgs()], { env }), 'image build');
+  must(cli(['build', '--workspace-folder', dir, '--config', join(dir, 'devcontainer.json'), '--image-name', image, ...runLabelArgs()], { env }), 'image build');
 }
 
 export function headRevision() {

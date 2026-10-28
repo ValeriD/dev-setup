@@ -1,13 +1,13 @@
 // Run once by `node --test --test-global-setup` in the main process, around all test files.
 // Setup gives the run an id, a temp root for its project folders and (unless the caller
-// supplied one) its own image tag; test files inherit these through the environment.
+// supplied one) its own image tag, built once; test files inherit these through the environment.
 // Teardown removes only what this run created, found through the run root, the run label
 // and the run tag. It never prunes and never matches by name prefix.
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { RUN_LABEL, DEFAULT_IMAGE, headRevision, run } from './lib.mjs';
+import { RUN_LABEL, DEFAULT_IMAGE, headRevision, buildRunImage, run } from './lib.mjs';
 
 let state;
 
@@ -31,6 +31,16 @@ export async function globalSetup() {
     ...(revision ? { DEV_SETUP_TEST_REVISION: revision } : {}),
   });
   state = { id, root, image, supplied };
+  // One build for the whole run; test files only check it exists. The harness probe (cleanup.test.mjs) opts out.
+  if (!supplied && !process.env.DEV_SETUP_TEST_NO_BUILD) {
+    console.log(`building run image ${image} (once for the run)`);
+    try {
+      buildRunImage(image);
+    } catch (e) {
+      await globalTeardown(); // a failed setup gets no teardown call; remove what the partial build left
+      throw e;
+    }
+  }
 }
 
 const docker = (...a) => run('docker', a).out.trim();
