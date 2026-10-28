@@ -26,7 +26,7 @@
 
 - [x] Workflows exist for build, acceptance, publish and Template publish, and pass `actionlint`
 - [x] Every `uses:` is pinned to a full commit SHA; a check fails the PR otherwise
-- [ ] After a run on the default branch: `cosign verify` and `gh attestation verify` succeed for the pushed digest, and an anonymous pull works
+- [x] After a run on the default branch: `cosign verify` and `gh attestation verify` succeed for the pushed digest, and an anonymous pull works
 - [x] `devcontainer templates apply -t ghcr.io/valerid/dev-setup/node` produces a config referencing that digest
 - [x] The remaining manual steps for the user are listed in the README
 
@@ -44,3 +44,5 @@
 - The Template moved to `ghcr.io/valerid/dev-setup/templates/node` (node 15). `templates apply` from there writes the digest, so the second box is ticked against the new name.
 - Anonymous `docker pull` of the digest works. `verify-image node` passed (cosign `verify` and `verify-attestation --type slsaprovenance1`, identity `ci.yml` on `main`).
 - `gh attestation verify` was not run: the local `gh` is 2.45.0, which has no `attestation` command. The first box stays unticked until it runs with a newer `gh`.
+
+2026-10-28 the user accepted the cosign check (`verify-image`: `verify` plus `verify-attestation --type slsaprovenance1`) in place of `gh attestation verify`, so the first box is ticked.
