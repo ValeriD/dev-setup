@@ -13,7 +13,7 @@ A force push, a first push or an unreachable base counts as "everything changed"
 
 **Blocked by:** node-devcontainer 15 (same `template` job, and the guard the template-only path relies on)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -54,3 +54,42 @@ A force push, a first push or an unreachable base counts as "everything changed"
 - The design adds `renovate.json` to the test inputs, because `tests/renovate.test.mjs` reads it.
 
 Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.
+
+2026-10-28 implemented (`ci.yml`, `ARCHITECTURE.md` CI row, README CI paragraph). No box is ticked: each needs a real CI run, which was not possible from a worktree.
+
+- `changes` job: `fetch-depth: 0`, one shell step; outputs `image`, `tests`, `template`, `publish_image`, `publish_template_only` (the last two `main` only). `acceptance` runs on any group; it saves and uploads the image only when `publish_image`. `publish` and `template` use `!cancelled()` plus explicit `result == 'success'` checks on `pins`, `acceptance` and `publish`.
+- Template-only path: `template` logs in, installs cosign, resolves `${IMAGE}:latest` to a digest, runs `cosign verify` on that digest (same identity regexp and issuer as `publish`), fills in that digest, publishes, and the guard compares `latest` with that same resolved digest (not `needs.publish.outputs.digest`). No new permissions; nothing is signed.
+- `actionlint` 1.7.7 on a copy of `ci.yml`: clean (exit 0). `npm run test:installer` 52/52, `npm run test:skill` 51/51, `node scripts/check-pins.mjs` and `tests/pins.test.mjs` pass.
+
+Local evidence: the run block of the `changes` step was extracted from `ci.yml` and run unmodified. Result format: `image tests template publish_image publish_template_only`.
+
+Real commit ranges of this repo (push to `main`, `before` = parent, tip = the commit):
+
+| Range | Result |
+|---|---|
+| `9c67f48` (tickets and design only) | false false false false false (only `changes` and `pins`) |
+| `2f5af2e` (`tests/acceptance.test.mjs`) | false true false false false (acceptance, no publish) |
+| `06d4a39` (`skills/dev-container/`, docs) | false true false false false |
+| `04318c9` (`ci.yml`, README, ARCHITECTURE) | false true false false false (the rollout commit publishes nothing) |
+| `1e80ad8` (`extensions/`, `installer/`, `templates/`) | true true true true false (everything) |
+
+Constructed file lists (`git diff` stubbed):
+
+| Case | Result |
+|---|---|
+| docs only, push or PR | false false false false false |
+| test only (`tests/lib.mjs`) | false true false false false |
+| `installer/` + README, push | true false false true false |
+| `variants/node/Dockerfile`, PR | true false false false false (no publish on a PR) |
+| `templates/` only, push to `main` | false true true false **true** |
+| `templates/` only, PR | false true true false false (acceptance, nothing published) |
+| `templates/` + `base/`, push | true true true true false (full publish; `template` follows `publish`) |
+| `renovate.json` only | false true false false false |
+| all-zero `before` | true true true true false |
+| empty `before` | true true true true false |
+| `schedule` | true true true true false |
+| `workflow_dispatch` on `main` | true true true true false |
+| `workflow_dispatch` on another branch | true true true false false (tests, but no publish) |
+| real unreachable base (`deadbeef...`, `git cat-file` fails) | true true true true false |
+
+Not run locally, to confirm in CI: the PR merge-base branch (`origin/$BASE_REF` after `fetch-depth: 0`), `github.event.before` on a real force push, the `if` expressions with skipped `needs`, and the template-only `cosign verify` and guard against GHCR. Rollout per the design: `ci.yml` is a test input, so merging it publishes nothing; run `workflow_dispatch` once on `main`.
