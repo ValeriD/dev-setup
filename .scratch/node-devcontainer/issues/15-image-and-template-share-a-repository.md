@@ -27,7 +27,7 @@
 - [x] The Template publishes under namespace `valerid/dev-setup/templates`, with no git tag per version
 - [x] A guard step fails the run when `node:latest` is not the digest just published (shell check shown failing locally against a wrong digest)
 - [x] README, checklist and `ARCHITECTURE.md` name `ghcr.io/valerid/dev-setup/templates/node`
-- [ ] After the CI run on `main`: `node:latest` is an image manifest, and `templates apply -t ghcr.io/valerid/dev-setup/templates/node` gives that digest
+- [x] After the CI run on `main`: `node:latest` is an image manifest, and `templates apply -t ghcr.io/valerid/dev-setup/templates/node` gives that digest
 
 ## Comments
 
@@ -44,3 +44,5 @@ ci-efficiency Q7 folds in here: `disable-repo-tagging: true`, with the version s
 - `node:latest` and `sha-e2a1e9784289` both point to image manifest `sha256:7691d5c9…79c1`. The guard step ("latest is still the image") passed.
 - The Template went to `ghcr.io/valerid/dev-setup/templates/node` with tags `0`, `0.1`, `0.1.7` and `latest` (`sha256:862f7a8e…6f6a`). Collection metadata went to `ghcr.io/valerid/dev-setup/templates:latest`. No git tag was pushed.
 - The `templates apply` half of the box is not checked yet, because the packages are still private (ci 06).
+
+2026-10-28 checked anonymously (empty `DOCKER_CONFIG`) on 2026-10-28, against `sha256:7691d5c9…79c1` from run 40742897800: `templates apply -t ghcr.io/valerid/dev-setup/templates/node` writes `"image": "ghcr.io/valerid/dev-setup/node@sha256:7691d5c9…79c1"`, and `node:latest` is a `manifest.v2` image manifest.

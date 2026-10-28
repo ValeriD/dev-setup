@@ -27,7 +27,7 @@
 - [x] Workflows exist for build, acceptance, publish and Template publish, and pass `actionlint`
 - [x] Every `uses:` is pinned to a full commit SHA; a check fails the PR otherwise
 - [ ] After a run on the default branch: `cosign verify` and `gh attestation verify` succeed for the pushed digest, and an anonymous pull works
-- [ ] `devcontainer templates apply -t ghcr.io/valerid/dev-setup/node` produces a config referencing that digest
+- [x] `devcontainer templates apply -t ghcr.io/valerid/dev-setup/node` produces a config referencing that digest
 - [x] The remaining manual steps for the user are listed in the README
 
 ## Spike findings to apply (from ticket 01 Answer)
@@ -39,3 +39,8 @@
 - Verified locally: `actionlint` (rhysd/actionlint 1.7.7 by digest) clean; `scripts/check-pins.mjs` passes on the repo and `tests/pins.test.mjs` shows it rejects tag-pinned Actions/images. All Actions resolved to full SHAs via `gh api`.
 - Not verifiable without a GitHub run (left unticked): `cosign verify` / `gh attestation verify` / anonymous pull on a real digest, and `templates apply` from the published Template. Also unexercised: `push-to-registry` plus `cosign verify-attestation` (README lists it as a manual check), and whether `devcontainers/action` accepts `templates-namespace: valerid/dev-setup` and lowercases correctly.
 - Deviations: the Template option is still named `image` (ticket 02 code and tests use it); CI rewrites its default to `ghcr.io/valerid/dev-setup/node@sha256:...` rather than introducing `imageDigest`. Platform is `linux/amd64` only (arm64 untested). The image is built once, tested, and the same image is pushed (tarball artifact between jobs). Template version is `0.1.<run number>`.
+
+2026-10-28 checked anonymously (empty `DOCKER_CONFIG`) on 2026-10-28, against `sha256:7691d5c9…79c1` from run 40742897800:
+- The Template moved to `ghcr.io/valerid/dev-setup/templates/node` (node 15). `templates apply` from there writes the digest, so the second box is ticked against the new name.
+- Anonymous `docker pull` of the digest works. `verify-image node` passed (cosign `verify` and `verify-attestation --type slsaprovenance1`, identity `ci.yml` on `main`).
+- `gh attestation verify` was not run: the local `gh` is 2.45.0, which has no `attestation` command. The first box stays unticked until it runs with a newer `gh`.
