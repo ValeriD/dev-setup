@@ -114,7 +114,7 @@ jobs:
       - run: npm run test:skill
 
   # Builds the image once, runs the acceptance suite against exactly that
-  # image, and hands the same image to the publish job as a tarball.
+  # image, and hands the same image to the publish job as a zstd tarball.
   acceptance:
     needs: changes
     if: needs.changes.outputs.image == 'true' || needs.changes.outputs.tests == 'true' || needs.changes.outputs.template == 'true'
@@ -147,13 +147,14 @@ jobs:
         run: npm test
       - name: Save the tested image
         if: needs.changes.outputs.publish_image == 'true'
-        run: docker save "$TEST_IMAGE" | gzip > image.tar.gz
+        run: docker save "$TEST_IMAGE" | zstd -T0 -3 -o image.tar.zst
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: needs.changes.outputs.publish_image == 'true'
         with:
           name: tested-image
-          path: image.tar.gz
+          path: image.tar.zst
           retention-days: 1
+          compression-level: 0  # already zstd-compressed
 
   publish:
     needs: [changes, pins, acceptance]
@@ -185,7 +186,7 @@ jobs:
 
       - name: Tag and push the tested image
         run: |
-          gunzip -c image.tar.gz | docker load
+          zstd -dc image.tar.zst | docker load
           docker tag "$TEST_IMAGE" "${IMAGE}:sha-${GITHUB_SHA::12}"
           docker tag "$TEST_IMAGE" "${IMAGE}:latest"
           docker push "${IMAGE}:sha-${GITHUB_SHA::12}"
