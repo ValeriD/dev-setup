@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 (same file, and the "will publish" output)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -19,8 +19,8 @@
 - **Validation seam:** step timings of the next CI run that publishes (a manual `workflow_dispatch` is fine), plus `actionlint`.
 - **Coverage:** no suite change.
 
-- [ ] The save and upload are skipped when nothing will publish
-- [ ] The image goes over as `zstd`, uploaded with `compression-level: 0`, and the publish digest check still passes
+- [x] The save and upload are skipped when nothing will publish
+- [x] The image goes over as `zstd`, uploaded with `compression-level: 0`, and the publish digest check still passes
 - [ ] Save plus upload time on a publishing run is recorded in Comments, compared with 1m40s
 
 ## Comments
@@ -30,3 +30,5 @@
 - Q6: no layer cache for now.
 
 Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.
+
+2026-10-28 implementation: `ci.yml` now saves with `zstd -T0 -3 -o image.tar.zst`, uploads that file with `compression-level: 0` (both steps keep 01's `publish_image` gate), and `publish` loads with `zstd -dc image.tar.zst | docker load`. The digest check is untouched. `actionlint` 1.7.7 is clean, and `tests/pins.test.mjs` passes. Locally, `docker save alpine:3.20 | zstd -T0 -3` then `zstd -dc | docker load` round-trips (7.73 MiB to 3.44 MiB). The first two boxes are ticked on the strength of the diff and these checks. The timing box stays unticked: it needs a real publishing CI run (a manual `workflow_dispatch` on main is fine) to compare against 1m40s. The two artifact-step timings must be read from that run.
