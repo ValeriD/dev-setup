@@ -36,7 +36,7 @@ A force push, a first push or an unreachable base counts as "everything changed"
 - **Coverage:** no suite change. Check the `changes` logic locally by running its shell against a few commit ranges of this repo: docs-only, test-only, image, and `templates/`-only, if one exists, or a constructed diff list.
 
 - [ ] A docs-only change runs only `changes` and `pins`
-- [ ] A test-only change runs acceptance and publishes nothing
+- [x] A test-only change runs acceptance and publishes nothing
 - [ ] An image change, the weekly schedule and `workflow_dispatch` publish as before
 - [ ] A `templates/`-only change on `main` publishes only the Template, pointing at the verified current `latest` (left unticked until such a change runs)
 - [ ] Force push, first push and unreachable base count as everything changed
@@ -93,3 +93,8 @@ Constructed file lists (`git diff` stubbed):
 | real unreachable base (`deadbeef...`, `git cat-file` fails) | true true true true false |
 
 Not run locally, to confirm in CI: the PR merge-base branch (`origin/$BASE_REF` after `fetch-depth: 0`), `github.event.before` on a real force push, the `if` expressions with skipped `needs`, and the template-only `cosign verify` and guard against GHCR. Rollout per the design: `ci.yml` is a test input, so merging it publishes nothing; run `workflow_dispatch` once on `main`.
+
+2026-10-28 first runs on GitHub (e2a1e97):
+- Push run 40742878096 (test inputs changed, no image inputs): `changes`, `pins` and `acceptance` ran; `publish` and `template` were skipped. Acceptance job 3m38s, against 8m21s before.
+- Manual run 40742897800 (`workflow_dispatch`): everything ran and published. Image `ghcr.io/valerid/dev-setup/node@sha256:7691d5c9…79c1`, signed and attested; Template published from the publish digest (`TEMPLATE_ONLY: false`).
+- Still unproven: docs-only, image-change and schedule paths, template-only path, force/first push.

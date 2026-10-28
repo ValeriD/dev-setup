@@ -39,3 +39,8 @@
 ci-efficiency Q7 folds in here: `disable-repo-tagging: true`, with the version staying `0.1.<run number>`. Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.
 
 2026-10-28: implemented. The last box needs a CI run on main after the push and is still open. The checklist names no Template package, so it needed no change. Added a docker/login-action step (already pinned) before the guard so imagetools can read a private package.
+
+2026-10-28 manual run 40742897800:
+- `node:latest` and `sha-e2a1e9784289` both point to image manifest `sha256:7691d5c9…79c1`. The guard step ("latest is still the image") passed.
+- The Template went to `ghcr.io/valerid/dev-setup/templates/node` with tags `0`, `0.1`, `0.1.7` and `latest` (`sha256:862f7a8e…6f6a`). Collection metadata went to `ghcr.io/valerid/dev-setup/templates:latest`. No git tag was pushed.
+- The `templates apply` half of the box is not checked yet, because the packages are still private (ci 06).
