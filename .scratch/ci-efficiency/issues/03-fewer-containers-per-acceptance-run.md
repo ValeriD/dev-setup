@@ -30,3 +30,10 @@ Durations per test from CI run 40568688924:
 - Which tests may share a container? A shared container means one test's leftovers can affect another.
 - Can migrate use a smaller fixture project, or a pre-filled pnpm store, without weakening what it proves?
 - Do SC-17 and SC-05/13 need a full recreate, or is that the behaviour under test?
+
+## Comments
+
+2026-10-28 grilling, all recommendations accepted:
+- Q4: only read-only checks in the same file share one container. Those are SC-06 privilege, SC-09, SC-12, SC-18 and the SC-03 host-exposure checks.
+- Tests that recreate or rebuild keep their own containers, SC-17 and SC-05/13 included.
+- Migrate keeps the same steps but uses a fixture project with fewer dependencies.

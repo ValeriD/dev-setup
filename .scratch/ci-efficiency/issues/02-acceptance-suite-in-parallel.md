@@ -18,3 +18,8 @@
 - What concurrency should it use (2, 3 or 4), and should CI and local runs use the same value?
 - Do tests that measure time-sensitive behaviour, such as the egress timeouts in SC-04 and fail closed, need their own serial group?
 - Should the test timeout per file change?
+
+## Comments
+
+2026-10-28 grilling, all recommendations accepted:
+- Q3: run 3 test files at once in CI and locally. An env variable overrides it, for example 1 for debugging.

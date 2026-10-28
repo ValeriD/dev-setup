@@ -20,3 +20,9 @@
 - Which way: one job that builds, tests and publishes; pushing an unsigned candidate tag first and promoting it after tests; or keeping the tarball but compressing faster (zstd)?
 - If a candidate tag is pushed before tests, how are failed candidates cleaned up, and how do we stop anyone using them?
 - Is a build cache (`--cache-from` / `--cache-to` with the GitHub Actions cache) worth it for a 45s build?
+
+## Comments
+
+2026-10-28 grilling, all recommendations accepted:
+- Q5: keep the separate acceptance and publish jobs. The job that runs the tests must never hold `id-token: write` or registry write access. The tests install public npm packages, and one of them could otherwise sign an image as the `main` workflow. Use zstd instead of gzip, and skip the save and upload when ticket 01 says nothing will publish.
+- Q6: no layer cache for now.

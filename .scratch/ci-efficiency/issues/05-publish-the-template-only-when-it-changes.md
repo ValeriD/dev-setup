@@ -17,3 +17,8 @@
 - Once 01 stops publishing images for doc-only changes, is anything left to fix here?
 - Should the action's git tag per version be turned off (`disable-repo-tagging`)?
 - What should the version scheme be: keep `0.1.<run>`, or bump on Template file changes only?
+
+## Comments
+
+2026-10-28 grilling, all recommendations accepted:
+- Q7: set `disable-repo-tagging: true` and keep the version as `0.1.<run number>`. Once ticket 01 is in, a new version appears only when the image or the Template really changed.
