@@ -1,25 +1,15 @@
 # 05: Publish the Template only when it or the image changes
 
-**What to build:** A new Template version is published only when the Template's files change or a new image is published. Its version number means something, rather than counting CI runs.
+**What to build:** Nothing on its own. The work is folded into other tickets.
 
-**Blocked by:** node-devcontainer 15 (the Template's registry name). It needs grilling first.
+**Blocked by:** None
 
-**Status:** needs-triage
-
-## Found (2026-10-28)
-
-- The `template` job sets the version to `0.1.<run number>` and publishes on every successful publish. Run 40681113721 published `0.1.5`.
-- `devcontainers/action` also pushes a git tag per version (`template_node_0.1.5`), so every run on `main` adds a tag to the repository.
-- Today the Template must republish whenever the image changes, because its `image` default is the new digest.
-
-## Open questions for grilling
-
-- Once 01 stops publishing images for doc-only changes, is anything left to fix here?
-- Should the action's git tag per version be turned off (`disable-repo-tagging`)?
-- What should the version scheme be: keep `0.1.<run>`, or bump on Template file changes only?
+**Status:** wontfix
 
 ## Comments
 
 2026-10-28 grilling, all recommendations accepted:
 - Q7: set `disable-repo-tagging: true` and keep the version as `0.1.<run number>`. Once ticket 01 is in, a new version appears only when the image or the Template really changed.
 - Q8 (round 2): a `templates/`-only change publishes the Template alone, pointing at the current image's digest (see 01).
+
+`/to-tickets` on 2026-10-28 folded Q7 into node-devcontainer 15 and Q8 into ci-efficiency 01. Ticket 01's gating means the Template publishes only when the image or `templates/` changed.

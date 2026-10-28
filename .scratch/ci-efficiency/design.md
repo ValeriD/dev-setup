@@ -105,7 +105,7 @@ The proposed replacement for ticket 03's scope:
 1. Resolve the CLI once per run.
 2. Remove the pnpm retry backoff from migrate's expected-failure step.
 
-Both keep what each test proves. This needs the user's approval.
+Both keep what each test proves. Approved by the user on 2026-10-28 (Q10).
 
 ## Validation plan
 

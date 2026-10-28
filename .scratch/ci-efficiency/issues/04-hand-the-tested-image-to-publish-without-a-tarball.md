@@ -1,28 +1,32 @@
-# 04: Hand the tested image to publishing without a tarball
+# 04: Hand the tested image to publishing more cheaply
 
-**What to build:** The publish job pushes exactly the image the acceptance suite tested. It doesn't save, gzip, upload, download and load a 1.4 GB tarball to do it.
+**What to build:** The acceptance job saves the tested image only when it will be published. It compresses the image with zstd and uploads it without compressing it again. The publish job loads it from zstd. What is published is still exactly what was tested.
 
-**Blocked by:** None. It needs grilling first.
+**Blocked by:** 01 (same file, and the "will publish" output)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Found (2026-10-28)
+## Technical context
 
-- Acceptance job: "Save the tested image" (`docker save | gzip`) takes 1m13s, and the upload takes 27s.
-- Publish job: downloads the artifact, then `gunzip | docker load`.
-- Each run on `main` keeps a 714 MB `tested-image` artifact for one day. Two such artifacts exist right now.
-- Pull requests skip the save, so this costs only on `main` and the weekly run.
-- The design rule to keep: what is published is byte-for-byte what was tested. The publish job already checks that the pushed digest matches the loaded image.
-- The image build itself takes about 45s with no layer cache: there are no Actions caches on the repo.
+**Design:** `.scratch/ci-efficiency/design.md` (`acceptance` and `publish` rows, Q5 and Q6).
 
-## Open questions for grilling
+- **Found:** "Save the tested image" (`docker save | gzip`) takes 1m13s, the upload 27s, and the artifact is 714 MB. `actions/upload-artifact` zips again by default.
+- **Modules:** `.github/workflows/ci.yml` `acceptance` (the save and upload steps, with `if` on 01's publish output) and `publish` (the load step).
+- **Reuse:**
+  - `zstd`, preinstalled on `ubuntu-24.04`: `docker save … | zstd -T0 -3 -o image.tar.zst`, and in publish `zstd -dc image.tar.zst | docker load`.
+  - `actions/upload-artifact` input `compression-level: 0`.
+- **Must not introduce:** one combined test-and-publish job, `id-token` or registry write on `acceptance`, candidate tags, or a layer cache. The `publish` digest check stays.
+- **Validation seam:** step timings of the next CI run that publishes (a manual `workflow_dispatch` is fine), plus `actionlint`.
+- **Coverage:** no suite change.
 
-- Which way: one job that builds, tests and publishes; pushing an unsigned candidate tag first and promoting it after tests; or keeping the tarball but compressing faster (zstd)?
-- If a candidate tag is pushed before tests, how are failed candidates cleaned up, and how do we stop anyone using them?
-- Is a build cache (`--cache-from` / `--cache-to` with the GitHub Actions cache) worth it for a 45s build?
+- [ ] The save and upload are skipped when nothing will publish
+- [ ] The image goes over as `zstd`, uploaded with `compression-level: 0`, and the publish digest check still passes
+- [ ] Save plus upload time on a publishing run is recorded in Comments, compared with 1m40s
 
 ## Comments
 
 2026-10-28 grilling, all recommendations accepted:
 - Q5: keep the separate acceptance and publish jobs. The job that runs the tests must never hold `id-token: write` or registry write access. The tests install public npm packages, and one of them could otherwise sign an image as the `main` workflow. Use zstd instead of gzip, and skip the save and upload when ticket 01 says nothing will publish.
 - Q6: no layer cache for now.
+
+Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.

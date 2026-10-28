@@ -1,35 +1,37 @@
-# 03: Start fewer containers per acceptance run
+# 03: Less overhead per test call
 
-**What to build:** Checks that only read a running container share one container per test file, instead of each starting its own. The slowest tests are cut down to what they actually prove. Coverage of the acceptance scenarios stays the same.
+**What to build:** The acceptance suite stops paying about a second of devcontainer CLI start-up on every `up`, `exec` and `templates apply`. The migrate test stops waiting on pnpm's network retries in the step that is meant to fail. Every test still proves the same thing.
 
-**Blocked by:** None. It needs grilling first. Interacts with 02.
+**Blocked by:** 02 (same harness files, and a stable baseline for timings)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Found (2026-10-28)
+## Technical context
 
-Durations per test from CI run 40568688924:
+**Design:** `.scratch/ci-efficiency/design.md` ("Correction to Q4", `tests/global-setup.mjs` and migrate rows).
 
-| Test | Time |
-|---|---|
-| migrate (npm project → Template, pnpm lockfile in the container) | 92s |
-| SC-17 missing secret warns at attach | 30s |
-| SC-04 egress allowlist / IPv6 / DNS | 30s |
-| SC-05/13 project skill and egress on recreate | 30s |
-| SC-13/15 project plugin and hook after recreate | 24s |
-| SC-10 login volumes across a rebuild | 21s |
-| SC-19 PAT helper | 18s |
-| render-template validates and starts | 16s |
+- **Found:**
+  - `tests/lib.mjs` runs every CLI call as `npx -y @devcontainers/cli@0.89.0`, which takes about 1.3s to start, and a run makes about 200 calls.
+  - Containers are already shared within files (`acceptance.test.mjs` `a`, `credentials.test.mjs`).
+  - The migrate test (`dev-container-skill.test.mjs`, 92s in CI) kills its registry stub and expects `import-lockfile` to fail. pnpm's default fetch retries are the suspected cost; this is not yet measured.
+- **Modules:**
+  - `tests/global-setup.mjs`: resolve the pinned CLI once per run (into the run root, or a warmed `npx` cache with a recorded bin path) and hand the path to files by env.
+  - `tests/lib.mjs`: `cli` uses that path, falling back to `npx` when the env is unset. The pin stays only in `tests/lib.mjs`, because `tests/renovate.test.mjs` and Renovate read it.
+  - The migrate test: retries off only for the expected-failure step, through env or the fixture's `.npmrc`.
+- **Reuse:** npm and npx with the existing exact pin; no new dependency.
+- **Must not introduce:**
+  - more container sharing;
+  - a second copy of the CLI version;
+  - changes to the skill helper's own `npx` use;
+  - weaker assertions.
+- **Docker safety:** never prune globally. Only this run's labelled or tagged resources may be removed. Other projects' resources on this machine are never touched.
+- **Validation seam:** per-test durations from `npm test` output, before and after.
+- **Coverage:** the existing suite. Keep the migrate change only if the measurement shows it helps; record both numbers.
 
-- Together these take about 260s of the 407s.
-- Read-only checks (SC-06 privilege, SC-09, SC-12, SC-18, SC-03) each take 3–10s, mostly starting a container.
-- The migrate test's time is mostly a pnpm install from the public registry inside the container.
-
-## Open questions for grilling
-
-- Which tests may share a container? A shared container means one test's leftovers can affect another.
-- Can migrate use a smaller fixture project, or a pre-filled pnpm store, without weakening what it proves?
-- Do SC-17 and SC-05/13 need a full recreate, or is that the behaviour under test?
+- [ ] The CLI is resolved once per run, and the pin stays in one place
+- [ ] SC-06, SC-09 and SC-12 durations before and after are recorded in Comments
+- [ ] Migrate duration before and after is recorded; the retry change is kept only if it helps
+- [ ] `npm test` passes 52 of 52, and Docker lists are equal before and after
 
 ## Comments
 
@@ -37,3 +39,5 @@ Durations per test from CI run 40568688924:
 - Q4: only read-only checks in the same file share one container. Those are SC-06 privilege, SC-09, SC-12, SC-18 and the SC-03 host-exposure checks.
 - Tests that recreate or rebuild keep their own containers, SC-17 and SC-05/13 included.
 - Migrate keeps the same steps but uses a fixture project with fewer dependencies.
+
+During `/to-design`, Q4 turned out to describe today's state already; the user approved the replacement scope above (Q10). Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.

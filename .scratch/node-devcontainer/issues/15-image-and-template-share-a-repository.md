@@ -1,26 +1,33 @@
-# 15: The image and the Template share one registry repository
+# 15: The Template gets its own registry name, and `latest` stays the image
 
-**What to build:** `ghcr.io/valerid/dev-setup/node:latest` always means the signed image, and the Template is published under a name of its own. Onboarding, `status` and updates resolve the newest image from that name.
+**What to build:** CI publishes the Template as `ghcr.io/valerid/dev-setup/templates/node`, separate from the image `ghcr.io/valerid/dev-setup/node`. After the Template publish, a guard fails the run unless `ghcr.io/valerid/dev-setup/node:latest` resolves to the image digest this run published. Publishing a Template version no longer adds a git tag to the repository. The README and the manual checklist use the new Template name.
 
-**Blocked by:** None. It needs grilling first.
+**Blocked by:** None (can start immediately)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-## Found
+## Technical context
 
-In CI run 40681113721 (2026-10-28, commit 1f7afa5), the first successful publish:
-- The `publish` job pushed the image to `ghcr.io/valerid/dev-setup/node` with tags `sha-<12>` and `latest`, with digest `sha256:2033c430…3d4d`.
-- The `template` job then ran `devcontainer templates publish -r ghcr.io -n valerid/dev-setup ./templates`. That pushed the Template `node` to the same repository with tags `0`, `0.1`, `0.1.5` and `latest`, with digest `sha256:854795c6…e8cd`.
-- `latest` now points to the Template artifact, not the image.
-- The skill helper resolves the newest image from `templates/node/devcontainer-template.json` `options.image.default`, which is `ghcr.io/valerid/dev-setup/node:latest` (`commands.mjs` `variantSource`). So `verify-image`, onboarding and the newer-image check in `status` read the Template artifact.
-- Ticket 10 chose both names on purpose ("Image names"). Nothing in the acceptance suite publishes both to one registry repository, so no test caught this.
-- The Template's `image` default that CI writes is a digest (`…/node@sha256:2033…`). Applying the Template is therefore not affected.
+**Design:** `.scratch/ci-efficiency/design.md` (capsule, `template` job row, Rollout).
 
-## Open questions for grilling
+- **Found (CI run 40681113721):** the Template publish moved the image's `latest` to the Template artifact, and also pushed `0`, `0.1` and `0.1.5`. The skill reads `options.image.default` (`…/node:latest`) to find the newest image, so `verify-image` and onboarding would read the Template.
+- **Modules:**
+  - `.github/workflows/ci.yml` `template` job: `TEMPLATE_NAMESPACE` becomes `valerid/dev-setup/templates`, `disable-repo-tagging: "true"`, and a final guard step.
+  - `README.md`: Template commands and names.
+  - `docs/manual/dev-container-skill-checklist.md`: any Template reference.
+  - `ARCHITECTURE.md` CI/release row: rewrite the row, never append.
+- **Implementation anchors:** the existing `publish` step "Resolve digest", which uses `docker buildx imagetools inspect … --format '{{.Manifest.Digest}}'`. The guard compares `${IMAGE}:latest` against `needs.publish.outputs.digest`.
+- **Reuse:** `devcontainers/action` inputs (already pinned); `imagetools`.
+- **Dependency direction:** the Template references the image, never the reverse.
+- **Must not introduce:** a change to the image's name, tags or labels; a change to `verify-image`'s identity; new workflows or actions.
+- **Rollout:** ci-efficiency 01 is not in yet, so the push of this ticket publishes. That run moves `latest` back to the image. Cleanup is ci-efficiency 06.
+- **Validation seam:** the CI run on `main` after the push, plus the guard's shell check tried locally against a wrong digest. Run `actionlint` locally (the `rhysd/actionlint` image is present) if available.
+- **Coverage:** no acceptance-suite change; the suite applies the Template from its own local registry.
 
-- Which one moves: the Template (for example namespace `valerid/dev-setup/templates`, giving `ghcr.io/valerid/dev-setup/templates/node`) or the image (for example `ghcr.io/valerid/dev-setup/images/node`)?
-- What happens to the already published `latest`, `0`, `0.1` and `0.1.5` tags on `ghcr.io/valerid/dev-setup/node`?
-- Should the acceptance suite or CI check that the image's `latest` is an image after publishing?
+- [ ] The Template publishes under namespace `valerid/dev-setup/templates`, with no git tag per version
+- [ ] A guard step fails the run when `node:latest` is not the digest just published (shell check shown failing locally against a wrong digest)
+- [ ] README, checklist and `ARCHITECTURE.md` name `ghcr.io/valerid/dev-setup/templates/node`
+- [ ] After the CI run on `main`: `node:latest` is an image manifest, and `templates apply -t ghcr.io/valerid/dev-setup/templates/node` gives that digest
 
 ## Comments
 
@@ -29,4 +36,4 @@ In CI run 40681113721 (2026-10-28, commit 1f7afa5), the first successful publish
 - Q2: the next publish moves `latest` back to the image, and the user deletes the stray `0`, `0.1` and `0.1.5` tags by hand.
 - Q3: CI checks after the Template job that `node:latest` is still the image it just published.
 
-The user asked for this ticket to go through grilling together with the `ci-efficiency` tickets.
+ci-efficiency Q7 folds in here: `disable-repo-tagging: true`, with the version staying `0.1.<run number>`. Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.
