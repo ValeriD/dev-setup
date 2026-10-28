@@ -1,7 +1,9 @@
 name: ci
 
-# PRs: pin check + acceptance suite. Push to main: also publish, sign, attest
-# and publish the Template. Nothing is pushed unless acceptance passes.
+# A first job (`changes`) works out what the commit touched; the others run
+# only when needed. PRs: pin check + acceptance suite. Push to main with image
+# changes: also publish, sign, attest and publish the Template. A templates/-only
+# push publishes just the Template. Nothing is pushed unless acceptance passes.
 on:
   pull_request:
   push:
@@ -29,6 +31,68 @@ env:
   TEST_IMAGE: dev-setup-node:ci
 
 jobs:
+  # Decides what runs. Path groups: image = what goes into the image;
+  # tests = what the acceptance suite or CI itself reads; template = templates/.
+  # schedule, workflow_dispatch, a missing/all-zero `before` and an unreachable
+  # base (force push) count as everything changed.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.diff.outputs.image }}
+      tests: ${{ steps.diff.outputs.tests }}
+      template: ${{ steps.diff.outputs.template }}
+      publish_image: ${{ steps.diff.outputs.publish_image }}
+      publish_template_only: ${{ steps.diff.outputs.publish_template_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compare with the base
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          everything=false
+          base=""
+          case "$EVENT_NAME" in
+            pull_request) base=$(git merge-base "origin/${BASE_REF}" HEAD) || base="" ;;
+            push) base="$BEFORE" ;;
+          esac
+          if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            everything=true
+          elif ! files=$(git diff --name-only "$base" HEAD); then
+            everything=true
+          fi
+
+          image=false tests=false template=false
+          if [ "$everything" = true ]; then
+            image=true tests=true template=true
+          else
+            echo "changed files:"; echo "$files"
+            grep -Eq '^(base|installer|extensions|variants/node)/' <<<"$files" && image=true
+            grep -Eq '^(tests/|templates/|skills/dev-container/|package\.json$|\.github/|renovate\.json$)' <<<"$files" && tests=true
+            grep -Eq '^templates/' <<<"$files" && template=true
+          fi
+
+          on_main=false
+          [ "$EVENT_NAME" != pull_request ] && [ "$REF" = refs/heads/main ] && on_main=true
+          publish_image=false publish_template_only=false
+          [ "$on_main" = true ] && [ "$image" = true ] && publish_image=true
+          [ "$on_main" = true ] && [ "$image" = false ] && [ "$template" = true ] && publish_template_only=true
+
+          {
+            echo "image=$image"
+            echo "tests=$tests"
+            echo "template=$template"
+            echo "publish_image=$publish_image"
+            echo "publish_template_only=$publish_template_only"
+          } | tee -a "${GITHUB_OUTPUT:-/dev/null}"
+
   pins:
     runs-on: ubuntu-24.04
     steps:
@@ -52,6 +116,8 @@ jobs:
   # Builds the image once, runs the acceptance suite against exactly that
   # image, and hands the same image to the publish job as a tarball.
   acceptance:
+    needs: changes
+    if: needs.changes.outputs.image == 'true' || needs.changes.outputs.tests == 'true' || needs.changes.outputs.template == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -80,20 +146,23 @@ jobs:
           DEV_SETUP_TEST_SKIP_BUILD: "1"
         run: npm test
       - name: Save the tested image
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.publish_image == 'true'
         run: docker save "$TEST_IMAGE" | gzip > image.tar.gz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.publish_image == 'true'
         with:
           name: tested-image
           path: image.tar.gz
           retention-days: 1
 
   publish:
-    needs: [pins, acceptance]
-    # main only: verify-image accepts signatures from ci.yml on refs/heads/main,
-    # so a manual run on another branch must not move :latest.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [changes, pins, acceptance]
+    # publish_image is main-only and set only for image changes, the schedule
+    # or a manual run: verify-image accepts signatures from ci.yml on
+    # refs/heads/main, so a run on another branch must not move :latest.
+    if: >-
+      !cancelled() && needs.changes.outputs.publish_image == 'true'
+      && needs.pins.result == 'success' && needs.acceptance.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -172,8 +241,15 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "$REPO"
 
+  # Publishes the Template. After `publish` it points at the digest just
+  # published; on a templates/-only change it points at the image now at
+  # `latest`, after cosign verifies it. Signs nothing.
   template:
-    needs: publish
+    needs: [changes, pins, acceptance, publish]
+    if: >-
+      !cancelled() && needs.pins.result == 'success' && needs.acceptance.result == 'success'
+      && ((needs.changes.outputs.publish_image == 'true' && needs.publish.result == 'success')
+          || needs.changes.outputs.publish_template_only == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -183,11 +259,36 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: needs.changes.outputs.publish_template_only == 'true'
+      - name: Resolve the image digest
+        id: image
+        env:
+          TEMPLATE_ONLY: ${{ needs.changes.outputs.publish_template_only }}
+          PUBLISHED: ${{ needs.publish.outputs.digest }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$TEMPLATE_ONLY" = true ]; then
+            d=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')
+            [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bad digest: $d"; exit 1; }
+            # same identity the publish job checks; verifying needs no id-token
+            cosign verify "${IMAGE}@${d}" \
+              --certificate-identity-regexp "^https://github.com/${REPO}/" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          else
+            d="$PUBLISHED"
+          fi
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
       # The Template's `image` option default becomes the exact image digest,
       # so applying the Template pins the project to what CI verified.
       - name: Fill in image digest and bump version
         env:
-          DIGEST: ${{ needs.publish.outputs.digest }}
+          DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           f=templates/node/devcontainer-template.json
           jq --arg ref "${IMAGE}@${DIGEST}" --arg v "0.1.${GITHUB_RUN_NUMBER}" \
@@ -205,15 +306,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # The skill reads the image through `node:latest`; it must still be the
-      # image this run published, not a Template artifact.
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Guard, latest is still the published image
+      # image this Template points at, not a Template artifact.
+      - name: Guard, latest is still the image
         env:
-          DIGEST: ${{ needs.publish.outputs.digest }}
+          DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           d=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')
           [ "$d" = "$DIGEST" ] || { echo "${IMAGE}:latest is $d, expected $DIGEST"; exit 1; }
