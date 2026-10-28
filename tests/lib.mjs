@@ -14,14 +14,23 @@ export const DEFAULT_IMAGE = 'dev-setup-node:test';
 export const IMAGE = process.env.DEV_SETUP_TEST_IMAGE ?? DEFAULT_IMAGE;
 export const RUN_LABEL = 'dev-setup.test-run';
 export const runLabelArgs = () => (process.env.DEV_SETUP_TEST_RUN ? ['--label', `${RUN_LABEL}=${process.env.DEV_SETUP_TEST_RUN}`] : []);
-const CLI = ['npx', '-y', '@devcontainers/cli@0.89.0'];
+const CLI_SPEC = '@devcontainers/cli@0.89.0'; // the one pin; tests/renovate.test.mjs and Renovate read it here
 const REGISTRY_IMAGE = 'registry:2.8.3';
 
 export function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 << 20, ...opts });
   return { code: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
 }
-const cli = (args, opts) => run(CLI[0], [...CLI.slice(1), ...args], opts);
+// Under `npm test` the global setup installs the pinned CLI once and hands its path over;
+// a file run on its own falls back to npx.
+export const cli = (args, opts) =>
+  process.env.DEV_SETUP_TEST_CLI ? run(process.env.DEV_SETUP_TEST_CLI, args, opts) : run('npx', ['-y', CLI_SPEC, ...args], opts);
+
+/** Install the pinned CLI under `dir` (once per run) and return its executable. */
+export function installCli(dir) {
+  must(run('npm', ['install', '--prefix', dir, '--no-save', '--no-audit', '--no-fund', '--loglevel=error', CLI_SPEC]), 'devcontainer CLI install');
+  return join(dir, 'node_modules', '.bin', 'devcontainer');
+}
 
 function must(r, what) {
   if (r.code !== 0) throw new Error(`${what} failed (${r.code})\n${r.out}\n${r.err}`);
