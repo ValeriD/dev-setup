@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -24,9 +24,9 @@
 - **Validation seam:** the CI run on `main` after the push, plus the guard's shell check tried locally against a wrong digest. Run `actionlint` locally (the `rhysd/actionlint` image is present) if available.
 - **Coverage:** no acceptance-suite change; the suite applies the Template from its own local registry.
 
-- [ ] The Template publishes under namespace `valerid/dev-setup/templates`, with no git tag per version
-- [ ] A guard step fails the run when `node:latest` is not the digest just published (shell check shown failing locally against a wrong digest)
-- [ ] README, checklist and `ARCHITECTURE.md` name `ghcr.io/valerid/dev-setup/templates/node`
+- [x] The Template publishes under namespace `valerid/dev-setup/templates`, with no git tag per version
+- [x] A guard step fails the run when `node:latest` is not the digest just published (shell check shown failing locally against a wrong digest)
+- [x] README, checklist and `ARCHITECTURE.md` name `ghcr.io/valerid/dev-setup/templates/node`
 - [ ] After the CI run on `main`: `node:latest` is an image manifest, and `templates apply -t ghcr.io/valerid/dev-setup/templates/node` gives that digest
 
 ## Comments
@@ -37,3 +37,5 @@
 - Q3: CI checks after the Template job that `node:latest` is still the image it just published.
 
 ci-efficiency Q7 folds in here: `disable-repo-tagging: true`, with the version staying `0.1.<run number>`. Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.
+
+2026-10-28: implemented. The last box needs a CI run on main after the push and is still open. The checklist names no Template package, so it needed no change. Added a docker/login-action step (already pinned) before the guard so imagetools can read a private package.

@@ -21,7 +21,8 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/valerid/dev-setup/node
-  TEMPLATE_NAMESPACE: valerid/dev-setup
+  # The Template lives under its own name so it never shares a tag with the image.
+  TEMPLATE_NAMESPACE: valerid/dev-setup/templates
   # Add linux/arm64 here (and a QEMU step) once it is verified to build.
   PLATFORM: linux/amd64
   CLI_VERSION: 0.89.0
@@ -199,5 +200,20 @@ jobs:
           base-path-to-templates: ./templates
           templates-namespace: ${{ env.TEMPLATE_NAMESPACE }}
           generate-docs: "false"
+          disable-repo-tagging: "true"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The skill reads the image through `node:latest`; it must still be the
+      # image this run published, not a Template artifact.
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Guard, latest is still the published image
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          d=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')
+          [ "$d" = "$DIGEST" ] || { echo "${IMAGE}:latest is $d, expected $DIGEST"; exit 1; }
