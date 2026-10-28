@@ -5,6 +5,6 @@
   "scripts": {
     "test:installer": "node --test installer/test/*.test.mjs",
     "test:skill": "node --test skills/dev-container/scripts/test/*.test.mjs",
-    "test": "node --test --test-global-setup=tests/global-setup.mjs --test-concurrency=1 --test-timeout=900000 tests/*.test.mjs"
+    "test": "node --test --test-global-setup=tests/global-setup.mjs --test-concurrency=${DEV_SETUP_TEST_CONCURRENCY:-3} --test-timeout=900000 tests/*.test.mjs"
   }
 }

@@ -23,7 +23,7 @@ const childEnv = (env) => {
   const e = { ...process.env };
   for (const k of Object.keys(e)) if (k.startsWith('DEV_SETUP_TEST_')) delete e[k]; // the child gets its own run
   delete e.NODE_TEST_CONTEXT; // otherwise the child runner only reports instead of running
-  return { ...e, ...env };
+  return { ...e, DEV_SETUP_TEST_NO_BUILD: '1', ...env }; // the probe tags a stand-in image itself: no build
 };
 
 /** Run the probe in a child `node --test`; resolves with its exit code, output and what it recorded. */

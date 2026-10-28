@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Technical context
 
@@ -29,10 +29,10 @@
 - **Validation seam:** `npm test` exit and duration; `docker images -a` and `docker ps -a` before and after.
 - **Coverage:** the existing suite, `cleanup.test.mjs` included. Running one test file directly (`node --test tests/x.test.mjs`) still works, by building when no run image exists or by documenting `npm test` as the way.
 
-- [ ] One image build per local `npm test` run, shown in the log
-- [ ] `npm test` runs 3 files at once and passes 52 of 52; duration recorded in Comments
-- [ ] `DEV_SETUP_TEST_CONCURRENCY=1 npm test` passes, serially
-- [ ] Docker image and container lists are equal before and after the run
+- [x] One image build per local `npm test` run, shown in the log
+- [x] `npm test` runs 3 files at once and passes 52 of 52; duration recorded in Comments
+- [x] `DEV_SETUP_TEST_CONCURRENCY=1 npm test` passes, serially
+- [x] Docker image and container lists are equal before and after the run
 
 ## Comments
 
@@ -41,3 +41,11 @@
 - Q9 (round 2): no serial group at the start. SC-04 and fail closed run in parallel like the rest. A file moves to serial only after it is seen to flake.
 
 The design adds the build-once prefactor. Rewritten as ready-for-agent through `/to-tickets` on 2026-10-28.
+
+2026-10-28 implemented (npm test runs: 2 of 3 used):
+- Parallel (3 at once, with the one build): 52 of 52 pass, 3m59s wall (node reports 239s). CI serial baseline was 8m21s.
+- `DEV_SETUP_TEST_CONCURRENCY=1`: 52 of 52 pass, serially, 10m13s locally (includes the one build).
+- The log shows one "building run image" line per run.
+- Docker: `docker images -a --no-trunc` and `docker ps -a` equal before and after both runs, except that a `dc-status-layers-test:<pid>-<ts>` image present before was gone after. It comes from `skills/dev-container/scripts/test/status.test.mjs` (not part of `npm test`), so another session's test cleaned it up; this run did not touch it.
+- No flake seen, so no serial group (Q9).
+- Added `DEV_SETUP_TEST_NO_BUILD` (used by `cleanup.test.mjs` for its child probe runs, which tag a stand-in image) so those children do not each build the 1.4 GB image. A failed build in global setup runs the teardown before rethrowing.
