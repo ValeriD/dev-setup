@@ -1,0 +1,178 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ValeriD/dev-setup/main/installer/extensions.schema.json",
+  "description": "Matt Pocock engineering workflow skills (grill, spec, design, tickets, implement) with their dependencies.",
+  "extensions": [
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/grill-with-docs",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/to-spec",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/to-design",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/to-tickets",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/implement",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/productivity/grilling",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/domain-modeling",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/codebase-design",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/tdd",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/code-review",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/setup-matt-pocock-skills",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/triage",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/productivity/writing-for-agents",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      }
+    },
+    {
+      "kind": "skill",
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "source": {
+        "github": "ValeriD/skills",
+        "path": "skills/engineering/improve-codebase-architecture",
+        "sha": "dfa745a21929e81a93b7e89609e051734295957a"
+      },
+      "egress": [
+        "cdn.jsdelivr.net",
+        "cdn.tailwindcss.com"
+      ]
+    }
+  ]
+}
