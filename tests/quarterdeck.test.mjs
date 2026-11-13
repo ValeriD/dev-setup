@@ -402,3 +402,122 @@ test('the checklist has the SC-02 and SC-10 rows with a setup, what to look at a
     assert.ok(cells.every((c) => c.length > 20), `${sc}: every column says something`);
   }
 });
+
+// qd-publish, run in a throwaway container of the image (no entrypoint, no Herdr, no network needed) against a local
+// bare origin with a stub gh. Each call builds a fresh fixture under /tmp/qdp and prints what the script prints.
+const FIXTURE = String.raw`
+set -e
+b=/tmp/qdp; mkdir -p $b/bin $b/marks; cd $b
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+git init -q --bare -b main origin.git
+git clone -q origin.git home/projects/proj 2>/dev/null
+c=$b/home/projects/proj
+git -C $c checkout -q -b main
+echo x > $c/f; git -C $c add f; git -C $c commit -q -m init; git -C $c push -q origin main
+git -C $c checkout -q -b qd/spec
+mkdir -p $c/.scratch/spec/issues
+printf '# 10: Third\n\nbody\n' > $c/.scratch/spec/issues/10-third.md
+printf '# 02: Second\n' > $c/.scratch/spec/issues/02-second.md
+printf '# 01: First\n' > $c/.scratch/spec/issues/01-first.md
+printf '# 9: Ninth\n' > $c/.scratch/spec/issues/9-ninth.md
+git -C $c add .; git -C $c commit -q -m tickets
+git -C $c checkout -q main; git -C $c branch -q other qd/spec
+cat > $b/bin/gh <<'GH'
+#!/bin/sh
+{ echo "CALL"; for a in "$@"; do echo "arg=$a"; done; } >> /tmp/qdp/gh.log
+[ -n "$STUB_GH_FAIL" ] && { echo "boom" >&2; exit 1; }
+echo "https://github.com/o/r/pull/7"
+GH
+chmod +x $b/bin/gh
+export PATH=$b/bin:$PATH
+`;
+const publishRun = (script, env = []) =>
+  run('docker', ['run', '--rm', '--label', runLabel, '-u', 'node', '--entrypoint', 'bash', ...env.flatMap((e) => ['-e', e]), image, '-c', FIXTURE + script]);
+
+test('qd-publish pushes exactly the named branch and opens one pull request against the default branch, listing the tickets in number order (SC-08, token-free half)', () => {
+  const r = publishRun(`
+    qd-publish $b/home proj qd/spec spec > $b/out
+    cat $b/out; echo ---; git --git-dir $b/origin.git for-each-ref --format='%(refname)'; echo ---; cat $b/gh.log`);
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  const [printed, refs, log] = r.out.split('---\n');
+  assert.equal(printed.trim(), 'https://github.com/o/r/pull/7');
+  assert.deepEqual(refs.trim().split('\n').sort(), ['refs/heads/main', 'refs/heads/qd/spec'], 'only the named branch was pushed ("other" was not)');
+  assert.equal((log.match(/^CALL$/gm) ?? []).length, 1);
+  const args = log.split('\n').filter((l) => l.startsWith('arg=')).map((l) => l.slice(4));
+  assert.deepEqual(args.slice(0, 2), ['pr', 'create']);
+  const val = (k) => args[args.indexOf(k) + 1];
+  assert.equal(val('--base'), 'main');
+  assert.equal(val('--head'), 'qd/spec');
+  assert.ok(log.includes('arg=Tickets implemented in this Spec Run:\n\n- 01: First\n- 02: Second\n- 9: Ninth\n- 10: Third\n'), log);
+});
+
+test('SC-18: hooks, core.hooksPath, core.fsmonitor and a redirected worktree .git file never run during qd-publish', () => {
+  const r = publishRun(`
+    c=$b/home/projects/proj; m=$b/marks
+    # planted in the clone's own hooks and config
+    for h in pre-push reference-transaction pre-commit post-update update pre-receive; do
+      printf '#!/bin/sh\\ntouch %s/hook-$h\\n' "$m" > $c/.git/hooks/$h; chmod +x $c/.git/hooks/$h; done
+    mkdir -p $b/home/state/x.git-hooks
+    printf '#!/bin/sh\\ntouch %s/hookspath\\n' "$m" > $b/home/state/x.git-hooks/pre-push; chmod +x $b/home/state/x.git-hooks/pre-push
+    printf '#!/bin/sh\\ntouch %s/fsmonitor-clone\\n' "$m" > $b/fsm; chmod +x $b/fsm
+    git --git-dir $c/.git config core.hooksPath $b/home/state/x.git-hooks
+    git --git-dir $c/.git config core.fsmonitor $b/fsm
+    # a worktree whose .git file is redirected to an attacker directory holding hooks and fsmonitor
+    mkdir -p $b/attacker/hooks; cp -r $c/.git/. $b/attacker/
+    printf '#!/bin/sh\\ntouch %s/fsmonitor-attacker\\n' "$m" > $b/fsm2; chmod +x $b/fsm2
+    git --git-dir $b/attacker config core.fsmonitor $b/fsm2
+    git --git-dir $b/attacker config core.hooksPath $b/attacker/hooks
+    printf '#!/bin/sh\\ntouch %s/hook-attacker\\n' "$m" > $b/attacker/hooks/pre-push; chmod +x $b/attacker/hooks/pre-push
+    mkdir -p $b/home/wt; printf 'gitdir: %s\\n' $b/attacker > $b/home/wt/.git
+    # control: plain git with the environment overrides removed does run the plants
+    env -u GIT_CONFIG_COUNT git --git-dir $c/.git push -q origin other:other 2>/dev/null || true
+    echo "control=$(ls $m | wc -l)"; rm -f $m/*
+    # a git shim records the effective hooks and fsmonitor settings of every call qd-publish makes (push never asks git for fsmonitor)
+    real=$(command -v git); mkdir -p $b/shim
+    printf '#!/bin/bash\\n[ "$1" = --git-dir ] && for k in hooksPath fsmonitor; do echo "$k=$(%s "\${@:1:6}" config --get core.$k)" >> %s/effective 2>/dev/null; done\\nexec %s "$@"\\n' "$real" "$b" "$real" > $b/shim/git; chmod +x $b/shim/git
+    cd $b/home/wt; PATH=$b/shim:$PATH qd-publish $b/home proj qd/spec spec; echo "code=$?"; ls $m; echo "ls-done"
+    sort -u $b/effective; echo "eff-done"`, [
+    'GIT_CONFIG_COUNT=2',
+    'GIT_CONFIG_KEY_0=core.hooksPath', 'GIT_CONFIG_VALUE_0=/tmp/qdp/home/state/x.git-hooks',
+    'GIT_CONFIG_KEY_1=core.fsmonitor', 'GIT_CONFIG_VALUE_1=/tmp/qdp/fsm',
+  ]);
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  assert.match(r.out, /control=[1-9]/, 'the planted hooks do run when git is not held back');
+  assert.match(r.out, /code=0\nls-done\n/, `a planted marker exists:\n${r.out}`);
+  // Under hostile config entries and a hostile clone config, git's own answer for both keys is the override, in every call.
+  const eff = r.out.split('ls-done\n')[1].split('eff-done')[0].trim().split('\n').sort();
+  assert.deepEqual(eff, ['fsmonitor=false', 'hooksPath=/dev/null'], r.out);
+});
+
+test('qd-publish passes --git-dir, -c overrides and --no-verify, and never reads the worktree .git file', () => {
+  const src = readFileSync(join(REPO, 'quarterdeck/bin/qd-publish'), 'utf8');
+  assert.match(src, /--git-dir "\$clone\/\.git" -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false/);
+  assert.match(src, /git push --no-verify /);
+  // Run from inside a worktree whose .git file is unreadable and points nowhere: git would stop on it if it looked.
+  // A marker the attacker's config would create (through fsmonitor) stays absent.
+  const r = publishRun(`
+    mkdir -p $b/home/wt $b/attacker; printf 'gitdir: %s\\n' $b/attacker > $b/home/wt/.git; chmod 000 $b/home/wt/.git
+    printf '[core]\\n\\tfsmonitor = touch %s/read-it\\n' $b > $b/attacker/config
+    cd $b/home/wt && { git rev-parse >/dev/null 2>&1 && echo control-unexpected || echo control-git-fails; }
+    cd $b/home/wt && qd-publish $b/home proj qd/spec spec; echo "code=$?"; test ! -e $b/read-it && echo marker-absent`);
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  assert.match(r.out, /control-git-fails\n.*pull\/7\ncode=0\nmarker-absent\n$/s);
+});
+
+test('a missing branch, a failing push and a failing gh all exit non-zero and print no pull request URL', () => {
+  const r = publishRun(`
+    url=https://github.com/o/r/pull
+    run() { "$@" > $b/o 2>&1 && echo "ok" || echo "code=$?"; if grep -Eq "https?://" $b/o; then echo URLSEEN; fi; }
+    echo "missing:"; run qd-publish $b/home proj nope spec
+    echo "no-tickets:"; run qd-publish $b/home proj qd/spec nothing
+    git --git-dir $b/home/projects/proj/.git remote set-url origin $b/gone.git
+    echo "push:"; run qd-publish $b/home proj qd/spec spec
+    git --git-dir $b/home/projects/proj/.git remote set-url origin $b/origin.git
+    printf '#!/bin/sh\\nexit 1\\n' > $b/origin.git/hooks/pre-receive; chmod +x $b/origin.git/hooks/pre-receive
+    echo "rejected:"; run qd-publish $b/home proj qd/spec spec
+    rm $b/origin.git/hooks/pre-receive
+    echo "gh:"; STUB_GH_FAIL=1 run qd-publish $b/home proj qd/spec spec`);
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  const lines = r.out.trim().split('\n');
+  assert.deepEqual(lines, ['missing:', 'code=1', 'no-tickets:', 'code=1', 'push:', 'code=128', 'rejected:', 'code=1', 'gh:', 'code=1'], r.out);
+});

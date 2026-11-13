@@ -1,0 +1,62 @@
+#!/bin/bash
+# qd-publish <home> <project> <branch> <slug>
+# Pushes <branch> from the Second Mate's clone (<home>/projects/<project>) and opens a pull request against the
+# project's default branch. Prints the pull request URL, and nothing that looks like one on failure.
+#
+# Git here never runs anything a project folder holds. It works on the clone's git directory only and never reads
+# a worktree's `.git` file (a Crewmate can redirect it). Hooks and fsmonitor are forced off three ways: the
+# environment (appended after any entries already there, FirstMate's among them, because the environment wins over
+# the repository's config), `-c`, and `--no-verify`. Other config keys are not stopped (design open question 8).
+set -euo pipefail
+
+[ $# -eq 4 ] || { echo "usage: qd-publish <home> <project> <branch> <slug>" >&2; exit 2; }
+home=$(realpath -- "$1") project=$2 branch=$3 slug=$4
+# Never run git from the caller's folder: it may be a worktree whose `.git` file a Crewmate redirected.
+cd /
+
+# These become path parts and a ref name: refuse anything that could climb out of the clone or the issues folder.
+safe='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+[[ $project =~ $safe && $slug =~ $safe && $project != *..* && $slug != *..* ]] \
+  || { echo "qd-publish: project and slug must be plain names" >&2; exit 2; }
+git check-ref-format --branch "$branch" >/dev/null 2>&1 || { echo "qd-publish: not a branch name: $branch" >&2; exit 2; }
+
+clone=$home/projects/$project
+[ -d "$clone/.git" ] || { echo "qd-publish: no clone at $clone" >&2; exit 1; }
+
+# A git directory given on the command line; anything the caller's environment points elsewhere is dropped.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG_PARAMETERS GIT_EXEC_PATH
+n=${GIT_CONFIG_COUNT:-0}
+[[ $n =~ ^[0-9]+$ ]] || n=0
+export "GIT_CONFIG_KEY_$n=core.hooksPath" "GIT_CONFIG_VALUE_$n=/dev/null" \
+       "GIT_CONFIG_KEY_$((n + 1))=core.fsmonitor" "GIT_CONFIG_VALUE_$((n + 1))=false" \
+       "GIT_CONFIG_COUNT=$((n + 2))"
+git() { command git --git-dir "$clone/.git" -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
+
+ref=refs/heads/$branch
+git rev-parse --verify --quiet "$ref^{commit}" >/dev/null || { echo "qd-publish: branch $branch does not exist in $clone" >&2; exit 1; }
+
+# The ticket titles come from the branch's own commit, in number order, not from any checked-out folder.
+issues=.scratch/$slug/issues
+body=
+while IFS= read -r path; do
+  title=$(git show "$ref:$path" | head -n 1)
+  title=${title#\# }
+  body+="- $title"$'\n'
+done < <(git ls-tree --name-only "$ref" -- "$issues/" | grep -E '/[0-9]+[^/]*\.md$' | LC_ALL=C sort -V)
+[ -n "$body" ] || { echo "qd-publish: no tickets under $issues on $branch" >&2; exit 1; }
+body="Tickets implemented in this Spec Run:"$'\n\n'"$body"
+
+# The project's default branch, as origin itself reports it.
+base=$(git ls-remote --symref origin HEAD | sed -n 's#^ref: refs/heads/\(.*\)[[:space:]]HEAD$#\1#p')
+[ -n "$base" ] || { echo "qd-publish: cannot tell origin's default branch" >&2; exit 1; }
+
+git push --no-verify origin "$ref:$ref" >&2
+
+# gh gets the repository by name and runs outside any project folder.
+url=$(git remote get-url origin)
+repo=$(printf '%s' "$url" | sed -nE 's#^.*github\.com[:/]([^/]+/[^/]+)$#\1#p' | sed 's#\.git$##')
+out=$(gh pr create --repo "${repo:-$url}" --base "$base" --head "$branch" --title "Spec Run: $slug" --body "$body") \
+  || { echo "qd-publish: gh pr create failed" >&2; exit 1; }
+pr=$(printf '%s\n' "$out" | grep -Eo 'https?://[^[:space:]]+' | tail -n 1 || true)
+[ -n "$pr" ] || { echo "qd-publish: gh printed no pull request URL" >&2; exit 1; }
+echo "$pr"
