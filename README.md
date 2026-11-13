@@ -45,6 +45,16 @@ It never commits. The skill finds this repository through the symlink, so if you
 
 `quarterdeck/` builds the image that runs Herdr and the mates. Put its command on your path once (`ln -s "$PWD/quarterdeck/bin/quarterdeck" ~/.local/bin/quarterdeck`), then `quarterdeck` builds the image if needed, starts the container and attaches to Herdr. `quarterdeck stop` removes it. The work root defaults to `~/work`; set `QUARTERDECK_WORK_ROOT` to change it.
 
+The tokens come from one file you own (not root), mode 0600, at `~/.config/quarterdeck/secrets.env` or the path in `QUARTERDECK_SECRETS`, with plain `NAME=value` lines (nothing is sourced or expanded). The command mounts it read-only; it never reads it. A non-root process in the container takes only these names and hands them to Herdr's server, so processes started from Herdr's panes have them and a `docker exec` shell does not:
+
+| Name | Holds |
+|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | the Claude token |
+| `QUARTERDECK_GITHUB_TOKEN` | GitHub token for the project repository; panes get it as `GH_TOKEN` and `DEV_SETUP_GITHUB_PAT` |
+| `QUARTERDECK_EXTENSIONS_TOKEN` | read-only token for private Agent Extension repositories, used by `qd-project-up` (ticket 08); every pane holds it |
+
+A name missing or empty in the file is warned about by name when the container starts, and the command repeats the warning. The container user is uid 1000, so the file must be owned by uid 1000 to be readable there. A running container keeps the values it started with: edit the file, then `quarterdeck stop` and `quarterdeck`.
+
 ### By hand
 
 ```sh

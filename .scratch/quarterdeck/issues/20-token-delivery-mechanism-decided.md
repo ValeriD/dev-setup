@@ -19,9 +19,9 @@ Nothing beyond ticket 03 and ticket 08. This ticket only fixes their open choice
 
 ## Acceptance criteria
 
-- [ ] Ticket 03 is implemented with the mechanism in decision 1, and its acceptance criteria hold.
-- [ ] No root-owned secrets file, no root process reading a secrets file, no `--env-file`, nothing sourced as shell.
-- [ ] The file's path, the names it may hold, and the warning for a missing name are documented where the `quarterdeck` command is documented.
+- [x] Ticket 03 is implemented with the mechanism in decision 1, and its acceptance criteria hold.
+- [x] No root-owned secrets file, no root process reading a secrets file, no `--env-file`, nothing sourced as shell.
+- [x] The file's path, the names it may hold, and the warning for a missing name are documented where the `quarterdeck` command is documented.
 - [ ] Ticket 08's ADR records decision 3, with the Git gate named as the fix.
 
 ## Technical context
@@ -33,3 +33,7 @@ Nothing beyond ticket 03 and ticket 08. This ticket only fixes their open choice
 ## Blocked by
 
 - 01: Quarterdeck image and the `quarterdeck` host command
+
+## Comments
+
+2026-11-13: Ticket 03 is done to decision 1. Ticked: ticket 03 implemented; no root-owned secrets file, root reader, `--env-file` or sourcing; the path, names and missing-name warning are documented in the `quarterdeck` header and `README.md`. Still open: the ADR criterion (decision 3), which belongs to ticket 08. Ticket 20 stays open until 08 is done.

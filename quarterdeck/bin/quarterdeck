@@ -3,7 +3,17 @@
 #   attach   (default) build the image if missing, start the container if it is not running, attach to Herdr
 #   stop     remove the Quarterdeck container this command labelled, nothing else
 #   rebuild  build the image again (run `quarterdeck stop` first to use it)
-# Reads no secrets file; it passes paths and names only.
+# Token file: a file you own (not root), mode 0600, at $QUARTERDECK_SECRETS (default
+# ~/.config/quarterdeck/secrets.env), with `NAME=value` lines. This command never reads it: it checks
+# the owner and mode and mounts it read-only at /run/quarterdeck/secrets.env. Inside, a non-root process
+# (qd-server) takes only these names and gives them to Herdr's server, so Herdr's panes hold them and a
+# `docker exec` shell does not:
+#   CLAUDE_CODE_OAUTH_TOKEN         the Claude token (also read by the mates in the Quarterdeck)
+#   QUARTERDECK_GITHUB_TOKEN        GitHub token for the project repository (becomes GH_TOKEN and DEV_SETUP_GITHUB_PAT)
+#   QUARTERDECK_EXTENSIONS_TOKEN    read-only token for private Agent Extension repositories (ticket 08)
+# A missing or empty name is warned about by name when the container starts. Edit the file, then
+# `quarterdeck stop` and `quarterdeck` again: a running container keeps the values it started with.
+# The container user is uid 1000, so the file must be owned by uid 1000 to be readable there.
 # Overrides (the tests use them): QUARTERDECK_NAME, QUARTERDECK_IMAGE, QUARTERDECK_WORK_ROOT,
 # QUARTERDECK_RUN_LABEL (key=value added to everything created), QUARTERDECK_ATTACH_CMD (default: herdr).
 set -euo pipefail
@@ -21,6 +31,10 @@ extra=()
 labels=(--label "$label_key=$name")
 labels+=("${extra[@]+"${extra[@]}"}")
 
+secrets=${QUARTERDECK_SECRETS:-}
+secrets_explicit=1
+if [ -z "$secrets" ]; then secrets=$HOME/.config/quarterdeck/secrets.env; secrets_explicit=; fi
+
 die() { echo "quarterdeck: $*" >&2; exit 1; }
 command -v docker >/dev/null || die "docker not found"
 
@@ -34,8 +48,23 @@ build() {
   docker build -f "$repo/quarterdeck/Dockerfile" -t "$image" ${extra[@]+"${extra[@]}"} --build-arg "REVISION=$rev" "$repo" >&2
 }
 
+# Warnings the container printed at start (missing secret names), shown to the user; never values.
+warnings() { docker logs "$name" 2>&1 | grep '^dev-setup: WARNING' >&2 || true; }
+
 start() {
   mkdir -p "$work/quarterdeck/claude" "$work/pool"
+  # The token file is mounted, never read, here. Names only in messages.
+  local mount=()
+  if [ -e "$secrets" ]; then
+    [ -f "$secrets" ] || die "$secrets is not a regular file"
+    [ "$(stat -c %u "$secrets")" = "$(id -u)" ] || die "$secrets must be owned by you, not by another user (root)"
+    [ "$(stat -c %a "$secrets")" = 600 ] || echo "quarterdeck: WARNING: $secrets should have mode 0600 (it is $(stat -c %a "$secrets"))" >&2
+    mount=(-v "$secrets:/run/quarterdeck/secrets.env:ro")
+  elif [ -n "$secrets_explicit" ]; then
+    die "QUARTERDECK_SECRETS=$secrets does not exist"
+  else
+    echo "quarterdeck: WARNING: no token file at $secrets (set QUARTERDECK_SECRETS); starting without tokens" >&2
+  fi
   # Remove an exited container of ours so the name is free; never touches an unlabelled one.
   mine | xargs -r docker rm -f >/dev/null
   # No user-defined network: Docker's embedded DNS (127.0.0.11) works through NAT rules in the container,
@@ -47,12 +76,13 @@ start() {
     -v "$work:$work" \
     -v "$work/quarterdeck/claude:/home/node/.claude" \
     -v "$work/pool:/home/node/.treehouse" \
+    ${mount[@]+"${mount[@]}"} \
     "$image" >/dev/null
   # Ready when egress is locked and Herdr's server answers; stop waiting if the container dies.
   local i
   for i in $(seq 1 120); do
     [ -n "$(running)" ] || { docker logs "$name" >&2 || true; die "the container stopped while starting"; }
-    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && herdr --session default status server | grep -q "status: running"' && return 0
+    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && herdr --session default status server | grep -q "status: running"' && { warnings; return 0; }
     sleep 0.5
   done
   docker logs "$name" >&2 || true

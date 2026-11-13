@@ -1,6 +1,7 @@
 #!/bin/bash
 # Quarterdeck container entrypoint. Root only long enough to lock egress, then runs
-# Herdr's server as `node`. Seeding the First Mate (ticket 05) and secrets (ticket 03) come later.
+# Herdr's server as `node` through qd-server, which reads the user's token file by name (root never reads it).
+# Seeding the First Mate comes with ticket 05.
 set -euo pipefail
 
 [ "$(id -u)" = 0 ] || { echo "qd-entry: must start as root" >&2; exit 1; }
@@ -15,7 +16,7 @@ sh /usr/local/share/egress/start.sh
 
 drop() { setpriv --reuid node --regid node --init-groups env HOME=/home/node USER=node LOGNAME=node "$@"; }
 
-drop bash -c 'cd /home/node && exec herdr --session default server' </dev/null &
+drop /opt/qd/bin/qd-server </dev/null &
 server=$!
 trap 'kill -TERM "$server" 2>/dev/null || true' TERM INT
 # The container lives as long as Herdr's server does. A trapped signal interrupts `wait`, so wait again

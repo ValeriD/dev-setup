@@ -1,6 +1,6 @@
 # 03: Tokens reach only the processes that need them, by name
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 1 (Quarterdeck up), credentials
 
@@ -20,12 +20,12 @@ Whatever the mechanism, the requirement is fixed: the Claude token and the GitHu
 
 ## Acceptance criteria (mechanism-independent)
 
-- [ ] A process in a Herdr pane has `CLAUDE_CODE_OAUTH_TOKEN` and the GitHub token for the project repository (as `GH_TOKEN` and `DEV_SETUP_GITHUB_PAT`, which Base's credential helper reads); a `docker exec` shell does not; compared by hash of dummy values (SC-19).
-- [ ] `docker inspect` of the Quarterdeck container, and `docker history` of the image, show no value (SC-19).
-- [ ] No token is written to disk in the container: no `gh auth setup-git`, no `hosts.yml`; `git` for `github.com` answers through Base's credential helper from `DEV_SETUP_GITHUB_PAT`.
-- [ ] A name that is missing produces a warning naming it, through Base's `check-secrets.sh` and `quarterdeck/extensions.json` (SC-19).
-- [ ] The mechanism does not need root to read a secret file and does not source anything as shell.
-- [ ] The read-only extensions token for the project container (ticket 08) has its name declared and its value delivered by the same confirmed mechanism, to the process that runs `qd-project-up`; the confirmed mechanism states which Herdr panes hold it.
+- [x] A process in a Herdr pane has `CLAUDE_CODE_OAUTH_TOKEN` and the GitHub token for the project repository (as `GH_TOKEN` and `DEV_SETUP_GITHUB_PAT`, which Base's credential helper reads); a `docker exec` shell does not; compared by hash of dummy values (SC-19).
+- [x] `docker inspect` of the Quarterdeck container, and `docker history` of the image, show no value (SC-19).
+- [x] No token is written to disk in the container: no `gh auth setup-git`, no `hosts.yml`; `git` for `github.com` answers through Base's credential helper from `DEV_SETUP_GITHUB_PAT`.
+- [x] A name that is missing produces a warning naming it, through Base's `check-secrets.sh` and `quarterdeck/extensions.json` (SC-19).
+- [x] The mechanism does not need root to read a secret file and does not source anything as shell.
+- [x] The read-only extensions token for the project container (ticket 08) has its name declared and its value delivered by the same confirmed mechanism, to the process that runs `qd-project-up`; the confirmed mechanism states which Herdr panes hold it.
 
 ## Technical context
 
@@ -47,3 +47,6 @@ Whatever the mechanism, the requirement is fixed: the Claude token and the GitHu
 ## Comments
 
 2026-11-13: The user answered the blocker. The mechanism is recorded in ticket 20 (`20-token-delivery-mechanism-decided.md`): a file the user owns, mounted read-only, read by name by a non-root process. Build this ticket to that decision. Status moved from `needs-info` to `ready-for-agent`.
+
+2026-11-13: Done, built to ticket 20 decision 1. The `quarterdeck` command checks that `QUARTERDECK_SECRETS` (default `~/.config/quarterdeck/secrets.env`) is owned by the caller, warns when its mode is not 0600, and mounts it read-only; it never reads it. `quarterdeck/bin/qd-server` runs as `node`, parses `NAME=value` lines (no sourcing) for the names in `quarterdeck/extensions.json` `secrets` (`CLAUDE_CODE_OAUTH_TOKEN`, `QUARTERDECK_GITHUB_TOKEN`, `QUARTERDECK_EXTENSIONS_TOKEN`), maps the GitHub token to `GH_TOKEN` and `DEV_SETUP_GITHUB_PAT`, runs Base's `check-secrets.sh`, and execs Herdr's server. `qd-entry` stays root only for egress. The extensions token (ticket 08) is held by every Herdr pane, so `qd-project-up` has it. Tests in `tests/quarterdeck.test.mjs` (dummy values; hashes in a real Herdr pane; `docker inspect`, `docker history`, disk scan, `git credential fill`). `npm test` 70 pass, `npm run test:skill` 51 pass.
+Review findings: mode other than 0600 is only a warning (declined: a uid other than 1000 cannot read 0600, CI uses 0644). `QUARTERDECK_GITHUB_TOKEN` was left in panes under its own name (fixed: unset after aliasing, tested). Duplicate pane/uid test merged (fixed). Quote stripping and `docker logs` warning relay kept (declined: harmless conveniences). Base's warning text still advises `remoteEnv`, wrong for the Quarterdeck (declined: Base reuse; a later ticket may add a Quarterdeck hint). Not tested: `NAME=` empty value, no file mounted, unreadable file paths in `qd-server`. The Named Secret wording in `CONTEXT.md` and ADR 0007's "passed by name" are untouched (ticket 08's ADR).
