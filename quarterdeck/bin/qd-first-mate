@@ -1,0 +1,59 @@
+#!/bin/bash
+# Runs as `node`, started by qd-entry once Herdr's server is up. Seeds the First Mate's home on first
+# start and opens the First Mate's Herdr workspace. Nothing already in the home is overwritten.
+set -euo pipefail
+# Runs in the background, so say why it stopped: the host command only sees the workspace never appear.
+trap 'echo "qd-first-mate: failed at line $LINENO" >&2' ERR
+
+work=${QD_WORK_ROOT:?QD_WORK_ROOT is not set}
+home=${QD_FIRST_MATE_HOME:-$work/fleet/firstmate}
+src=${QD_FIRSTMATE_SRC:-/opt/firstmate}
+fleet=${QD_FLEET_DIR:-/opt/qd/fleet}
+label=firstmate
+cmd='claude --model opus --permission-mode auto'
+herdr=(herdr --session default)
+
+# Herdr's server answers before the workspace can be created.
+up=
+for _ in $(seq 1 120); do
+  if "${herdr[@]}" status server 2>/dev/null | grep -q 'status: running'; then up=1; break; fi
+  sleep 0.5
+done
+[ -n "$up" ] || { echo "qd-first-mate: Herdr's server did not answer in 60 seconds" >&2; exit 1; }
+
+# The home is a checkout of the pinned FirstMate commit. A home that exists is never touched.
+if [ ! -e "$home/.git" ]; then
+  # A copy, not a clone: /opt/firstmate is root-owned, and git refuses to read it as node (the dubious-ownership
+  # check also runs in the child process of a local clone, where no configuration can reach). The copy is already
+  # checked out at the pinned commit. It is built beside the home and moved in, so a failure leaves no half home.
+  mkdir -p "$(dirname "$home")"
+  tmp=$home.seeding.$$
+  rm -rf "$tmp"
+  cp -a "$src" "$tmp"
+  # Updates come from the fork, not from the read-only copy in the image.
+  git -C "$tmp" remote add origin https://github.com/ValeriD/firstmate
+  rmdir "$home" 2>/dev/null || true
+  mv "$tmp" "$home"
+fi
+
+# Shipped configuration: only files that are missing, so a hand edit survives every later start.
+mkdir -p "$home/config"
+for f in "$fleet"/config/*; do
+  dest=$home/config/$(basename "$f")
+  [ -e "$dest" ] || cp "$f" "$dest"
+done
+
+# Claude's first run for the mates (the launcher ticket later owns this for project containers; the Quarterdeck's own config is written here): onboarding done and the home trusted, so no dialog waits for a person.
+cfg=${CLAUDE_CONFIG_DIR:?CLAUDE_CONFIG_DIR is not set}/.claude.json
+mkdir -p "$(dirname "$cfg")"
+[ -s "$cfg" ] || echo '{}' >"$cfg"
+new=$(mktemp "$cfg.XXXXXX")
+jq --arg p "$home" '.hasCompletedOnboarding = true | .projects[$p].hasTrustDialogAccepted = true' "$cfg" >"$new" && mv "$new" "$cfg"
+
+# One First Mate workspace, however many times the container starts.
+if "${herdr[@]}" workspace list | jq -e --arg l "$label" '[.. | objects | select(.label? == $l)] | length > 0' >/dev/null; then
+  exit 0
+fi
+ws=$("${herdr[@]}" workspace create --no-focus --cwd "$home" --label "$label")
+pane=$(jq -r '.result.root_pane.pane_id' <<<"$ws")
+"${herdr[@]}" pane run "$pane" "$cmd"

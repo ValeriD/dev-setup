@@ -112,7 +112,7 @@ start() {
     --user root --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --cap-add DAC_READ_SEARCH \
     --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges \
     -v "$volume:/run/docker-proxy" \
-    -v "$work:$work" \
+    -v "$work:$work" -e "QD_WORK_ROOT=$work" \
     -v "$work/quarterdeck/claude:/home/node/.claude" \
     -v "$work/pool:/home/node/.treehouse" \
     ${mount[@]+"${mount[@]}"} \
@@ -121,7 +121,7 @@ start() {
   local i
   for i in $(seq 1 120); do
     [ -n "$(running)" ] || { docker logs "$name" >&2 || true; die "the container stopped while starting"; }
-    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && docker version >/dev/null 2>&1 && herdr --session default status server | grep -q "status: running"' && { warnings; return 0; }
+    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && docker version >/dev/null 2>&1 && herdr --session default status server | grep -q "status: running" && herdr --session default workspace list | grep -Eq "\"label\": *\"firstmate\""' && { warnings; return 0; }
     sleep 0.5
   done
   docker logs "$name" >&2 || true

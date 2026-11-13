@@ -5,7 +5,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { REPO, RUN_LABEL, run, projectDir } from './lib.mjs';
@@ -16,6 +16,7 @@ const name = `qd-test-${id}`;
 const image = `dev-setup-quarterdeck:test-${id}`;
 const stranger = `qd-test-stranger-${id}`; // unlabelled by Quarterdeck, labelled by the run for teardown
 const closedProbe = `qd-test-failclosed-${id}`;
+const stubImage = `dev-setup-quarterdeck:test-stub-${id}`; // the Quarterdeck image with `claude` replaced by a stub
 const proxyName = `${name}-docker-proxy`;
 const proxyVolume = `${name}-docker`;
 const lifecycle = `qd-test-lifecycle-${id}`; // created through the proxy, labelled by the run for teardown
@@ -54,6 +55,11 @@ after(() => {
   for (const c of run('docker', ['ps', '-aq', '--filter', `label=${runLabel}`, '--filter', `name=${name}`]).out.split('\n').filter(Boolean)) {
     run('docker', ['rm', '-fv', c]);
   }
+  // Files node (uid 1000) wrote into the work root belong to another user when the host uid is not 1000: remove them from a labelled root container.
+  if (process.getuid?.() !== 1000) {
+    run('docker', ['run', '--rm', '--label', runLabel, '--user', 'root', '--entrypoint', 'rm', '-v', `${work}:${work}`, image, '-rf', join(work, 'fleet')]);
+  }
+  run('docker', ['rmi', stubImage]);
   run('docker', ['rmi', image]);
   rmSync(work, { recursive: true, force: true });
   rmSync(join(secretsFile, '..'), { recursive: true, force: true });
@@ -302,4 +308,97 @@ test('quarterdeck stop removes the labelled container and nothing else (SC-01, n
   assert.equal(run('docker', ['inspect', stranger, '--format', '{{.State.Running}}']).out.trim(), 'true', 'the unlabelled container survives');
   assert.equal(run('docker', ['image', 'inspect', image]).code, 0, 'stop keeps the image');
   assert.equal(quarterdeck('stop').code, 0, 'stop with nothing running is not an error');
+});
+
+// Ticket 05: the First Mate's home and tab. A derived image replaces the real `claude` (first on PATH) with a stub
+// that records its arguments and working directory, so no real session starts and no subscription is spent.
+const home = () => join(work, 'fleet/firstmate');
+const stubQuarterdeck = (...args) =>
+  run(COMMAND, args, {
+    env: {
+      ...process.env,
+      QUARTERDECK_NAME: name,
+      QUARTERDECK_IMAGE: stubImage,
+      QUARTERDECK_WORK_ROOT: work,
+      QUARTERDECK_RUN_LABEL: runLabel,
+      QUARTERDECK_SECRETS: secretsFile,
+      QUARTERDECK_ATTACH_CMD: 'herdr --session default status server',
+    },
+  });
+const firstMateWorkspaces = () => {
+  const r = inside('herdr --session default workspace list');
+  assert.equal(r.code, 0, r.err);
+  return JSON.stringify(JSON.parse(r.out)).match(/"label":"firstmate"/g)?.length ?? 0;
+};
+const stubRecord = () => {
+  for (let i = 0; i < 60; i++) {
+    const r = inside('cat /tmp/stub-claude.out 2>/dev/null');
+    if (r.code === 0 && r.out.includes('cwd=')) return r.out;
+    run('sleep', ['0.5']);
+  }
+  assert.fail('the stub claude never ran in the First Mate pane');
+};
+
+test('First Mate: the first start seeds the home at the pinned commit and opens a pane running claude on opus in auto mode (SC-02)', () => {
+  const b = run('docker', ['build', '-t', stubImage, '--label', runLabel, '-'], {
+    input: `FROM ${image}\nUSER root\nRUN printf '#!/bin/sh\\n{ echo "cwd=$PWD"; for a in "$@"; do echo "arg=$a"; done; } > /tmp/stub-claude.out\\nexec sleep 3600\\n' > /opt/qd/bin/claude && chmod 755 /opt/qd/bin/claude\n`,
+  });
+  assert.equal(b.code, 0, `${b.out}\n${b.err}`);
+  const r = stubQuarterdeck();
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  assert.equal(firstMateWorkspaces(), 1);
+  const rec = stubRecord().trim().split('\n');
+  assert.deepEqual(rec, [`cwd=${home()}`, 'arg=--model', 'arg=opus', 'arg=--permission-mode', 'arg=auto']);
+  // The home is the pinned commit; nothing in it is tracked-modified; only the four ignored folders are untracked-ignored.
+  const pin = dockerfile.match(/^ARG FIRSTMATE_COMMIT=(\w+)/m)[1];
+  assert.equal(run('git', ['-C', home(), 'rev-parse', 'HEAD']).out.trim(), pin);
+  assert.equal(run('git', ['-C', home(), 'status', '--porcelain']).out.trim(), '');
+  const ignored = run('git', ['-C', home(), 'status', '--porcelain', '--ignored']).out.trim().split('\n').map((l) => l.slice(3)).sort();
+  assert.deepEqual(ignored.filter((p) => !['config/', 'data/', 'state/', 'projects/'].includes(p)), [], `unexpected entries: ${ignored}`);
+});
+
+test('First Mate: the shipped configuration is in the home and no dispatch variable is in .env (SC-06)', () => {
+  const c = (f) => readFileSync(join(home(), 'config', f), 'utf8');
+  assert.equal(c('backend').trim(), 'herdr');
+  assert.equal(c('claude-permission-mode').trim(), 'auto');
+  assert.equal(c('secondmate-harness').trim(), 'claude sonnet');
+  const d = JSON.parse(c('crew-dispatch.json'));
+  assert.equal(d.shared_quota, true);
+  assert.deepEqual(d.rules.map((r) => [r.when, r.use]), [['the ticket is about skills, prompts or agent tools', { harness: 'claude', model: 'opus' }]]);
+  assert.deepEqual(d.default, [{ harness: 'claude', model: 'sonnet' }]);
+  assert.equal(existsSync(join(home(), '.env')) && /FM_DISPATCH_/.test(readFileSync(join(home(), '.env'), 'utf8')), false);
+});
+
+test('First Mate: Claude is trusted for the home and onboarding is done, so no dialog waits (SC-10)', () => {
+  const j = JSON.parse(readFileSync(join(work, 'quarterdeck/claude/.claude.json'), 'utf8'));
+  assert.equal(j.hasCompletedOnboarding, true);
+  assert.equal(j.projects[home()].hasTrustDialogAccepted, true);
+});
+
+test('First Mate: a second run of the seeding step opens no second tab; a restart keeps hand-edited files and opens exactly one tab', () => {
+  okInside('/opt/qd/bin/qd-first-mate');
+  assert.equal(firstMateWorkspaces(), 1, 'running the step again while the tab exists adds nothing');
+  writeFileSync(join(home(), 'config/claude-permission-mode'), 'default\n');
+  writeFileSync(join(home(), 'config/crew-dispatch.json'), '{"shared_quota":false}\n');
+  run('rm', ['-f', join(work, 'quarterdeck/claude/.claude.json')]);
+  assert.equal(stubQuarterdeck('stop').code, 0);
+  const r = stubQuarterdeck();
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  assert.equal(firstMateWorkspaces(), 1);
+  assert.equal(readFileSync(join(home(), 'config/claude-permission-mode'), 'utf8'), 'default\n');
+  assert.equal(readFileSync(join(home(), 'config/crew-dispatch.json'), 'utf8'), '{"shared_quota":false}\n');
+  assert.equal(readFileSync(join(home(), 'config/backend'), 'utf8').trim(), 'herdr', 'a file that was not edited is still there');
+  assert.equal(run('git', ['-C', home(), 'status', '--porcelain']).out.trim(), '');
+  assert.equal(stubQuarterdeck('stop').code, 0);
+});
+
+test('the checklist has the SC-02 and SC-10 rows with a setup, what to look at and what a pass is', () => {
+  const t = readFileSync(join(REPO, 'quarterdeck/CHECKLIST.md'), 'utf8');
+  for (const sc of ['SC-02', 'SC-10']) {
+    const row = t.split('\n').find((l) => l.startsWith('|') && l.includes(sc));
+    assert.ok(row, `${sc} row`);
+    const cells = row.split('|').slice(1, -1).map((c) => c.trim());
+    assert.equal(cells.length, 4, `${sc}: scenario, setup, look at, pass`);
+    assert.ok(cells.every((c) => c.length > 20), `${sc}: every column says something`);
+  }
 });

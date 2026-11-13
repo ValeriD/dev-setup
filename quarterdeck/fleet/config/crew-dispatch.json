@@ -1,0 +1,12 @@
+{
+  "shared_quota": true,
+  "rules": [
+    {
+      "when": "the ticket is about skills, prompts or agent tools",
+      "use": { "harness": "claude", "model": "opus" }
+    }
+  ],
+  "default": [
+    { "harness": "claude", "model": "sonnet" }
+  ]
+}
