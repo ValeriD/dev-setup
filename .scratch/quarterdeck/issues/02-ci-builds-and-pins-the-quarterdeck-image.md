@@ -1,6 +1,6 @@
 # 02: CI builds the Quarterdeck image and keeps its pins in step
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 1 (support), "CI" in the Validation plan
 
@@ -10,11 +10,11 @@ A change under `quarterdeck/` runs the acceptance job, which builds the Quarterd
 
 ## Acceptance criteria
 
-- [ ] The `changes` job in `.github/workflows/ci.yml` has a `quarterdeck` output that is true when `quarterdeck/` changed, and the `acceptance` job runs when that output is true.
-- [ ] The `acceptance` job builds the Quarterdeck image after the node image when `quarterdeck` or `tests` changed, and no publish job or step pushes it.
-- [ ] `scripts/check-pins.mjs` covers `quarterdeck/Dockerfile` (base image pinned to a digest) and fails when its base digest or Claude version differs from `variants/node/Dockerfile`; a test shows both failures.
-- [ ] `renovate.json` and `tests/renovate.test.mjs` cover the CLI pin inside `quarterdeck/Dockerfile`, so one Renovate PR updates it with the other copies and the repo-wide untracked-pin scan passes.
-- [ ] `skills/dev-container/scripts/test/helper.test.mjs`'s agreement check includes the Quarterdeck Dockerfile's CLI version.
+- [x] The `changes` job in `.github/workflows/ci.yml` has a `quarterdeck` output that is true when `quarterdeck/` changed, and the `acceptance` job runs when that output is true.
+- [x] The `acceptance` job builds the Quarterdeck image after the node image when `quarterdeck` or `tests` changed, and no publish job or step pushes it.
+- [x] `scripts/check-pins.mjs` covers `quarterdeck/Dockerfile` (base image pinned to a digest) and fails when its base digest or Claude version differs from `variants/node/Dockerfile`; a test shows both failures.
+- [x] `renovate.json` and `tests/renovate.test.mjs` cover the CLI pin inside `quarterdeck/Dockerfile`, so one Renovate PR updates it with the other copies and the repo-wide untracked-pin scan passes.
+- [x] `skills/dev-container/scripts/test/helper.test.mjs`'s agreement check includes the Quarterdeck Dockerfile's CLI version.
 
 ## Technical context
 
@@ -31,3 +31,11 @@ A change under `quarterdeck/` runs the acceptance job, which builds the Quarterd
 ## Blocked by
 
 - 01: Quarterdeck image and the `quarterdeck` host command
+
+## Comments
+
+Resolution. Built: `quarterdeck` output in `changes`; the acceptance job builds `dev-setup-quarterdeck:ci` (local, never pushed) after the node image when `quarterdeck`, `tests` or `image` changed; `check-pins.mjs` scans `quarterdeck/Dockerfile` and `findDrift` compares base digest, Claude Code and pnpm pins with the Node Variant's; Renovate matches the CLI, Claude and pnpm ARGs in `quarterdeck/Dockerfile`; the helper agreement test includes the Quarterdeck CLI version. The Quarterdeck test opens its own work-root folders when the host uid is not 1000 (CI runners are 1001). Not run: the workflow itself (read only). `npm test` 66 pass; `npm run test:skill` 51 pass; renovate-config-validator --strict ok.
+
+Review: Design 1 (image-only changes to base/installer/extensions skipped the Quarterdeck build) fixed by adding `image` to the build condition. Standards 1-3 (ARCHITECTURE.md rows) fixed: stale CLI-pin sentence updated, rows shortened. Standards smell on names `a`/`b` fixed. Redundant test lines (literal FROM, message-format assertion) removed. Declined: removing the helper agreement assertion (ticket criterion 5 requires it); dedup of `arg` helper (one-line, in a different module); pnpm drift check kept (the Dockerfile says it shares that pin); multi-stage FROM concern (single-stage today).
+
+Later tickets: the uid-1000 limit is a real host limitation of the work root (rootless Docker / other uid), still unsolved in the product.

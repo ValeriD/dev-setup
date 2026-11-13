@@ -2,7 +2,7 @@
 # (ADR 0006): no devcontainer.json, no Template, never published.
 # Build context is the repository root:  docker build -f quarterdeck/Dockerfile .
 
-# Same pinned base image as variants/node/Dockerfile. Nothing enforces that yet (CI ticket).
+# Same pinned base image as variants/node/Dockerfile. scripts/check-pins.mjs fails when the two differ.
 FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205
 
 # Same Claude Code and pnpm pins as the Node Variant.

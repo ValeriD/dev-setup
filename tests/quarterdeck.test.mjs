@@ -5,7 +5,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO, RUN_LABEL, run, projectDir } from './lib.mjs';
 
@@ -22,6 +22,14 @@ const arg = (n) => dockerfile.match(new RegExp(`^ARG ${n}=(\\S+)`, 'm'))[1];
 let work;
 before(() => {
   work = projectDir('qd-work-');
+  // `node` in the container is uid 1000. On a host or CI runner with another uid it cannot write folders
+  // the host user created, so open the test's own folders (the command's mkdir -p then finds them).
+  if (process.getuid?.() !== 1000) {
+    for (const d of [work, join(work, 'quarterdeck'), join(work, 'quarterdeck/claude'), join(work, 'pool')]) {
+      mkdirSync(d, { recursive: true });
+      chmodSync(d, 0o777);
+    }
+  }
 });
 after(() => {
   for (const n of [name, stranger, closedProbe]) run('docker', ['rm', '-fv', n]);

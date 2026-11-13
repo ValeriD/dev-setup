@@ -8,7 +8,7 @@
     {
       "description": "Claude Code version pinned as a Dockerfile ARG",
       "customType": "regex",
-      "managerFilePatterns": ["/^variants/node/Dockerfile$/"],
+      "managerFilePatterns": ["/^(variants/node|quarterdeck)/Dockerfile$/"],
       "matchStrings": ["ARG CLAUDE_CODE_VERSION=(?<currentValue>\\S+)"],
       "datasourceTemplate": "npm",
       "depNameTemplate": "@anthropic-ai/claude-code"
@@ -24,7 +24,7 @@
     {
       "description": "pnpm version pinned as a Dockerfile ARG",
       "customType": "regex",
-      "managerFilePatterns": ["/^variants/node/Dockerfile$/"],
+      "managerFilePatterns": ["/^(variants/node|quarterdeck)/Dockerfile$/"],
       "matchStrings": ["ARG PNPM_VERSION=(?<currentValue>\\S+)"],
       "datasourceTemplate": "npm",
       "depNameTemplate": "pnpm"
@@ -38,16 +38,18 @@
       "depNameTemplate": "pnpm"
     },
     {
-      "description": "devcontainers CLI version pinned in the workflow env, the acceptance suite, the dev-container skill helper and the README",
+      "description": "devcontainers CLI version pinned in the workflow env, the acceptance suite, the dev-container skill helper, the Quarterdeck Dockerfile and the README",
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/.+\\.ya?ml$/",
         "/^tests/lib\\.mjs$/",
         "/^skills/dev-container/scripts/commands\\.mjs$/",
+        "/^quarterdeck/Dockerfile$/",
         "/^README\\.md$/"
       ],
       "matchStrings": [
         "CLI_VERSION: (?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "ARG DEVCONTAINER_CLI_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)",
         "@devcontainers/cli@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
       ],
       "datasourceTemplate": "npm",

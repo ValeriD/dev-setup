@@ -28,12 +28,27 @@ export function findUnpinned(file, text) {
   return bad;
 }
 
+/**
+ * The Quarterdeck Dockerfile repeats the Node Variant's base digest and Claude Code and pnpm pins.
+ * @returns {string[]} one message per pin that differs
+ */
+export function findDrift(nodeText, quarterdeckText) {
+  const base = (t) => t.match(/^FROM\s+(?:--\S+\s+)*(\S+)/im)?.[1];
+  const arg = (t, n) => t.match(new RegExp(`^ARG ${n}=(\\S+)`, 'm'))?.[1];
+  const pairs = [['base image', base], ['CLAUDE_CODE_VERSION', (t) => arg(t, 'CLAUDE_CODE_VERSION')], ['PNPM_VERSION', (t) => arg(t, 'PNPM_VERSION')]];
+  return pairs.flatMap(([what, get]) => {
+    const [want, have] = [get(nodeText), get(quarterdeckText)];
+    return want && want === have ? [] : [`quarterdeck/Dockerfile: ${what} is ${have}, variants/node/Dockerfile has ${want}`];
+  });
+}
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const wf = join(root, '.github/workflows');
   const files = readdirSync(wf).filter((f) => /\.ya?ml$/.test(f)).map((f) => join('.github/workflows', f));
-  files.push('variants/node/Dockerfile');
+  files.push('variants/node/Dockerfile', 'quarterdeck/Dockerfile');
   const bad = files.flatMap((f) => findUnpinned(f, readFileSync(join(root, f), 'utf8')));
+  bad.push(...findDrift(readFileSync(join(root, 'variants/node/Dockerfile'), 'utf8'), readFileSync(join(root, 'quarterdeck/Dockerfile'), 'utf8')));
   bad.forEach((m) => console.error(m));
   if (bad.length) process.exit(1);
   console.log(`pins ok (${files.length} files)`);
