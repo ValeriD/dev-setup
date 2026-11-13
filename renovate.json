@@ -63,6 +63,13 @@
       "datasourceTemplate": "docker"
     },
     {
+      "description": "The Quarterdeck's Docker socket proxy image (tag plus digest) in quarterdeck/docker-proxy.conf",
+      "customType": "regex",
+      "managerFilePatterns": ["/^quarterdeck/docker-proxy\\.conf$/"],
+      "matchStrings": ["PROXY_IMAGE=(?<depName>[^:\\s]+/[^:\\s]+):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})"],
+      "datasourceTemplate": "docker"
+    },
+    {
       "description": "Extension Manifest Pinned Refs: a github source or plugin marketplace followed by its 40-char sha",
       "customType": "regex",
       "managerFilePatterns": ["/^extensions/[^/]+\\.json$/", "/^variants/[^/]+/extensions\\.json$/"],

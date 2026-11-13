@@ -36,6 +36,16 @@ test('regex managers match the Quarterdeck Dockerfile ARG pins', () => {
   assert.ok(!config.customManagers.some((x) => x.depNameTemplate === '@openai/codex' && patternMatches(x, 'quarterdeck/Dockerfile')));
 });
 
+test('a regex manager updates the Quarterdeck proxy image tag and digest together', () => {
+  const m = config.customManagers.find((x) => patternMatches(x, 'quarterdeck/docker-proxy.conf'));
+  assert.ok(m);
+  assert.equal(m.datasourceTemplate, 'docker');
+  const [hit] = run(m, read('quarterdeck/docker-proxy.conf'));
+  assert.equal(hit.depName, 'wollomatic/socket-proxy');
+  assert.match(hit.currentValue, /^\d+\.\d+\.\d+$/);
+  assert.match(hit.currentDigest, /^sha256:[0-9a-f]{64}$/);
+});
+
 test('regex managers match the workflow pins', () => {
   const ci = read('.github/workflows/ci.yml');
   const wf = '.github/workflows/ci.yml';

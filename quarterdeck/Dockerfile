@@ -95,6 +95,7 @@ RUN mkdir -p /opt/qd/empty/.devcontainer /home/node/.claude /home/node/.treehous
  && ! find / -xdev -type f \( -perm -4000 -o -perm -2000 \) | grep -q .
 
 ENV PATH=/opt/qd/bin:$PATH \
+    DOCKER_HOST=unix:///run/docker-proxy/docker.sock \
     CLAUDE_CONFIG_DIR=/home/node/.claude \
     DISABLE_AUTOUPDATER=1 \
     DEV_SETUP_WORKSPACE=/opt/qd/empty \

@@ -1,7 +1,7 @@
 #!/bin/bash
 # quarterdeck [attach|stop|rebuild]
 #   attach   (default) build the image if missing, start the container if it is not running, attach to Herdr
-#   stop     remove the Quarterdeck container this command labelled, nothing else
+#   stop     remove the Quarterdeck container, its Docker proxy and the proxy's volume that this command labelled, nothing else
 #   rebuild  build the image again (run `quarterdeck stop` first to use it)
 # Token file: a file you own (not root), mode 0600, at $QUARTERDECK_SECRETS (default
 # ~/.config/quarterdeck/secrets.env), with `NAME=value` lines. This command never reads it: it checks
@@ -15,7 +15,12 @@
 # `quarterdeck stop` and `quarterdeck` again: a running container keeps the values it started with.
 # The container user is uid 1000, so the file must be owned by uid 1000 to be readable there.
 # Overrides (the tests use them): QUARTERDECK_NAME, QUARTERDECK_IMAGE, QUARTERDECK_WORK_ROOT,
-# QUARTERDECK_RUN_LABEL (key=value added to everything created), QUARTERDECK_ATTACH_CMD (default: herdr).
+# QUARTERDECK_RUN_LABEL (key=value added to everything created), QUARTERDECK_ATTACH_CMD (default: herdr),
+# QUARTERDECK_DOCKER_SOCKET (the host socket the proxy mounts read-only, default /var/run/docker.sock).
+# Docker: the Quarterdeck never sees the host socket. A socket proxy (quarterdeck/docker-proxy.conf: pin and
+# allowed list) mounts it read-only and listens on a Unix socket in the volume <name>-docker, which the
+# Quarterdeck mounts at /run/docker-proxy (DOCKER_HOST is set in its image). A Unix socket is not network
+# traffic, so Base's egress rules do not apply to it and did not change.
 set -euo pipefail
 
 here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
@@ -30,6 +35,15 @@ extra=()
 # container started from it, and `stop` would remove those too.
 labels=(--label "$label_key=$name")
 labels+=("${extra[@]+"${extra[@]}"}")
+# The proxy and its volume carry their own key (so `mine` and `running` mean the Quarterdeck only) and the run label.
+proxy=$name-docker-proxy
+volume=$name-docker
+proxy_label_key=io.github.valerid.quarterdeck.proxy
+proxy_labels=(--label "$proxy_label_key=$name")
+proxy_labels+=("${extra[@]+"${extra[@]}"}")
+host_socket=${QUARTERDECK_DOCKER_SOCKET:-/var/run/docker.sock}
+# shellcheck source=quarterdeck/docker-proxy.conf
+. "$here/../docker-proxy.conf"
 
 secrets=${QUARTERDECK_SECRETS:-}
 secrets_explicit=1
@@ -46,6 +60,29 @@ build() {
   local rev; rev=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
   echo "quarterdeck: building $image" >&2
   docker build -f "$repo/quarterdeck/Dockerfile" -t "$image" ${extra[@]+"${extra[@]}"} --build-arg "REVISION=$rev" "$repo" >&2
+}
+
+# The proxy container and volume this command labelled for this name. The volume is removed only if it carries the label.
+proxies() { docker ps -aq --filter "label=$proxy_label_key=$name" 2>/dev/null; }
+proxy_down() {
+  proxies | xargs -r docker rm -f >/dev/null
+  if [ -n "$(docker volume ls -q --filter "label=$proxy_label_key=$name" --filter "name=^$volume\$")" ]; then
+    docker volume rm "$volume" >/dev/null
+  fi
+}
+# File mode 438 is decimal for 0666. A fresh volume each start, so no stale socket. Root with every capability dropped: it only needs the host
+# socket's group (read-only mount) and to create the socket, which is mode 0666 inside the volume that only
+# the Quarterdeck mounts.
+proxy_up() {
+  proxy_down
+  [ -S "$host_socket" ] || die "$host_socket is not a Docker socket (set QUARTERDECK_DOCKER_SOCKET)"
+  docker volume create "${proxy_labels[@]}" "$volume" >/dev/null
+  docker run -d --name "$proxy" "${proxy_labels[@]}" --user 0:0 --group-add "$(stat -c %g "$host_socket")" \
+    --cap-drop ALL --security-opt no-new-privileges --read-only --restart no \
+    -v "$host_socket:/var/run/docker.sock:ro" -v "$volume:/run/docker-proxy" \
+    "$PROXY_IMAGE" \
+    -socketpath /var/run/docker.sock -proxysocketendpoint /run/docker-proxy/docker.sock -proxysocketendpointfilemode 438 \
+    -allowGET "$ALLOW_GET" -allowPOST "$ALLOW_POST" -allowDELETE "$ALLOW_DELETE" >/dev/null
 }
 
 # Warnings the container printed at start (missing secret names), shown to the user; never values.
@@ -67,12 +104,14 @@ start() {
   fi
   # Remove an exited container of ours so the name is free; never touches an unlabelled one.
   mine | xargs -r docker rm -f >/dev/null
+  proxy_up
   # No user-defined network: Docker's embedded DNS (127.0.0.11) works through NAT rules in the container,
   # and Base's egress ruleset begins with `flush ruleset`, which removes them. On the default bridge the
-  # resolver is a real address and works. The Docker proxy (ticket 04) talks over a socket, not a network.
+  # resolver is a real address and works. The Docker proxy talks over a socket in a volume, not a network.
   docker run -d --init --name "$name" "${labels[@]}" --hostname quarterdeck \
     --user root --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --cap-add DAC_READ_SEARCH \
     --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges \
+    -v "$volume:/run/docker-proxy" \
     -v "$work:$work" \
     -v "$work/quarterdeck/claude:/home/node/.claude" \
     -v "$work/pool:/home/node/.treehouse" \
@@ -82,7 +121,7 @@ start() {
   local i
   for i in $(seq 1 120); do
     [ -n "$(running)" ] || { docker logs "$name" >&2 || true; die "the container stopped while starting"; }
-    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && herdr --session default status server | grep -q "status: running"' && { warnings; return 0; }
+    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && docker version >/dev/null 2>&1 && herdr --session default status server | grep -q "status: running"' && { warnings; return 0; }
     sleep 0.5
   done
   docker logs "$name" >&2 || true
@@ -100,6 +139,7 @@ attach() {
 
 stop() {
   mine | xargs -r docker rm -f >/dev/null
+  proxy_down
 }
 
 case "${1:-attach}" in

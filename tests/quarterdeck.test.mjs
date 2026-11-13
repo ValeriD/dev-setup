@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execSync } from 'node:child_process';
 import { REPO, RUN_LABEL, run, projectDir } from './lib.mjs';
 
 const id = process.env.DEV_SETUP_TEST_RUN ?? randomBytes(4).toString('hex');
@@ -15,8 +16,14 @@ const name = `qd-test-${id}`;
 const image = `dev-setup-quarterdeck:test-${id}`;
 const stranger = `qd-test-stranger-${id}`; // unlabelled by Quarterdeck, labelled by the run for teardown
 const closedProbe = `qd-test-failclosed-${id}`;
+const proxyName = `${name}-docker-proxy`;
+const proxyVolume = `${name}-docker`;
+const lifecycle = `qd-test-lifecycle-${id}`; // created through the proxy, labelled by the run for teardown
 const COMMAND = join(REPO, 'quarterdeck/bin/quarterdeck');
 const dockerfile = readFileSync(join(REPO, 'quarterdeck/Dockerfile'), 'utf8');
+// The proxy pin and the allowed list live in one file, which the command sources and this test reads.
+const proxyConf = readFileSync(join(REPO, 'quarterdeck/docker-proxy.conf'), 'utf8');
+const conf = (n) => proxyConf.match(new RegExp(`^${n}=(.*)$`, 'm'))?.[1];
 const arg = (n) => dockerfile.match(new RegExp(`^ARG ${n}=(\\S+)`, 'm'))[1];
 
 // Dummy token values only. The file holds a comment, a quoted value, a shell-looking value, a name nothing
@@ -42,7 +49,8 @@ before(() => {
   }
 });
 after(() => {
-  for (const n of [name, stranger, closedProbe]) run('docker', ['rm', '-fv', n]);
+  for (const n of [name, proxyName, stranger, closedProbe, lifecycle]) run('docker', ['rm', '-fv', n]);
+  run('docker', ['volume', 'rm', proxyVolume]);
   for (const c of run('docker', ['ps', '-aq', '--filter', `label=${runLabel}`, '--filter', `name=${name}`]).out.split('\n').filter(Boolean)) {
     run('docker', ['rm', '-fv', c]);
   }
@@ -96,6 +104,68 @@ test('a second quarterdeck while the first runs starts no second container and a
   assert.equal(r.code, 0, `${r.out}\n${r.err}`);
   assert.match(r.out, /status: running/);
   assert.deepEqual(ours(), [firstId]);
+});
+
+test('the proxy runs beside the Quarterdeck: pinned by digest, host socket read-only, labelled with the run, DOCKER_HOST over the volume', () => {
+  const proxies = run('docker', ['ps', '-aq', '--filter', `label=io.github.valerid.quarterdeck.proxy=${name}`]).out.split('\n').filter(Boolean);
+  assert.equal(proxies.length, 1);
+  const [c] = JSON.parse(run('docker', ['inspect', proxies[0]]).out);
+  assert.equal(c.State.Running, true);
+  assert.equal(c.Config.Labels[RUN_LABEL], id);
+  assert.equal(c.Name, `/${proxyName}`);
+  assert.equal(c.Image, run('docker', ['image', 'inspect', conf('PROXY_IMAGE'), '--format', '{{.Id}}']).out.trim());
+  const sock = c.Mounts.filter((m) => m.Destination === '/var/run/docker.sock');
+  assert.equal(sock.length, 1);
+  assert.equal(sock[0].RW, false, 'the host socket is read-only in the proxy');
+  assert.equal(c.HostConfig.CapDrop.includes('ALL'), true);
+  assert.equal(c.Mounts.some((m) => m.Name === proxyVolume && m.Destination === '/run/docker-proxy'), true);
+  const [q] = JSON.parse(run('docker', ['inspect', firstId]).out);
+  assert.equal(q.Mounts.some((m) => m.Source === '/var/run/docker.sock' || m.Destination === '/var/run/docker.sock'), false, 'the Quarterdeck has no host socket');
+  assert.equal(q.Mounts.some((m) => m.Name === proxyVolume && m.Destination === '/run/docker-proxy'), true);
+  assert.equal(okInside('echo "$DOCKER_HOST"').trim(), 'unix:///run/docker-proxy/docker.sock');
+  assert.equal(run('docker', ['volume', 'inspect', proxyVolume, '--format', '{{index .Labels "io.github.valerid.quarterdeck.proxy"}}']).out.trim(), name);
+});
+
+test('Docker through the proxy: version, info, ps and a create, start, exec, stop, remove of a labelled container all work', () => {
+  for (const c of ['version', 'info', 'ps']) okInside(`docker ${c} >/dev/null`);
+  okInside(`docker create --name ${lifecycle} --label ${runLabel} --entrypoint sleep ${image} 300`);
+  okInside(`docker start ${lifecycle}`);
+  assert.equal(okInside(`docker inspect -f '{{.State.Running}}' ${lifecycle}`).trim(), 'true');
+  assert.equal(okInside(`docker exec ${lifecycle} echo through-the-proxy`).trim(), 'through-the-proxy');
+  okInside(`docker images -q ${image} >/dev/null; docker image inspect ${image} >/dev/null; docker volume ls >/dev/null`);
+  okInside(`docker stop -t 1 ${lifecycle}`);
+  okInside(`docker rm ${lifecycle}`);
+  assert.equal(run('docker', ['inspect', lifecycle]).code, 1);
+});
+
+test('Docker through the proxy: everything outside the allowed list is refused with 403', () => {
+  for (const cmd of ['docker system df', 'docker swarm init', 'docker login -u u -p p localhost:1', `docker cp ${name}-none:/etc/hostname /tmp/x`]) {
+    const r = inside(`${cmd} 2>&1; true`);
+    assert.match(r.out, /403|Forbidden|forbidden/i, `${cmd}: ${r.out}`);
+  }
+  // Raw calls, so the refusal is the proxy's and not the CLI's.
+  const code = (m, p) => okInside(`curl -s -o /dev/null -w '%{http_code}' --unix-socket /run/docker-proxy/docker.sock -X ${m} http://d${p}`).trim();
+  for (const [m, p] of [['GET', '/system/df'], ['POST', '/swarm/init'], ['POST', '/commit'], ['POST', '/auth'], ['POST', '/containers/prune'], ['POST', '/volumes/prune'], ['POST', '/images/prune'], ['GET', '/containers/x/archive?path=/'], ['GET', '/services'], ['GET', '/secrets'], ['DELETE', '/volumes/x'], ['POST', '/containers/x/update']]) {
+    assert.equal(code(m, p), '403', `${m} ${p}`);
+  }
+  assert.match(code('PUT', '/containers/x/archive?path=/'), /^(403|405)$/, 'a method with no allow rule is refused (405)');
+  assert.equal(code('GET', '/_ping'), '200');
+  assert.equal(code('GET', '/v1.47/_ping'), '200', 'a versioned path matches too');
+});
+
+test('the allowed list is in one file and is the design list; the proxy follows it and nothing else', () => {
+  const cases = {
+    GET: ['_ping', 'version', 'info', 'containers/json', 'containers/abc/json', 'exec/abc/json', 'images/library/node/json', 'volumes', 'events'],
+    POST: ['containers/create', 'containers/abc/start', 'containers/abc/stop', 'containers/abc/kill', 'containers/abc/wait', 'containers/abc/exec', 'exec/abc/start', 'exec/abc/resize', 'images/create', 'build', 'volumes/create'],
+    DELETE: ['containers/abc'],
+  };
+  const denied = { GET: ['containers/abc/archive', 'system/df', 'volumes/x/json', 'images/json'], POST: ['commit', 'auth', 'containers/prune', 'containers/abc/update', 'containers/abc/attach', 'swarm/init'], DELETE: ['volumes/abc', 'containers/abc/archive', 'images/abc'] };
+  for (const m of Object.keys(cases)) {
+    const re = new RegExp(execSync(`. ${join(REPO, 'quarterdeck/docker-proxy.conf')}; printf %s "$ALLOW_${m}"`, { shell: '/bin/bash' }).toString());
+    for (const p of cases[m]) assert.ok(re.test(`/${p}`) && re.test(`/v1.47/${p}`), `${m} ${p} must be allowed`);
+    for (const p of denied[m]) assert.equal(re.test(`/${p}`), false, `${m} ${p} must be refused`);
+  }
+  assert.equal(conf('ALLOW_PUT'), undefined);
 });
 
 test('egress: the ruleset is ready, an allowlisted host is reachable, another is not', () => {
@@ -227,6 +297,8 @@ test('quarterdeck stop removes the labelled container and nothing else (SC-01, n
   const r = quarterdeck('stop');
   assert.equal(r.code, 0, `${r.out}\n${r.err}`);
   assert.deepEqual(ours(), []);
+  assert.equal(run('docker', ['inspect', proxyName]).code, 1, 'the proxy is removed with the Quarterdeck');
+  assert.notEqual(run('docker', ['volume', 'inspect', proxyVolume]).code, 0, 'and its volume');
   assert.equal(run('docker', ['inspect', stranger, '--format', '{{.State.Running}}']).out.trim(), 'true', 'the unlabelled container survives');
   assert.equal(run('docker', ['image', 'inspect', image]).code, 0, 'stop keeps the image');
   assert.equal(quarterdeck('stop').code, 0, 'stop with nothing running is not an error');
