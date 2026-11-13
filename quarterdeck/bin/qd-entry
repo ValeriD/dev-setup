@@ -1,0 +1,26 @@
+#!/bin/bash
+# Quarterdeck container entrypoint. Root only long enough to lock egress, then runs
+# Herdr's server as `node`. Seeding the First Mate (ticket 05) and secrets (ticket 03) come later.
+set -euo pipefail
+
+[ "$(id -u)" = 0 ] || { echo "qd-entry: must start as root" >&2; exit 1; }
+
+# Egress first. DEV_SETUP_WORKSPACE points at an empty .devcontainer (image-built), so start.sh
+# applies the image's allowlist and no project layer. If that folder were missing, start.sh fails
+# closed (drop-all ruleset, SIGTERM to PID 1). The ready file is checked again here, so a
+# start.sh that returned without applying anything still stops the container.
+export DEV_SETUP_WORKSPACE=${DEV_SETUP_WORKSPACE:-/opt/qd/empty}
+sh /usr/local/share/egress/start.sh
+[ -e /run/egress/ready ] || { echo "qd-entry: egress not ready, stopping" >&2; exit 1; }
+
+drop() { setpriv --reuid node --regid node --init-groups env HOME=/home/node USER=node LOGNAME=node "$@"; }
+
+drop bash -c 'cd /home/node && exec herdr --session default server' </dev/null &
+server=$!
+trap 'kill -TERM "$server" 2>/dev/null || true' TERM INT
+# The container lives as long as Herdr's server does. A trapped signal interrupts `wait`, so wait again
+# until the server has really exited.
+status=0
+wait "$server" || status=$?
+while kill -0 "$server" 2>/dev/null; do wait "$server" || status=$?; done
+exit "$status"

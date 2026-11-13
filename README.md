@@ -41,6 +41,10 @@ Then, in Claude Code on your host, run `/dev-container`. It can:
 
 It never commits. The skill finds this repository through the symlink, so if you move the checkout, run `ln -sfn` again.
 
+### Quarterdeck (work in progress)
+
+`quarterdeck/` builds the image that runs Herdr and the mates. Put its command on your path once (`ln -s "$PWD/quarterdeck/bin/quarterdeck" ~/.local/bin/quarterdeck`), then `quarterdeck` builds the image if needed, starts the container and attaches to Herdr. `quarterdeck stop` removes it. The work root defaults to `~/work`; set `QUARTERDECK_WORK_ROOT` to change it.
+
 ### By hand
 
 ```sh

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ValeriD/dev-setup/main/installer/extensions.schema.json",
+  "notes": [
+    "Quarterdeck layer on top of Base. The Quarterdeck keeps Base's Egress Allowlist (design open question 5). Hosts it needs beyond Base are added by the ticket that finds them (ghcr.io for the devcontainer CLI is ticket 07)."
+  ],
+  "extensions": []
+}

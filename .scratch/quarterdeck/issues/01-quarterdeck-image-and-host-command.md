@@ -1,6 +1,6 @@
 # 01: Quarterdeck image and the `quarterdeck` host command
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 1 (Quarterdeck up), first part
 
@@ -18,14 +18,14 @@ The image is built on Base, not as a Variant (ADR 0006, `CONTEXT.md` "Quarterdec
 
 ## Acceptance criteria
 
-- [ ] `quarterdeck` with no image and no container builds the image, starts one container, and attaches to Herdr (SC-01).
-- [ ] A second `quarterdeck` while the first runs starts no second container (one labelled Quarterdeck container exists afterwards) and attaches (SC-01).
-- [ ] `quarterdeck stop` removes the labelled Quarterdeck container and network and nothing else: an unlabelled container started beside it survives (SC-01, design constraint "no prune").
-- [ ] In the running container, the egress ruleset is ready, an allowlisted destination (for example `api.anthropic.com`) is reachable and a non-allowlisted one is not.
-- [ ] `herdr --session default server` is running as user `node`; Herdr, treehouse, `gh`, `docker`, `devcontainer` (0.89.0), `jq` and FirstMate at the pin exist at their paths; `/opt/firstmate` is read-only; `/opt/qd/bin` is first on `PATH`.
-- [ ] The container's Claude policy has none of `allowManagedHooksOnly`'s effect: the rendered `/etc/claude-code/managed-settings.json` has no `allowManagedHooksOnly` key but keeps the rest of Base's keys (`disableSkillShellExecution`, `disableSideloadFlags`, `disableCommandPluginSources`).
-- [ ] The container environment sets `GIT_CONFIG_COUNT` entries for `core.hooksPath=/dev/null` and `core.fsmonitor=false`.
-- [ ] `tests/quarterdeck.test.mjs` exists, builds the Quarterdeck image once per run, uses a temporary work root, labels what it creates with a run id and cleans up only that.
+- [x] `quarterdeck` with no image and no container builds the image, starts one container, and attaches to Herdr (SC-01).
+- [x] A second `quarterdeck` while the first runs starts no second container (one labelled Quarterdeck container exists afterwards) and attaches (SC-01).
+- [x] `quarterdeck stop` removes the labelled Quarterdeck container and network and nothing else: an unlabelled container started beside it survives (SC-01, design constraint "no prune").
+- [x] In the running container, the egress ruleset is ready, an allowlisted destination (for example `api.anthropic.com`) is reachable and a non-allowlisted one is not.
+- [x] `herdr --session default server` is running as user `node`; Herdr, treehouse, `gh`, `docker`, `devcontainer` (0.89.0), `jq` and FirstMate at the pin exist at their paths; `/opt/firstmate` is read-only; `/opt/qd/bin` is first on `PATH`.
+- [x] The container's Claude policy has none of `allowManagedHooksOnly`'s effect: the rendered `/etc/claude-code/managed-settings.json` has no `allowManagedHooksOnly` key but keeps the rest of Base's keys (`disableSkillShellExecution`, `disableSideloadFlags`, `disableCommandPluginSources`).
+- [x] The container environment sets `GIT_CONFIG_COUNT` entries for `core.hooksPath=/dev/null` and `core.fsmonitor=false`.
+- [x] `tests/quarterdeck.test.mjs` exists, builds the Quarterdeck image once per run, uses a temporary work root, labels what it creates with a run id and cleans up only that.
 
 ## Technical context
 
@@ -47,3 +47,14 @@ The image is built on Base, not as a Variant (ADR 0006, `CONTEXT.md` "Quarterdec
 ## Blocked by
 
 None (can start immediately)
+
+## Comments
+
+**Resolution (implement, commit see `git log` for this ticket).** Built `quarterdeck/` (Dockerfile, claude-policy.json, extensions.json, `bin/qd-entry`, `bin/quarterdeck`), `.dockerignore` entry, `tests/quarterdeck.test.mjs`, an ARCHITECTURE.md section and a README paragraph. Full `npm test`: 63 pass, 0 fail.
+
+- **No user-defined network (deviation).** The ticket says the command creates a network and `stop` removes it. Verified by running: on a user-defined network Docker's embedded DNS (127.0.0.11) relies on NAT rules inside the container, and Base's `egress/start.sh` ruleset starts with `flush ruleset`, which deletes them. DNS then fails and the self-test fails closed. The container therefore runs on the default bridge and there is no network to create or remove. Criterion 3 is ticked for what it protects (only the labelled container is removed). Tickets 03/04 must not assume a Quarterdeck network; the Docker proxy design already uses a socket.
+- **Ownership label** goes on the container only; on the image every container started from it would inherit it and `stop` would remove them (found by the test).
+- **Work root** defaults to `$HOME/work` (equal to `/home/valeri/work` here); `QUARTERDECK_WORK_ROOT` overrides. Mount sources are created by the host user, so the container's `node` (uid 1000) can write only if the host uid is 1000. Not handled; matters for CI (runner uid) and other hosts.
+- **Not checked:** the real TUI attach (`docker exec -it ... herdr`); tests run a Herdr status probe through `QUARTERDECK_ATTACH_CMD`. The `~/.local/bin` symlink is documented, not created.
+- **Pins not yet enforced:** the Dockerfile's base digest, Claude/pnpm pins and `DEVCONTAINER_CLI_VERSION` duplicate the Node Variant's; `scripts/check-pins.mjs`, `renovate.json` and `tests/renovate.test.mjs` do not cover `quarterdeck/Dockerfile` (CI ticket).
+- **Review findings.** Fixed: ARCHITECTURE.md orphaned ADR 0003 line and over-long rows; empty-array expansion under old bash; Dockerfile comment claiming a nonexistent check; redundant test assertions (policy deepEqual, GIT_CONFIG_COUNT). Declined: duplicated COPY lines vs the Node Variant (ADR 0006, Quarterdeck is not a Variant; Base copied as is per ticket); `$HOME/work` vs literal path (override exists); real-TUI attach test (no terminal in the suite); uid mapping and a second fail-closed test for the ready-file check (out of ticket scope); extra `QUARTERDECK_*` variables (needed as test seams); name-only label matching (the label value is the per-name ownership key by design).

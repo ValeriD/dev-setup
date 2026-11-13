@@ -1,0 +1,80 @@
+#!/bin/bash
+# quarterdeck [attach|stop|rebuild]
+#   attach   (default) build the image if missing, start the container if it is not running, attach to Herdr
+#   stop     remove the Quarterdeck container this command labelled, nothing else
+#   rebuild  build the image again (run `quarterdeck stop` first to use it)
+# Reads no secrets file; it passes paths and names only.
+# Overrides (the tests use them): QUARTERDECK_NAME, QUARTERDECK_IMAGE, QUARTERDECK_WORK_ROOT,
+# QUARTERDECK_RUN_LABEL (key=value added to everything created), QUARTERDECK_ATTACH_CMD (default: herdr).
+set -euo pipefail
+
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+repo=$(cd "$here/../.." && pwd)
+name=${QUARTERDECK_NAME:-quarterdeck}
+image=${QUARTERDECK_IMAGE:-dev-setup-quarterdeck:local}
+work=${QUARTERDECK_WORK_ROOT:-$HOME/work}
+label_key=io.github.valerid.quarterdeck
+extra=()
+[ -z "${QUARTERDECK_RUN_LABEL:-}" ] || extra=(--label "$QUARTERDECK_RUN_LABEL")
+# The ownership label goes on the container only. On the image it would be inherited by every
+# container started from it, and `stop` would remove those too.
+labels=(--label "$label_key=$name")
+labels+=("${extra[@]+"${extra[@]}"}")
+
+die() { echo "quarterdeck: $*" >&2; exit 1; }
+command -v docker >/dev/null || die "docker not found"
+
+# Containers this command labelled for this name.
+mine() { docker ps -aq --filter "label=$label_key=$name" 2>/dev/null; }
+running() { docker ps -q --filter "label=$label_key=$name" --filter "status=running"; }
+
+build() {
+  local rev; rev=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
+  echo "quarterdeck: building $image" >&2
+  docker build -f "$repo/quarterdeck/Dockerfile" -t "$image" ${extra[@]+"${extra[@]}"} --build-arg "REVISION=$rev" "$repo" >&2
+}
+
+start() {
+  mkdir -p "$work/quarterdeck/claude" "$work/pool"
+  # Remove an exited container of ours so the name is free; never touches an unlabelled one.
+  mine | xargs -r docker rm -f >/dev/null
+  # No user-defined network: Docker's embedded DNS (127.0.0.11) works through NAT rules in the container,
+  # and Base's egress ruleset begins with `flush ruleset`, which removes them. On the default bridge the
+  # resolver is a real address and works. The Docker proxy (ticket 04) talks over a socket, not a network.
+  docker run -d --init --name "$name" "${labels[@]}" --hostname quarterdeck \
+    --user root --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --cap-add DAC_READ_SEARCH \
+    --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges \
+    -v "$work:$work" \
+    -v "$work/quarterdeck/claude:/home/node/.claude" \
+    -v "$work/pool:/home/node/.treehouse" \
+    "$image" >/dev/null
+  # Ready when egress is locked and Herdr's server answers; stop waiting if the container dies.
+  local i
+  for i in $(seq 1 120); do
+    [ -n "$(running)" ] || { docker logs "$name" >&2 || true; die "the container stopped while starting"; }
+    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && herdr --session default status server | grep -q "status: running"' && return 0
+    sleep 0.5
+  done
+  docker logs "$name" >&2 || true
+  die "the Quarterdeck did not become ready"
+}
+
+attach() {
+  docker image inspect "$image" >/dev/null 2>&1 || build
+  [ -n "$(running)" ] || start
+  local tty=-i
+  if [ -t 0 ] && [ -t 1 ]; then tty=-it; fi
+  # shellcheck disable=SC2086
+  exec docker exec $tty -u node -w /home/node "$name" ${QUARTERDECK_ATTACH_CMD:-herdr}
+}
+
+stop() {
+  mine | xargs -r docker rm -f >/dev/null
+}
+
+case "${1:-attach}" in
+  attach) attach ;;
+  stop) stop ;;
+  rebuild) build ;;
+  *) die "usage: quarterdeck [attach|stop|rebuild]" ;;
+esac

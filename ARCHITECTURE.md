@@ -30,6 +30,13 @@ Dependency direction: the Template references the image, never the reverse. The 
 
 Egress details: ADR 0002. VS Code trade-offs: ADR 0003.
 
+## Quarterdeck
+
+| Module | Where | Owns | Rules that aren't obvious |
+|---|---|---|---|
+| Quarterdeck image | `quarterdeck/` (`Dockerfile`, `extensions.json`, `claude-policy.json`, `bin/qd-entry`) | Base material plus the mates' tools (Docker CLI, `gh`, devcontainer CLI, Herdr, treehouse, FirstMate at a pinned commit in read-only `/opt/firstmate`). Built on Base, not a Variant (ADR 0006); never published | Claude policy is Base's minus `allowManagedHooksOnly`. `qd-entry` runs `base/egress/start.sh` as root against an empty `.devcontainer` (image allowlist only; fail closed), then Herdr's server as `node`. `GIT_CONFIG_*` env disables project git hooks. |
+| Host command | `quarterdeck/bin/quarterdeck` | `quarterdeck [attach\|stop\|rebuild]`, tested by `tests/quarterdeck.test.mjs` | The ownership label goes on the container, never the image (containers inherit image labels). Default bridge, no user network: Base's `flush ruleset` removes the embedded DNS rules. Put it on the path with `ln -s`, see README. |
+
 ## dev-container host skill
 
 | Module | Where | Owns | Rules that aren't obvious |
