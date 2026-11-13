@@ -11,7 +11,7 @@ One kind of development container in the catalogue, defined by the toolchain it 
 _Avoid_: Flavour, stack, setup
 
 **Base**:
-What every Variant has in common: the hardening, the agents, and the shared extension set.
+What every Variant and the Quarterdeck have in common: the hardening, the agents, and the shared extension set.
 _Avoid_: Core, common layer
 
 **Consuming Project**:
@@ -55,3 +55,45 @@ _Avoid_: Template, bundle, profile
 **Pinned Ref**:
 An immutable pointer to an Agent Extension's exact content: a commit SHA or an exact package version.
 _Avoid_: Version, tag, branch
+
+### Orchestration
+
+**Quarterdeck**:
+The one long-lived container you work from. It holds the session manager, the mates and every skill, and it starts and reaches into each Consuming Project's container. It is built on Base but is not a Variant, because it serves no single project.
+_Avoid_: Helm, control container, main container
+
+**First Mate**:
+The single orchestrating Agent in the Quarterdeck that you talk to. It hands work to Second Mates and reports back.
+_Avoid_: Orchestrator, coordinator, FirstMate (as a role; that spelling names the upstream tool)
+
+**Second Mate**:
+An orchestrating Agent in the Quarterdeck that owns one Consuming Project. It starts Crewmates for that project and checks their results.
+_Avoid_: Project mate, sub-orchestrator, supervisor
+
+**Crewmate**:
+An Agent session started by a mate to do one piece of work. A coding Crewmate runs inside the Consuming Project's container.
+_Avoid_: Worker, subagent, task agent
+
+**Spec**:
+The product document that says what one feature must do, written after the grilling. It is never the build notes inside a Crewmate's instructions; those are brief notes.
+_Avoid_: PRD, requirements, Firstmate spec
+
+**Spec Run**:
+One Spec taken from the First Mate's grilling handoff to its final pull request by a Second Mate: a planning Crewmate writes the Spec, design and tickets, then one Crewmate per ticket makes one commit per ticket.
+_Avoid_: Task, job, ship (as a noun)
+
+**Brief**:
+The instruction file a Crewmate starts from. For a ticket's Crewmate it points at the ticket.
+_Avoid_: Prompt, task description
+
+**Charter**:
+A Second Mate's standing instructions: which Consuming Project it owns and how it runs a Spec Run.
+_Avoid_: Role prompt, system prompt
+
+**Scout**:
+A Crewmate that only investigates and writes a report. It changes nothing.
+_Avoid_: Researcher, explorer
+
+**Idea**:
+Something you thought of for a project that has had no grilling yet. It is kept on hold with the First Mate and is never started until you grill it.
+_Avoid_: Backlog item, todo, ticket

@@ -1,0 +1,8 @@
+# Throwaway stand-in for a project container. NOT the hardened Node Variant.
+FROM node:24-bookworm-slim
+ARG CLAUDE_CODE_VERSION=2.1.310
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates jq procps \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+USER node
+CMD ["sleep", "infinity"]
