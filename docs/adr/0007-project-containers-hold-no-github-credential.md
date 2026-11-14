@@ -1,6 +1,6 @@
 # Project containers hold no GitHub credential; the push is done in the Quarterdeck
 
-Narrowed by [ADR 0010](0010-read-only-agent-extensions-token.md): one read-only, single-repository token is allowed for fetching Agent Extensions. The project repository credential and push remain in the Quarterdeck.
+Narrowed by [ADR 0010](0010-read-only-agent-extensions-token.md): one read-only, single-repository token is allowed for fetching Agent Extensions. The project repository credential and push remain in the Quarterdeck's intended delivery path. [Ticket 21 decisions 3–5](../../.scratch/quarterdeck/issues/21-mvp-security-review-decisions.md) further qualify the historical isolation claims below: trusted main-branch Features, credentials already in the shared clone Git configuration, worktree Git redirection and a misled publish session are accepted MVP risks, not proven isolation. The spec's accepted risks name the custom socket proxy, post-MVP clone preflight hardening and Git gate as the respective fixes.
 
 A Consuming Project's container started by the Quarterdeck gets no GitHub credential. Crewmates commit locally. The push and the pull request are done by a Crewmate in the Quarterdeck, where the token lives. The project folder holds the same files on both sides, so a commit made in the project container is visible in the Quarterdeck at once; the spike confirmed this. This removes a GitHub login from every container, and a compromised Crewmate can neither push nor read other repositories.
 

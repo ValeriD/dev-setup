@@ -421,6 +421,35 @@ async function testProjectFixture(extensionsToken = '', t) {
     }
     return r;
   };
+  // Ticket 21 accepts /etc/environment inside the project container, not external persistence.
+  const assertNoExternalToken = async (container, variant) => t.test(`extensions token absent from rendered config, exports, logs and image: ${variant}`, () => {
+    const exported = inside(`grep -rFl -- '${extensionsToken}' ${work}/quarterdeck/config ${work}/quarterdeck/logs`);
+    assert.equal(exported.code, 1, 'token absent from rendered config, work-root exports and logs');
+    const inspected = run('docker', ['inspect', container]);
+    assert.equal(inspected.code, 0);
+    const builtImage = JSON.parse(inspected.out)[0].Config.Image;
+    for (const args of [['logs', container], ['history', '--no-trunc', builtImage]]) {
+      const output = run('docker', args);
+      assert.equal(output.code, 0);
+      assert.equal((output.out + output.err).includes(extensionsToken), false, 'logs/history contain no token');
+    }
+    // docker save includes image config and every uncompressed layer tar, including deleted files.
+    // Unlike history or a running filesystem scan, this checks layer contents, not just commands.
+    // Stream rather than storing a second full image on the host; consume all bytes so
+    // pipefail also detects save failures (grep -q would stop early and hide that distinction).
+    const scan = run('bash', ['-o', 'pipefail', '-c', `docker image save "$1" | node --input-type=module -e '
+      const token = Buffer.from(process.argv[1]);
+      let tail = Buffer.alloc(0), found = false, bytes = 0;
+      for await (const chunk of process.stdin) {
+        bytes += chunk.length;
+        const data = Buffer.concat([tail, chunk]);
+        found ||= data.includes(token);
+        tail = data.subarray(Math.max(0, data.length - token.length + 1));
+      }
+      process.exitCode = found || bytes === 0 ? 1 : 0;
+    ' "$2"`, 'image-scan', builtImage, extensionsToken]);
+    assert.equal(scan.code, 0, `image archive scan must succeed without a token match: ${scan.err}`);
+  });
   const foreign = `${name}-project-stranger`;
   assert.equal(run('docker', ['create', '--name', foreign, '--label', runLabel, '--label', 'quarterdeck.project=fixture', '--label', `quarterdeck.home=${home}`, '--entrypoint', 'sleep', IMAGE, '300']).code, 0);
   const first = up();
@@ -455,17 +484,7 @@ async function testProjectFixture(extensionsToken = '', t) {
       assert.equal(other.out, '');
       assert.equal(probe('env | grep -E "^(GH_TOKEN|GITHUB_TOKEN|QUARTERDECK_GITHUB_TOKEN|QUARTERDECK_EXTENSIONS_TOKEN)="').code, 1);
       assert.equal(JSON.stringify(c.Config.Env).includes('dummy-project-only'), false);
-      const exportScan = inside(`grep -rFl -- '${extensionsToken}' ${work}/quarterdeck/config`);
-      assert.equal(exportScan.code, 1, 'token absent from every exported file');
-      const diskScan = run('docker', ['exec', '-u', 'root', cid, 'sh', '-c', 'grep -rFl -- "$DEV_SETUP_GITHUB_PAT" /home /etc /tmp /var /opt /usr/local']);
-      await t.test('extensions token is absent from container files', {
-        todo: 'ticket 08 blocker: pinned devcontainer CLI persists container environment in /etc/environment; security-review 05',
-      }, () => assert.equal(diskScan.code, 1, `token found (paths only): ${diskScan.out}`));
-      for (const args of [['logs', cid], ['history', '--no-trunc', c.Config.Image]]) {
-        const output = run('docker', args);
-        assert.equal(output.code, 0);
-        assert.equal((output.out + output.err).includes(extensionsToken), false);
-      }
+      await assertNoExternalToken(cid, 'ordinary Template');
     } else {
       assert.match(first.err, /warning.*QUARTERDECK_EXTENSIONS_TOKEN/);
       assert.equal(probe('env | grep -Ei "github|^GH_TOKEN="').code, 1);
@@ -491,6 +510,7 @@ async function testProjectFixture(extensionsToken = '', t) {
     const featured = up();
     assert.equal(featured.code, 0, featured.err);
     assert.equal(run('docker', ['exec', featured.out.trim(), 'cat', '/feature-proof']).out.trim(), 'installed');
+    if (extensionsToken) await assertNoExternalToken(featured.out.trim(), 'benign local Feature');
     const survivor = featured.out.trim();
     for (const args of [['--env', 'GH_TOKEN'], ['--volume=/tmp:/extra'], ['--privileged'], ['--entrypoint=sh']]) {
       put(configPath, JSON.stringify({ image: IMAGE, runArgs: args }));
@@ -685,7 +705,7 @@ function inPane(script) {
 }
 const hashLine = (v) => `printenv ${v} | sha256sum | cut -d' ' -f1`;
 
-test('SC-19: a Herdr pane holds the tokens by name; a docker exec shell holds none', () => {
+test('SC-19: a Herdr pane holds token variables; a plain docker exec shell inherits none', () => {
   const lines = inPane(['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'DEV_SETUP_GITHUB_PAT'].map(hashLine).join('; ') + '; printenv QUARTERDECK_GITHUB_TOKEN | wc -c').trim().split('\n');
   assert.deepEqual(lines, [sha(CLAUDE), sha(GITHUB), sha(GITHUB), '0']);
   assert.equal(inPane('id -u').trim(), '1000', 'a pane process runs as node');
@@ -709,7 +729,9 @@ test('SC-19: the entrypoint and everything above Herdr hold no value; docker ins
   assert.match(inspect, new RegExp(`${secretsFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:/run/quarterdeck/secrets\\.env:ro`));
 });
 
-test('SC-19: no token on disk in the container, and git for github.com answers from DEV_SETUP_GITHUB_PAT', () => {
+test('SC-19: no token copies in scanned directories (mounted secrets file excepted); github.com uses DEV_SETUP_GITHUB_PAT', () => {
+  // Ticket 21 accepts host-user access to the mounted source; environment non-inheritance is above.
+  assert.equal(inside('test -r /run/quarterdeck/secrets.env').code, 0, 'mounted source is readable by node');
   const hits = inside("grep -rIl 'dummy-' /home /etc /tmp /var /root /opt 2>/dev/null; true").out.trim();
   assert.equal(hits, '', `a token value is on disk: ${hits}`);
   assert.equal(inside('test -e /home/node/.config/gh/hosts.yml').code, 1);

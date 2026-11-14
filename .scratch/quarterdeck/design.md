@@ -16,6 +16,8 @@ spec: .scratch/quarterdeck/spec.md (draft), overridden by grill-notes.md decisio
 
 ## Design capsule
 
+[Ticket 21](issues/21-mvp-security-review-decisions.md) supersedes older security wording below without changing product behavior: CLI persistence of the extensions token inside the project container is accepted; external config/export/log/image persistence is not. SC-19 means plain-exec environment non-inheritance, not an unreadable mounted source. Only user-controlled `main` configurations/Features are supported (unsupported `runArgs` still rejected); clone-stored credentials, worktree Git redirection and publish-session instruction influence are accepted MVP risks. See the spec's accepted risks and ADR 0010 for scope and later fixes. Review 04 remains a human permission check. Historical delivery proposals below are also superseded by ticket 20.
+
 Ticket 08 / [ADR 0010](../../docs/adr/0010-read-only-agent-extensions-token.md) narrows SC-16/SC-19 and ADR 0007: only the read-only `ValeriD/skills` token may enter a project container at creation. Ticket 20 supersedes the original root-owned-file delivery mechanism below; ticket 03 implements its user-owned file and non-root parser. Other proposed behavior is unchanged.
 
 - **New top-level module `quarterdeck/`.** It holds the Quarterdeck image, the host `quarterdeck` command, four in-container tools (`qd-entry`, the `claude` launcher, `qd-project-up`, `qd-publish`), the FirstMate configuration we ship, the Charter template, and two mate skills (`qd-first-mate`, `qd-spec-run`). Nothing in `base/`, `installer/`, `variants/`, `templates/` or `skills/dev-container/` depends on it.

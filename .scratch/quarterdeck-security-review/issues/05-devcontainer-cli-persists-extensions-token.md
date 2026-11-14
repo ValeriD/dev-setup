@@ -1,6 +1,6 @@
 # 05: Devcontainer CLI persists the container-level extensions token
 
-Status: ready-for-human
+Status: done
 Type: task
 
 ## Evidence
@@ -29,3 +29,9 @@ Name-only `-e DEV_SETUP_GITHUB_PAT` keeps the rendered JSON/export and ordinary 
 - [ ] Confirm generated files, container files, logs and image contents separately; image history alone is not proof of absence from every layer.
 
 Deleting `/etc/environment` after startup would not satisfy “appears in no file”; pre-seeding undocumented CLI marker files was not introduced as a workaround. This is distinct from concern 01's arbitrary project configuration trust. Independent creation transport is implemented; no real-token run is claimed safe or complete.
+
+## Comments
+
+### Resolution — ticket 21 decision 1
+
+[Ticket 21](../../quarterdeck/issues/21-mvp-security-review-decisions.md) explicitly accepts persistence inside the project container, including `/etc/environment`, until the Git gate. ADR 0010 and spec accepted risk 11 narrow the no-file requirement to rendered config, work-root exports, logs and images. The obsolete container-files TODO is replaced by ordinary/benign-Feature checks of that boundary, including saved image layers rather than history alone. Closed by requirement narrowing, not prevention of the observed write. The historical evidence remains intact; real private-source startup and permissions are still unobserved and review 04 remains open.

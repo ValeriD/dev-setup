@@ -1,6 +1,6 @@
 # 03: Review credentials already stored in the shared clone Git directory
 
-Status: ready-for-human
+Status: done
 Type: task
 
 ## Evidence and impact
@@ -16,3 +16,9 @@ Pointers: `quarterdeck/bin/qd-project-up` (Git directory mounts), `.scratch/quar
 - [ ] Define synthetic-only regression fixtures and safe diagnostics for the selected policy.
 
 This is distinct from Feature trust and worktree Git redirection: it concerns credentials already present in a required shared mount. Ticket 07 continues without claiming arbitrary clone contents are credential-free.
+
+## Comments
+
+### Resolution — ticket 21 decision 4
+
+[Ticket 21](../../quarterdeck/issues/21-mvp-security-review-decisions.md) accepts credentials already stored in clone Git configuration for the MVP. A check refusing such clones belongs to the post-MVP hardening feature, not this implementation. Spec accepted risk 14 and `quarterdeck/PROJECT-CONTAINERS.md` record this limit. Closed by explicit acceptance; no clone inspection or credential-free proof is claimed, and the historical body is preserved.

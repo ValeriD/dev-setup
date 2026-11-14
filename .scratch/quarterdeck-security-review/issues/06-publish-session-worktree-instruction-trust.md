@@ -1,6 +1,6 @@
 # 06: Review worktree instructions in the credential-bearing publish session
 
-Status: ready-for-human
+Status: done
 Type: task
 
 ## Evidence and impact
@@ -21,3 +21,9 @@ This is distinct from concern 01 (container creation configuration) and 02/03 (G
 - [ ] Record real-Claude loading behavior for worktree instructions, skills and settings using harmless canaries and no project/push credential.
 - [ ] Confirm whether existing MVP prompt-injection acceptance covers this particular publish path and its credential scope.
 - [ ] Decide whether the later Git gate or a narrower publish interface must remove arbitrary credential-bearing agent tool execution; specify regression outcomes for any approved change.
+
+## Comments
+
+### Resolution — ticket 21 decision 5
+
+[Ticket 21](../../quarterdeck/issues/21-mvp-security-review-decisions.md) accepts publish-session influence from worktree content as the misled-mate risk, limited by the repository-scoped token. Spec accepted risk 15 names the hardening pair and Git gate as later fixes. Closed by explicit acceptance, not by proving instruction isolation. The benign real-Claude loading checklist remains unperformed compatibility evidence, not a blocker to this policy decision. Historical review criteria are preserved; no real agent or credential probe was run.

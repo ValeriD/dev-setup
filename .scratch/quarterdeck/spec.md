@@ -98,7 +98,7 @@ Each scenario is stated from the outside. "Unproven" means the spike did not run
 
 ### Credentials
 
-- **SC-19** (story 11, D9, D14, D35). Two credentials exist for the MVP: a Claude token, and a GitHub token scoped to the pomoplan repository. Both are given by name from a file or variable outside this repository. Their values never appear in this repository, in an image, or in the project container's files. The Quarterdeck holds both. The project container receives the Claude token only (the spike's project container got the Claude token and no GitHub token). Processes started from Herdr in the Quarterdeck can read the tokens; a plain shell entered into the Quarterdeck from outside cannot. Mates and Crewmates running in the Quarterdeck can therefore read the GitHub token (accepted risk). How the tokens are delivered is open.
+- **SC-19** (story 11, D9, D14, D35). Two credentials exist for the MVP: a Claude token, and a GitHub token scoped to the pomoplan repository. Both are given by name from a file or variable outside this repository. Their values never appear in this repository, in an image, or in the project container's files. The Quarterdeck holds both. The project container receives the Claude token only (the spike's project container got the Claude token and no GitHub token). Processes started from Herdr in the Quarterdeck inherit the token variables; a plain `docker exec` shell does not. The host user's ability to read the mounted source file from that shell is accepted (ticket 21 decision 2); this is environment non-inheritance, not filesystem isolation. Mates and Crewmates running in the Quarterdeck can therefore read the GitHub token (accepted risk). How the tokens are delivered is open.
 
 ### Where things are kept
 
@@ -142,6 +142,16 @@ From the "Later" list (each becomes its own feature when picked up), D3 and D16,
 8. **"auto" permission mode is not "ask before everything".** It was accepted for the MVP (D38). It is weaker than prompting and stronger than skipping prompts.
 9. **FirstMate is a fast-moving upstream (D18).** The pinned fork protects against surprise, but upgrades need a diff review.
 10. **Not tested in the spike:** messages sent to a Crewmate behind the project container; a Herdr restart with such a Crewmate running; two Second Mates for one project; the watcher and away mode; the First Mate as a Claude session.
+
+### Ticket 21 — explicit MVP security decisions (supersede older stronger wording)
+
+These are risk acceptances, not evidence of isolation. Published ticket and review bodies remain historical; [ticket 21](issues/21-mvp-security-review-decisions.md) is authoritative.
+
+11. **Extensions-token persistence (decision 1).** The read-only skills token may persist in the project container's `/etc/environment`, as it already reaches every process's environment and Docker inspect. It must not appear in rendered configuration, work-root exports, logs or image layers. The user-owned source file is intentional. [ADR 0010](../../docs/adr/0010-read-only-agent-extensions-token.md) records this narrowing; the **Git gate** removes the exposure.
+12. **Outside-exec source-file access (decision 2).** SC-19 requires no inherited token variables in a plain Quarterdeck `docker exec` shell, not an unreadable secrets mount. The host user can already read that file on the host. The **Git gate** removes the repository token from the Quarterdeck; host-user access to the user's own source file is not a boundary the MVP promises to remove.
+13. **Trusted main configuration (decision 3).** The Quarterdeck only starts Projects whose `main` branch the user controls. Features and retained configuration from that branch are trusted input, not proven mount/egress/credential isolation. Unsupported `runArgs` rejection remains. Repositories outside the user's control wait for the **custom socket proxy**, the planned hardening boundary; no blanket Features ban is introduced.
+14. **Shared clone credentials (decision 4).** Credentials already stored in the clone's Git configuration remain readable through the required shared Git store, even with read-only config overlays. This is accepted, not proof of credential exclusion. A refusal check for credential-bearing clones belongs to the **post-MVP hardening feature**.
+15. **Misled publication and redirected Git (decision 5).** Worktree content can influence the credential-bearing publish session; `--setting-sources user` does not prove instruction isolation. Worktree `.git` redirection can influence other Quarterdeck Git reads despite hooks/fsmonitor overrides and `qd-publish`'s explicit clone directory. Both fall under risk 2's misled-mate acceptance, limited by the repository-scoped token. The **hardening pair (custom socket proxy and worktree link fix)** and then the **Git gate** are the planned fixes (decisions 49, 51, 52); the Git gate removes the token and constrains repository/branch operations. See ADR 0009. No real-agent isolation observation is claimed.
 
 ## Open Questions
 

@@ -1,6 +1,6 @@
 # 07: Review outside-exec access to the Quarterdeck secrets mount
 
-Status: ready-for-human
+Status: done
 Type: task
 
 ## Evidence and impact
@@ -17,3 +17,9 @@ Impact: an outside exec process can potentially read all credentials in the moun
 - [ ] If retained, approve a supported delivery/lifetime boundary that prevents outside exec reads; do not treat read-only mounts or UID equality as isolation.
 - [ ] Validate the selected policy with disposable dummy secrets only, including the mounted-file path and node/default exec identities; print only outcomes, never values. Review other same-UID access paths before claiming isolation.
 - [ ] Reconcile SC-19, ticket 13 and credential documentation/tests with the approved decision before real-token validation. No real credential probe is needed to decide this issue.
+
+## Comments
+
+### Resolution — ticket 21 decision 2
+
+[Ticket 21](../../quarterdeck/issues/21-mvp-security-review-decisions.md) narrows SC-19 to absence of token environment variables in a plain Quarterdeck exec shell. Mounted-source readability is accepted because the host user can already read the source on the host. The SC-19 spec, tests and checklist now distinguish those boundaries; the Git gate later removes repository credentials from the Quarterdeck, not the host user's access to their own file. Closed by explicit narrowing, not a delivery change or proof of unreadability. Historical body preserved; no real secret was read.

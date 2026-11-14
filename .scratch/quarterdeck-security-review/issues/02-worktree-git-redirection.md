@@ -1,6 +1,6 @@
 # 02: Review accepted worktree Git redirection risk
 
-Status: ready-for-human
+Status: done
 Type: task
 
 ## Evidence and impact
@@ -16,3 +16,9 @@ Pointers: `docs/adr/0009-accept-worktree-git-redirection-for-the-mvp.md`, `quart
 - [ ] Specify token-free regression cases for the chosen boundary, including non-hook configuration keys.
 
 Implementation of ticket 07 continues; this review does not authorize testing against real credentials.
+
+## Comments
+
+### Resolution — ticket 21 decision 5
+
+[Ticket 21](../../quarterdeck/issues/21-mvp-security-review-decisions.md) confirms worktree Git redirection is accepted for the MVP as the misled-mate risk, limited by the repository-scoped GitHub token. The hardening pair (custom socket proxy and worktree link fix) and Git gate are the later fixes. Spec accepted risk 15 and ADR 0009 document the boundary; no new isolation or real-token probe is claimed. Closed by explicit acceptance, preserving the historical body and unperformed review checks above.
