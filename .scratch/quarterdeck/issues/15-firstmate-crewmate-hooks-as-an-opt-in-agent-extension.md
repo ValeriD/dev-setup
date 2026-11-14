@@ -1,6 +1,6 @@
 # 15: FirstMate's Crewmate hooks reach a Quarterdeck-created container as an opt-in Agent Extension
 
-**Status:** ready-for-agent
+**Status:** needs-info
 **Model:** Opus (the ticket is about an agent hook)
 **Design slice:** 3 (Hardened project container), design open question 3
 
@@ -41,3 +41,31 @@ First step: read ticket 14's recorded result. If the hooks did fire under the ha
 
 - 07: `qd-project-up` creates the project container from the project's main branch
 - 14: The hardened project container on pomoplan runs the full gate for a hand-spawned Crewmate (its recorded hook result decides whether anything is built)
+
+## Comments
+
+### Conditional prerequisite missing — no implementation authorized by evidence
+
+Fixed point and starting HEAD: `952cbd8bf25bd224d232fbbd026aaac5ef6a4574`. Read tracker instructions, domain/architecture context, spec, full design, dependencies 07 and 14 (including its independent-review closeout), ADRs 0004/0008/0010, creator and installer hook delivery, Base policy, test manifest and ticket 14's checklist.
+
+**Actual deciding result:** ticket 14 explicitly says no real hooks or supervision behavior was observed; its hook-result criterion is unchecked. `quarterdeck/CHECKLIST.md`, “Ticket 14 / hooks and supervision”, likewise says not run. The design's expectation that `allowManagedHooksOnly` suppresses local hooks is not an observed result. Neither a simulated Stop hook nor a passing prepared-home stub loop establishes that real Claude suppresses these hooks. Thus neither the “hooks fired, build nothing” branch nor the conditional implementation branch has been established.
+
+**Sketch / scope:** change only this ticket's status and append this handoff. Reuse the existing ticket 14 checklist rather than add a speculative ticket 15 hook row (reuse ladder rung 1: no new component yet). No independently valid runtime portion exists before this condition is established: even the script and its stub tests would presume that the extension is needed. No script, manifest entry, pinned-source commit, placeholder test or checklist claim was added. No new abstraction, interface, module ownership or dependency direction; no architecture reconciliation required. All six criteria remain unchecked, including the SC-02/SC-10 supervision support.
+
+**Blockers, separated by kind:**
+
+- **Missing manual evidence (direct blocker):** observed busy and turn-end hook firing under the unchanged hardened policy, plus whether supervision works without those hooks. This is the mandatory ticket 14 result, not missing ticket 15 implementation to fill speculatively.
+- **Existing implementation-contract/provisioning failures upstream:** ticket 08/security-review 05 records the pinned devcontainer CLI persisting the extensions token in `/etc/environment`; ticket 11, as reported in ticket 14, records stock shallow-home dispatch failing FirstMate's lineage guard. A real token does not fix either; prepared-history fixture success does not prove stock-home dispatch. These are not merely missing manual evidence and are not repaired under ticket 15.
+- **Missing operational inputs/authorization reported by ticket 14:** authorized fresh owning home/clone with fetched pomoplan `origin/main`, human-provisioned scoped extensions token and Claude authentication, and explicit permission for the real gate. Ticket 14's absent adjacent `origin/main` is its recorded observation, not a new check in this session. No remote fetch, real credential access or real-agent run was attempted here.
+- **Not missing creator implementation:** ticket 07's creator, main export, restricted Template arguments, retained Features, mounts and readiness exist. Its remaining config/Feature and shared-Git-store trust concerns (security-review 01/03), and concerns 04/07, remain logged human follow-up, not blanket gates on otherwise authorized work. Unsupported `runArgs` rejection remains approved; no blanket Feature rejection or new isolation guarantee is introduced.
+
+**Precise resumption instructions:**
+
+1. Follow `quarterdeck/CHECKLIST.md` → “Ticket 14 — pomoplan and a hand-spawned Crewmate”, including its distinction between actual execution blockers and pending policy reviews. Resolve the demonstrated token-persistence failure or obtain explicit acceptance of that specific failure before real-token validation; resolve stock-home provisioning without patching FirstMate or bypassing its guard. Obtain the authorized inputs and real-gate permission there. Do not run that gate as part of this restricted session.
+2. In that attended ticket 14 run, record date, repository/main/config/image and FirstMate/Claude revisions, container identity, unchanged effective hardened policy, and whether FirstMate generated the local hook commands. Record sanitized before/after generation, sequence and timestamps for `state/<slug>.busy-state` and `.turn-ended`, correlated with actual busy/turn-end events, status lines and Herdr states. Never source state/worktree content or dump secret-bearing environments/logs. Record busy and turn-end results separately and supervision with/without their signals. A missing signal alone does not establish policy suppression; inconclusive results remain blocked, with the missing observation identified.
+3. Append those actual results to ticket 14 and link them here. If the hooks fired, record that here and build nothing as this ticket directs. Only if observations establish the specified hardened-policy suppression/need should ticket 15 resume implementation. Preserve the existing Extension mechanism and two-commit source-pin requirement; do not relax policy, alter product dispatch, patch FirstMate, or modify Base/Variant/Template. If observations do not settle the condition, keep this ticket open rather than guessing.
+4. After that condition is established, validate the installed entry and stub behavior through `tests/quarterdeck.test.mjs` (including unset FirstMate variables and data-only generation handling), unchanged hand-opened settings/hook list, and the real-Claude checklist row required above. These are future validation instructions, not acceptance claims. Broader acceptance coverage needs separate authorization under this session's suite restrictions.
+
+**Validation actually run:** `npm run test:quarterdeck` exited 0: **32 tests, 31 pass, 0 ordinary failures, 0 skipped, 1 failing TODO**. The TODO reports the existing ticket 08 failure at `/etc/environment`; it is not evidence of token-file absence. Output: `/tmp/quarterdeck-ticket15-tests.log` (ephemeral). This is unchanged-runtime regression evidence only, not proof of ticket 15's prerequisite or criteria. No new behavior was built, so no red-green cycle is claimed. Broader regression coverage intentionally not run: full acceptance suite, skill suite, installer suite, unrelated suites and pomoplan gate. No real secrets or credential probes were used.
+
+No new distinct security concern was identified; existing concerns are not duplicated or modified. Initial dirty `grill-notes.md`, ticket 07, `CONTEXT.md`, and untracked security-review 01 remain outside this work. Only this ticket is committed, with its path in the commit message. Independent review is deliberately not launched: the parent will dispatch a fresh review after this handoff; no review findings or closure are claimed. Ticket remains open, **needs-info**, with all criteria unticked. No other ticket was started.
