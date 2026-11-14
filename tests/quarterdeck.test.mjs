@@ -61,10 +61,10 @@ after(() => {
   for (const c of run('docker', ['ps', '-aq', '--filter', `label=${runLabel}`, '--filter', `name=${name}`]).out.split('\n').filter(Boolean)) {
     run('docker', ['rm', '-fv', c]);
   }
-  // Files node (uid 1000) wrote into the work root belong to another user when the host uid is not 1000: remove them from a labelled root container.
-  if (process.getuid?.() !== 1000) {
-    run('docker', ['run', '--rm', '--label', runLabel, '--user', 'root', '--entrypoint', 'rm', '-v', `${work}:${work}`, image, '-rf', join(work, 'fleet'), join(work, 'quarterdeck/config'), join(work, 'pool')]);
-  }
+  // FirstMate makes hook directories read-only, even on a uid-1000 host.
+  // Remove only this test's home/config/pool from a labelled root container.
+  run('docker', ['run', '--rm', '--label', runLabel, '--user', 'root', '--entrypoint', 'rm', '-v', `${work}:${work}`, image, '-rf', join(work, 'fleet'), join(work, 'quarterdeck/config'), join(work, 'pool')]);
+  run('docker', ['rmi', crewImage]);
   run('docker', ['rmi', stubImage]);
   run('docker', ['rmi', image]);
   rmSync(work, { recursive: true, force: true });
@@ -95,6 +95,138 @@ const okInside = (script) => {
 };
 
 let firstId;
+const crewImage = `dev-setup-quarterdeck:test-crew-${id}`;
+
+// Test script plays the Second Mate (qd-spec-run steps 2–8); no product checker.
+async function testTicketLoop(t, failure = false) {
+  buildImage();
+  const built = run('docker', ['build', '--build-arg', `NODE_IMAGE=${IMAGE}`, '--label', runLabel,
+    '-t', crewImage, join(REPO, 'tests/fixtures/quarterdeck-crewmate')]);
+  assert.equal(built.code, 0, built.err);
+  const started = quarterdeck();
+  assert.equal(started.code, 0, started.err);
+  const parent = `${work}/fleet/firstmate`;
+  const mate = failure ? 'sm-loop-failure' : 'sm-loop';
+  const home = `${work}/fleet/${mate}`;
+  const origin = `${work}/${mate}-origin.git`;
+  const clone = `${home}/projects/loop`;
+  const slug = failure ? 'loop-failure' : 'loop-success';
+  const put = (p, content) => {
+    const r = run('docker', ['exec', '-i', '-u', 'node', name, 'sh', '-c', 'cat > "$1"', 'sh', p], { input: content });
+    assert.equal(r.code, 0, r.err);
+  };
+  const fm = command => okInside(`cd ${home}; FM_HOME=${home} ${command}`);
+  const read = p => okInside(`cat ${p}`);
+  const git = args => fm(`git -C ${clone} ${args}`).trim();
+  okInside(`rm -rf ${parent}/projects/loop; mkdir -p ${parent}/data ${parent}/projects/loop/.devcontainer; git init -q --bare -b main ${origin}; git -C ${parent}/projects/loop init -q -b main`);
+  put(`${parent}/projects/loop/.devcontainer/devcontainer.json`, JSON.stringify({ image: crewImage, runArgs: ['--cap-drop=ALL'] }));
+  put(`${parent}/projects/loop/.devcontainer/extensions.json`, readFileSync(join(REPO, 'templates/node/.devcontainer/extensions.json'), 'utf8'));
+  put(`${parent}/projects/loop/.gitignore`, '.claude/\n');
+  okInside(`cd ${parent}/projects/loop; git add .; git commit -qm initial; git remote add origin ${origin}; git push -q origin main`);
+  put(`${parent}/data/projects.md`, `- loop [direct-PR branch=feat/] - Token-free loop fixture\n`);
+  // FirstMate's publication guard needs real roots to distinguish this fixture
+  // from its own repository. Fetch public history without any credential helper.
+  if (okInside(`git -C ${parent} rev-parse --is-shallow-repository`).trim() === 'true') {
+    okInside(`git -C ${parent} -c credential.helper= fetch --unshallow https://github.com/ValeriD/firstmate $(git -C ${parent} rev-parse HEAD)`);
+  }
+  okInside(`cd ${parent}; FM_HOME=${parent} FM_SECONDMATE_CHARTER='Second Mate for loop. Commit only.' bin/fm-brief.sh ${mate} --secondmate loop; FM_HOME=${parent} bin/fm-home-seed.sh ${mate} ${home} loop`);
+  // No model plays this Second Mate, so install the same shipped home config
+  // normally inherited when its pane is spawned.
+  okInside(`cp /opt/qd/fleet/config/* ${home}/config/`);
+  const base = git('rev-parse origin/main');
+  const originRefs = okInside(`git --git-dir=${origin} show-ref`);
+  fm(`env -u QUARTERDECK_EXTENSIONS_TOKEN QD_PROJECT_TEST_IMAGE=${crewImage} QD_RUN_LABEL=${runLabel} qd-project-up ${home} loop`);
+  fm(`bin/fm-brief.sh ${slug} loop --mode direct-PR --branch-prefix feat/`);
+  const briefPath = `${home}/data/${slug}/brief.md`;
+  const generated = read(briefPath);
+  const contract = generated.match(/^Delivery contract:.*$/m)?.[0];
+  const branch = generated.match(/^Ship branch:.*$/m)?.[0];
+  assert.ok(contract && branch);
+  put(briefPath, generated.replace('{TASK}', `Spec Run: ${slug}\nProject: loop\nBranch prefix: feat/`)
+    .replace('{FIRSTMATE_SPEC}', `Each session does exactly one job named by the latest ## Progress note. No note: plan.\nFixture failure: ${failure}\nGate: build, lint, test. One commit per job.`)
+    .replace(/This task ships \*\*direct-PR\*\*:[\s\S]*?(?=Do NOT run \/no-mistakes\.)/, 'Commit and report; do not push or open a PR.\n'));
+  assert.ok(read(briefPath).includes(contract) && read(briefPath).includes(branch));
+  fm(`bin/fm-dispatch-resolve.sh ${briefPath}`);
+  const spawned = fm(`bin/fm-spawn.sh ${slug} projects/loop --mode direct-PR --yolo off --branch-prefix feat/ --harness claude --model sonnet`);
+  const wt = spawned.match(/worktree=(\S+)/)?.[1];
+  assert.ok(wt, spawned);
+  const wg = args => fm(`git -C ${wt} ${args}`).trim();
+  const statusPath = `${home}/state/${slug}.status`;
+  const sessionsPath = `${home}/state/${slug}.stub-sessions`;
+  const sessions = () => JSON.parse(`[${read(sessionsPath).trim().split('\n').join(',')}]`);
+  const wait = async count => {
+    for (let n = 0; n < 120; n++) {
+      const result = inside(`cat ${sessionsPath} 2>/dev/null`);
+      if (result.code === 0 && result.out.trim().split('\n').length === count) return;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    assert.fail(`stub session ${count} did not finish; ${inside(`cat ${statusPath}`).out}`);
+  };
+  const lastStatus = () => read(statusPath).trim().split('\n').at(-1);
+  const checkTicket = (nn, start, status = lastStatus()) => {
+    assert.match(status, new RegExp(`^done \\[at=\\d+\\]: ticket ${nn} committed ${wg('rev-parse HEAD')}; build ok, lint ok, test ok$`));
+    wg(`merge-base --is-ancestor ${start} HEAD`);
+    assert.equal(wg(`rev-list --count ${start}..HEAD`), '1');
+    assert.equal(wg('status --porcelain'), '');
+  };
+  const relaunch = (model, note) => {
+    const r = inside(`cd ${home}; FM_HOME=${home} bin/fm-control.sh ${slug} relaunch --model ${model} --note '${note}'`);
+    assert.equal(r.code, 0, r.out + r.err);
+  };
+  await wait(1);
+  const plan = wg('rev-parse HEAD');
+  assert.match(lastStatus(), new RegExp(`^done \\[at=\\d+\\]: plan committed ${plan}; 2 tickets$`));
+  assert.equal(wg(`rev-list --count ${base}..HEAD`), '1');
+  assert.equal(wg('status --porcelain'), '');
+  for (const file of ['spec.md', 'design.md', 'issues/01-skills.md', 'issues/02-code.md']) assert.ok(read(`${wt}/.scratch/${slug}/${file}`).trim());
+  const dispatch = JSON.parse(read(`${home}/config/crew-dispatch.json`));
+  let count = 1;
+  for (const [nn, file] of [['01', '01-skills.md'], ['02', '02-code.md']]) {
+    const ticket = `.scratch/${slug}/issues/${file}`;
+    const text = read(`${wt}/${ticket}`);
+    const model = /about skills, prompts or agent tools/.test(text) ? dispatch.rules[0].use.model : dispatch.default[0].model;
+    const start = wg('rev-parse HEAD');
+    relaunch(model, `Ticket ${nn}: ${ticket}. Start commit ${start}.`);
+    await wait(++count);
+    if (lastStatus().startsWith('failed ')) {
+      const failed = wg('rev-parse HEAD');
+      relaunch(model, `Retry of ticket ${nn}. Save the failed attempt as refs/quarterdeck/failed/${nn}-1, then reset to ${start}.`);
+      await wait(++count);
+      assert.match(lastStatus(), /^failed /);
+      assert.equal(wg(`rev-parse refs/quarterdeck/failed/${nn}-1`), failed);
+      assert.equal(wg('rev-parse HEAD^'), start, 'retry reset to original start before new attempt');
+      break; // second failure: no later ticket and no publish
+    }
+    checkTicket(nn, start);
+    assert.throws(() => checkTicket(nn, start, lastStatus().replace(', lint ok', '')), /match/);
+    const state = fm(`bin/fm-crew-state.sh ${slug}`);
+    assert.match(state, /blocked[\s\S]*named head[\s\S]*unreachable/);
+    t.diagnostic(`ticket ${nn}: ${state.trim()}`);
+  }
+  assert.equal(wg('branch --show-current'), `feat/${slug}`);
+  assert.deepEqual(git('for-each-ref --format="%(refname:short)" refs/heads').split('\n'), [`feat/${slug}`, 'main']);
+  assert.equal(okInside(`git --git-dir=${origin} show-ref`), originRefs, 'no push');
+  assert.equal(wg('status --porcelain'), '');
+  const observed = sessions();
+  assert.equal(observed.length, 3, 'plan and two sessions only');
+  assert.equal(new Set(observed.map(s => s.session)).size, 3);
+  assert.ok(observed.every(s => s.cwd === wt && !s.argv.some(a => /^(--resume|--continue|-r|-c)(=|$)/.test(a))));
+  const logs = read(`${work}/quarterdeck/logs/launch.log`).trim().split('\n').map(JSON.parse).filter(s => s.cwd === wt);
+  assert.deepEqual(logs.map(s => s.model), failure ? ['sonnet', 'opus', 'opus'] : ['sonnet', 'opus', 'sonnet']);
+  assert.ok(logs.every(s => s.route === 'project'));
+  if (!failure) {
+    assert.deepEqual(wg(`log --reverse --format=%s ${base}..HEAD`).split('\n'), ['plan', 'ticket 01', 'ticket 02']);
+    assert.equal(observed[2].start, observed[1].head, 'ticket 2 sees ticket 1 commit');
+  } else {
+    assert.equal(observed[2].start, plan);
+    assert.match(observed[2].note, /Retry of ticket 01/);
+    assert.equal(inside(`test -e ${wt}/ticket-02`).code, 1);
+  }
+  assert.equal(fm(`find state -maxdepth 1 -name '*.meta' -printf '%f\\n'`).trim(), `${slug}.meta`, 'one FirstMate record');
+  assert.equal(okInside(`git -C ${home} status --porcelain --untracked-files=no`).trim(), '', 'FirstMate unpatched');
+  assert.equal(okInside(`git -C ${parent} status --porcelain --untracked-files=no`).trim(), '', 'parent unpatched');
+}
+
 
 function testLauncherFixture({ home, wt, cid, put, probe }) {
   assert.equal(inside('test -x /opt/qd/bin/claude').code, 0, 'launcher installed');
@@ -772,6 +904,9 @@ test('a missing branch, a failing push and a failing gh all exit non-zero and pr
   const lines = r.out.trim().split('\n');
   assert.deepEqual(lines, ['missing:', 'code=1', 'no-tickets:', 'code=1', 'push:', 'code=128', 'rejected:', 'code=1', 'gh:', 'code=1'], r.out);
 });
+
+test('ticket loop: plan and ordered fresh Crewmates without push (SC-03–06,13–14)', t => testTicketLoop(t));
+test('ticket loop failure: preserve one attempt, retry once, stop without push (SC-11,13)', t => testTicketLoop(t, true));
 
 test('qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)', () => testProjectFixture());
 test('qd-project-up extensions fixture: creation-only read token, helper and persistence checks (SC-16, SC-19)', t => testProjectFixture(`dummy-extensions-${id}`, t));
