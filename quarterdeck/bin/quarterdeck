@@ -93,7 +93,7 @@ warnings() { docker logs "$name" 2>&1 | grep '^dev-setup: WARNING' >&2 || true; 
 start() {
   docker image inspect "$image" >/dev/null 2>&1 || build
   if [ -n "$(running)" ]; then
-    if [ "$first_mate" = no ]; then wait_ready; fi
+    wait_ready
     # A normal invocation after a manual start opens the skipped workspace through Herdr,
     # whose server (not this exec process) supplies the pane's tokens.
     local has_first_mate
@@ -144,7 +144,7 @@ wait_ready() {
   local i
   for i in $(seq 1 120); do
     [ -n "$(running)" ] || { docker logs "$name" >&2 || true; die "the container stopped while starting"; }
-    docker exec -u node "$name" sh -c 'test -e /run/quarterdeck-ready && test -e /run/egress/ready && docker version >/dev/null 2>&1 && herdr --session default status server | grep -q "status: running"' && { warnings; return 0; }
+    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && docker version >/dev/null 2>&1 && herdr --session default status server | grep -q "status: running" && { test -e /run/quarterdeck-ready || herdr --session default workspace list | jq -e '\''[.. | objects | select(.label? == "firstmate")] | length > 0'\'' >/dev/null; }' && { warnings; return 0; }
     sleep 0.5
   done
   docker logs "$name" >&2 || true

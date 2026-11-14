@@ -552,6 +552,27 @@ test('a second quarterdeck attaches without replacing a running container, inclu
     assert.equal(r.code, 0, `${r.out}\n${r.err}`);
     assert.match(r.out, /status: running/);
     assert.deepEqual(ours(), [firstId]);
+    // Also hold startup readiness back: reuse must wait rather than inspect/seed early.
+    const pending = run('bash', ['-ceu', String.raw`
+export QUARTERDECK_NAME="$2" QUARTERDECK_IMAGE="$3" QUARTERDECK_WORK_ROOT="$4"
+export QUARTERDECK_SECRETS="$5" QUARTERDECK_RUN_LABEL="$6"
+log=$(mktemp)
+trap 'docker exec -u root "$2" touch /run/egress/ready >/dev/null; rm -f "$log"' EXIT
+docker exec -u root "$2" rm /run/egress/ready
+"$1" start >"$log" 2>&1 &
+child=$!
+sleep 2
+if ! kill -0 "$child" 2>/dev/null; then
+  cat "$log"
+  echo 'normal reuse returned before startup readiness' >&2
+  wait "$child" || true
+  exit 1
+fi
+docker exec -u root "$2" touch /run/egress/ready
+wait "$child" || { cat "$log"; exit 1; }
+`, 'qd-startup', COMMAND, name, image, work, secretsFile, runLabel]);
+    assert.equal(pending.code, 0, `${pending.out}\n${pending.err}`);
+    assert.deepEqual(ours(), [firstId]);
   } finally {
     run('docker', ['exec', '-u', 'root', name, 'touch', '/run/quarterdeck-ready']);
   }
