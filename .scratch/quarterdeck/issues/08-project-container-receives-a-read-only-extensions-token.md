@@ -1,6 +1,6 @@
 # 08: The project container receives a read-only token for fetching Agent Extensions, and nothing that can push
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), private extension sources
 
@@ -18,13 +18,13 @@ The user supplies the token value; that is a human step needed only for the real
 
 ## Acceptance criteria
 
-- [ ] With `QUARTERDECK_EXTENSIONS_TOKEN` set to a dummy in `qd-project-up`'s environment, the created container has `DEV_SETUP_GITHUB_PAT` equal to it (compared by hash) at container level, and `git credential fill` for `github.com` inside the container answers with it (Base's helper), and for any other host answers nothing.
+- [x] With `QUARTERDECK_EXTENSIONS_TOKEN` set to a dummy in `qd-project-up`'s environment, the created container has `DEV_SETUP_GITHUB_PAT` equal to it (compared by hash) at container level, and `git credential fill` for `github.com` inside the container answers with it (Base's helper), and for any other host answers nothing.
 - [ ] The value appears in no file: not in the rendered `devcontainer.json`, not in the export under `/home/valeri/work/quarterdeck/config/`, not in logs, not in an image layer.
 - [ ] The container never has `GH_TOKEN`, `GITHUB_TOKEN`, `QUARTERDECK_GITHUB_TOKEN` or the project repository's token, and nothing from the project's own config's GitHub variables (SC-16, restated).
 - [ ] With the variable unset, `qd-project-up` still creates the container, prints a warning naming `QUARTERDECK_EXTENSIONS_TOKEN`, and a Project layer with a private source then fails with the installer's existing message.
 - [ ] The Claude token path of the launcher (ticket 09) is unchanged and still never forwards any GitHub variable; this ticket's token is delivered only at creation.
-- [ ] A container opened by hand from a Template is unchanged: `git diff` shows no change under `base/`, `variants/` or `templates/`, and the existing acceptance suite passes.
-- [ ] A new ADR records the narrowing and the reason (read-only, one repository, fetching Agent Extensions only), and `quarterdeck/CHECKLIST.md` gets a row for the human with the real token: in the container `git ls-remote` of `ValeriD/skills` works, another private repository is not readable, and a push to `ValeriD/skills` is refused.
+- [x] A container opened by hand from a Template is unchanged: `git diff` shows no change under `base/`, `variants/` or `templates/`, and the existing acceptance suite passes.
+- [x] A new ADR records the narrowing and the reason (read-only, one repository, fetching Agent Extensions only), and `quarterdeck/CHECKLIST.md` gets a row for the human with the real token: in the container `git ls-remote` of `ValeriD/skills` works, another private repository is not readable, and a push to `ValeriD/skills` is refused.
 
 ## Technical context
 
@@ -70,3 +70,13 @@ ADR 0010 records the narrowing of ADR 0007 and ticket 20's accepted inspect expo
 **Operator notes:** token changes do not alter tree-based container identity. Updating the source file requires a fresh Herdr session; updating an already-created project's token requires deliberate removal/recreation of only the container whose creator/home/project labels you verified. Revocation is done at GitHub; unsetting the variable does not revoke a reused container's old token. Keep tracing disabled and never print token values, raw credential-fill output or raw inspect output as evidence. No real-token run was performed or requested from the agent.
 
 All acceptance checkboxes and status are left for the parent after independent review; this is not closure. No other implementation ticket was changed. Preexisting modifications to `grill-notes.md` and ticket 07 are preserved outside commits, as is the initially untracked concern 01 (including this session's appended evidence). Concurrent edits appeared in `CONTEXT.md` and additional `grill-notes.md` content during validation; they are not this implementation's changes and remain unstaged. Implementation and documentation are committed together with this ticket path in the commit message.
+
+### Documentation resolution — ticket remains open
+
+Implementation commit: `b9cd6de56b84b3d67bb8e5a3bd6daa47a56eb3fa`. [Independent reviewer reports and dispositions](../reviews/08-independent-review.md) preserve all three reports verbatim.
+
+Only fully satisfied criteria are checked: committed dummy container/helper behavior; unchanged Base/Variant/Template plus the independently passing existing acceptance suite; and ADR 0010 plus the human checklist. The fixed-point-to-implementation diff under `base/`, `variants/`, and `templates/` is empty. Independent finalization run: `node --test --test-global-setup=tests/global-setup.mjs --test-timeout=900000 tests/acceptance.test.mjs` — **11 passed, 0 failed, 0 TODO**. Implementation validation remains **28 passed, 0 ordinary failures, 1 failing TODO** for Quarterdeck and **87 passed, 0 ordinary failures, 1 failing TODO** for the full suite; these are prior committed evidence, not new full-suite runs or a green persistence assertion.
+
+**Review dispositions:** Standards has no findings. Design 1 and Spec 1 are accepted as true blockers; immediate remediation is declined/deferred under user direction to log security concerns and continue against the existing design, not rejection of the constraint. [Security-review 05](../../quarterdeck-security-review/issues/05-devcontainer-cli-persists-extensions-token.md) tracks persistence in `/etc/environment`; the no-file criterion remains unchecked. Spec 2 is an accepted validation gap: the immediate real/private run is deferred because the private-source fixture/credentials are unavailable. Explicit manual instructions are already recorded above and in `quarterdeck/CHECKLIST.md`; the absent-token/private-source criterion remains unchecked.
+
+Remaining blockers are filesystem persistence, private-source startup/permission evidence, universal credential-exclusion proof beyond the dummy fixture and its recorded trust/provisioning limits, and ticket 09's unimplemented launcher proof. Those partial/blocked criteria remain unchecked. **Open; Status: ready-for-human.** No code or other ticket was changed for this finalization; unrelated working edits and untracked security concern 01 are preserved.
