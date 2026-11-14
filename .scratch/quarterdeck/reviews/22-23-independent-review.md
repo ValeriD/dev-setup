@@ -92,3 +92,54 @@ A normal `quarterdeck` invocation now skips readiness waiting whenever Docker re
 The correction bypasses readiness for every normal invocation, not just already-ready legacy containers. Docker reports a container as running while `qd-entry` is still applying egress and starting Herdr and the home-seeding process. A second normal invocation during that interval immediately inspects workspaces: before Herdr answers it can fail with “could not inspect First Mate workspace”; after Herdr answers but before seeding finishes, it can launch another `qd-first-mate` against the same home. Previously, `wait_ready` prevented both paths. Preserve the legacy-container attachment fix while retaining the startup barrier for current containers.
 
 **Overall correctness:** incorrect. One patch-introduced SC-01/readiness regression; no additional findings against ticket 22 or decisions 88/89. No builds or tests were run.
+
+### Correction-review dispositions
+
+- Standards startup-gating finding: **Fixed** in `9c2da18`.
+- Design readiness-synchronization finding: **Fixed** in `9c2da18`.
+- Spec SC-01/readiness finding: **Fixed** in `9c2da18`.
+
+All three describe the same synchronization defect. Reuse now always waits for egress, Docker and Herdr plus either completed setup's marker or an existing First Mate workspace. The attachment regression retains marker-free reuse and adds a held-readiness check. No findings declined.
+
+## Final correction review — fixed point `0520424`
+
+### Design
+
+No material design-axis findings.
+
+The correction restores readiness gating for running-container reuse while preserving legacy markerless attachment. The fallback `firstmate` workspace is created only after home seeding, repair, configuration and trust setup, preserving ticket 23’s “Readiness follows completed seeding” constraint.
+
+The added acceptance case uses the existing real-container seam to check that reuse waits for readiness without replacing the container. No missing planned validation outcomes identified within this correction range.
+
+Overall correctness: correct.
+Confidence: 0.93.
+
+No builds, tests, linters or formatters were run.
+
+### Spec
+
+No actionable spec-axis findings in `0520424...HEAD` (`9c2da18`).
+
+- **SC-01 / ticket 23:** Unconditional `wait_ready` restores synchronization during running-container reuse. The marker-or-existing-workspace fallback preserves attachment to initialized legacy containers without the new marker.
+- **Ticket 23 / D89:** Agent-free startup still waits for completed seeding; later normal startup reaches the existing First Mate activation path.
+- **Ticket 22 / D88:** The correction does not alter pinned full-history installation, offline home repair, or dispatch setup.
+
+No patch-introduced missing outcomes, scope creep, or incorrect implementations identified.
+
+**Overall correctness:** correct.
+**Confidence:** 0.93.
+No builds, tests, linters, or formatters run.
+
+## Standards
+
+**Documented violations:** None found against project instructions, `docs/agents/architecture.md`, `docs/agents/domain.md`, `docs/agents/issue-tracker.md`, `CONTEXT.md`, or relevant ADRs.
+
+**Baseline smells:** No actionable patch-introduced smells from `SMELLS.md`. The existing workspace-label query is repeated in readiness detection, but serves a distinct compatibility check; extracting it is not warranted by this correction alone.
+
+**Changed-test value — judgement:** `tests/quarterdeck.test.mjs:555–578` adds distinct regression protection: normal reuse must remain blocked while egress readiness is withheld, then succeed without replacing the container. Existing tests checked successful attachment and container identity, not waiting during incomplete readiness. The fixture couples to an internal readiness marker, but uses the existing real-container acceptance seam rather than duplicating production readiness logic. It preserves the unique marker-free compatibility check. No test removal recommended.
+
+**Overall correctness:** correct. No actionable standards-axis defects found in committed correction `9c2da18`. No builds, tests, linters, or formatters were run.
+
+**Confidence:** 0.94.
+
+Final correction review: Standards 0 actionable findings; Design 0; Spec 0. Every earlier finding is fixed; none declined.
