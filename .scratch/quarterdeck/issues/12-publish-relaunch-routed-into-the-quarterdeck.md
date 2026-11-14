@@ -14,13 +14,13 @@ After the last ticket the Second Mate writes a route marker and relaunches the s
 
 ## Acceptance criteria
 
-- [ ] The launcher chooses the publish route only when `<home>/data/<id>/qd-route` exists, with the home taken from `FM_TASK_INBOX`; the marker is deleted when used. The same marker placed in `<home>/state/`, or one that the project container could write, is ignored (the project container cannot write `data/`) (launcher row of the Validation plan).
-- [ ] In the publish route the launcher runs the real Claude in the Quarterdeck with `--setting-sources user`, and re-appends `core.hooksPath=/dev/null` and `core.fsmonitor=false` `GIT_CONFIG_*` entries after FirstMate's own entries.
-- [ ] The extended stub run: after ticket 2 the test writes the marker and relaunches with `--note "Publish."`; the stub session (in the Quarterdeck) runs `qd-publish`, the branch reaches the local origin, the stub `gh` receives the pull request, and the stub appends `done [at=...]: PR <url>` (SC-08 token-free half).
-- [ ] After that, `fm-crew-state.sh` no longer reports the head as unreachable and FirstMate's done gate accepts the line; what FirstMate does with the PR through its normal PR path is recorded in a comment on this file (SC-14).
-- [ ] The origin has exactly one commit per ticket after the plan commit, in order, and the PR body lists the tickets (SC-04, SC-08).
-- [ ] The failing-ticket run of ticket 11 still publishes nothing.
-- [ ] `quarterdeck/CHECKLIST.md` gains a row: with a real Claude in the publish route, do `CLAUDE.md` and worktree skills still load (the design flags this as unverified), and do worktree-written settings not load.
+- [x] The launcher chooses the publish route only when `<home>/data/<id>/qd-route` exists, with the home taken from `FM_TASK_INBOX`; the marker is deleted when used. The same marker placed in `<home>/state/`, or one that the project container could write, is ignored (the project container cannot write `data/`) (launcher row of the Validation plan).
+- [x] In the publish route the launcher runs the real Claude in the Quarterdeck with `--setting-sources user`, and re-appends `core.hooksPath=/dev/null` and `core.fsmonitor=false` `GIT_CONFIG_*` entries after FirstMate's own entries.
+- [x] The extended stub run: after ticket 2 the test writes the marker and relaunches with `--note "Publish."`; the stub session (in the Quarterdeck) runs `qd-publish`, the branch reaches the local origin, the stub `gh` receives the pull request, and the stub appends `done [at=...]: PR <url>` (SC-08 token-free half).
+- [x] After that, `fm-crew-state.sh` no longer reports the head as unreachable and FirstMate's done gate accepts the line; what FirstMate does with the PR through its normal PR path is recorded in a comment on this file (SC-14).
+- [x] The origin has exactly one commit per ticket after the plan commit, in order, and the PR body lists the tickets (SC-04, SC-08).
+- [x] The failing-ticket run of ticket 11 still publishes nothing.
+- [x] `quarterdeck/CHECKLIST.md` gains a row: with a real Claude in the publish route, do `CLAUDE.md` and worktree skills still load (the design flags this as unverified), and do worktree-written settings not load.
 
 ## Technical context
 
@@ -68,3 +68,76 @@ Remaining blockers and limits; criteria stay unticked:
 4. **Security review:** added distinct ready-for-human concern `06-publish-session-worktree-instruction-trust.md` for project-authored instructions reaching a credential-bearing publish agent. Existing concerns 01–05 remain unresolved; approved unsupported-`runArgs` rejection and retained Features are unchanged. Hooks/fsmonitor overrides are not a general Git/configuration or prompt-injection isolation guarantee.
 
 No review dispatched; ticket/design/spec remain open. Preserved and excluded from staging: existing grill notes, ticket 07, `CONTEXT.md`, and untracked security-review ticket 01.
+
+### Step 7 resolution — reviewed implementation; open dependency
+
+Implementation commit: `b3cb7cad505a65116a361773ce8f90f2d090a004` (`b3cb7ca`), reviewed against fixed point `8438101911e7ab0268d89668a627f16cbf69b6bc`. Built the private-marker publish route and extended the existing same-record stub loop through local-origin publication and FirstMate done-gate acceptance; added the manual settings/instructions checklist row.
+
+This resolution supersedes the handoff's blanket decision to leave criteria unticked and its pending-review statement. All seven ticket-local criteria are satisfied by the committed evidence within their specified token-free/fixture scope:
+
+1. **Checked:** launcher fixture proves inbox-derived private-marker authority, rejection of state/worktree markers, denied project-container writes to `data/`, consumption, and return to project routing. This is ordinary configured-container evidence, not isolation against arbitrary Features or shared Git stores.
+2. **Checked:** launcher invokes the real-Claude executable path locally with final `--setting-sources user`; the replacement executable verifies argv and effective hooks/fsmonitor overrides after conflicting prior entries. Real Claude's interpretation of that flag is not observed.
+3. **Checked:** prepared-home stub loop relaunches the same record after ticket 02 with `Publish.`, executes unchanged `qd-publish`, reaches the local origin, calls stub `gh`, and writes the timestamped PR done line.
+4. **Checked:** real `fm-crew-state.sh` changes from unreachable/blocked to accepted done through its done gate. The preceding handoff records FirstMate's normal PR path by pinned-source inspection. Watcher registration, forge reads, merge polling and landing/teardown were not observed; source inspection is not runtime proof of those behaviors.
+5. **Checked:** origin log assertion is exactly `plan`, `ticket 01`, `ticket 02` in order; the stub PR body lists both tickets.
+6. **Checked:** the recorded Quarterdeck run includes the failing-ticket loop: unchanged origin refs, no publish session, and no ticket 02 after the retry limit.
+7. **Checked:** `quarterdeck/CHECKLIST.md` gained the requested real-Claude settings/instruction-loading row. This criterion requires adding the row, not executing it. The manual check remains **not run**.
+
+No ticket-local criterion remains unproven in that stated scope. **Ticket remains open (`ready-for-agent`) because dependency 11's stock shallow-home lineage/provisioning failure is unresolved.** The successful integration run requires full public FirstMate history and seeded configuration; it does not prove untouched shipped startup. Closing this ticket would conceal that outstanding dependency. Design/spec remain open and unchanged.
+
+Pending evidence and risks are not promoted to checked runtime outcomes: real Claude settings exclusion, `CLAUDE.md`/skill loading, lifecycle/policy compatibility and autonomous supervision/PR tracking remain unobserved. Real GitHub credentials/publication belong to ticket 13; local-origin/stub-gh success does not establish them. The existing extensions-token TODO and security-review concerns 01–06 remain separate unresolved limits, including credential-bearing publish-agent instruction trust.
+
+Validation relies on the committed handoff's Quarterdeck-only run: 32 tests, 31 pass, 0 fail, 1 existing TODO, plus the recorded syntax/diff checks. No tests rerun for this tracker-only update. Broader regression coverage intentionally omitted: no `npm test`, full suite, `test:skill`, or unrelated suites; unrelated behavior therefore has no new regression evidence.
+
+Independent reviews below are preserved verbatim: **Standards 0, Design 0, Spec 0 findings**. No fixes or declines are required. Only this ticket record is changed; unrelated dirty grill notes, ticket 07, `CONTEXT.md`, and untracked security ticket 01 are excluded.
+
+#### Independent report: `/tmp/qd12-review-standards.log`
+
+```text
+## Standards
+
+No actionable findings in `git diff 8438101911e7ab0268d89668a627f16cbf69b6bc...HEAD` (commit `b3cb7ca`).
+
+- No documented-standard breaches or material baseline smells found.
+- Added tests provide distinct protection: private-marker authority and consumption, effective Git overrides, and publication through the existing FirstMate record. Overlap with publisher tests verifies integration rather than merely duplicating them.
+- Real-Claude settings/instruction loading and autonomous PR tracking are explicitly pending evidence, not falsely claimed implementation results.
+- Worktree instruction trust is already documented for human security review in concern 06; accepted Git-redirection policy remains unchanged.
+
+Tests were not rerun. No files edited or commits created; working-tree changes preserved.
+
+**Summary:** Standards: 0 findings.
+```
+
+#### Independent report: `/tmp/qd12-review-design.log`
+
+```text
+## Design
+
+No material design violations found in `8438101911e7ab0268d89668a627f16cbf69b6bc...HEAD` (`b3cb7ca`).
+
+- Publish routing remains launcher-owned, consumes the private marker, and preserves the existing FirstMate record/worktree.
+- Git overrides and `--setting-sources user` match the design.
+- Tests extend the existing integration seam and reuse unchanged `qd-publish`, rather than introducing lifecycle infrastructure.
+- Real-Claude settings/instruction loading and autonomous PR tracking are explicitly pending evidence—not missing ticket-12 implementation. The shallow-home provisioning blocker belongs to dependency 11.
+- Worktree instruction trust is appropriately recorded for human security review; no isolation claim is established.
+
+Tests not rerun. No files edited or commits created.
+
+**Summary: Design — 0 findings.**
+```
+
+#### Independent report: `/tmp/qd12-review-spec.log`
+
+```text
+## Spec
+
+No findings in `git diff 8438101911e7ab0268d89668a627f16cbf69b6bc...HEAD` (commit `b3cb7ca`).
+
+The diff implements ticket 12’s token-free requirements: private marker consumption, Quarterdeck routing, final Git overrides, same-record publication, accepted done status, ordered commits and ticket-listed PR body, plus the manual checklist row.
+
+Pending real-Claude settings/instruction loading, real GitHub publication and watcher registration are explicitly unproven evidence—not missing ticket-12 implementation. The stock shallow-home provisioning blocker remains a documented dependency issue. Instruction-trust risk is already recorded for human review.
+
+Tests not rerun. No edits or commits; working-tree changes preserved.
+
+**Summary: Spec — 0 findings.**
+```
