@@ -1,6 +1,6 @@
 # 07: `qd-project-up` creates the project container from the project's main branch
 
-**Status:** needs-info
+**Status:** ready-for-agent
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), the fixture half
 
@@ -48,6 +48,10 @@
 
 ## Comments
 
+### User decision: restrict `runArgs`
+
+The user approved rejecting unsupported `runArgs` and allowing only explicitly validated Template options. This supersedes unconditional preservation of `runArgs` in the technical context and design. Resume implementation with this restriction, reconcile the design, and test rejection before invoking the devcontainer CLI. This approval does not authorize weakening other security constraints or treating arbitrary Features and environment substitutions as safe.
+
 ### Implementation blocked: `runArgs` security contract
 
 Fixed point: `d4b0a3d0c650d57bece5412f2a99c1095ccb7869`; initial working tree clean. Dependencies 01 and 04 were read and are done. No implementation was started and no acceptance criterion is claimed satisfied.
@@ -63,3 +67,17 @@ Actual baseline validation before stopping:
 - `npm test`: 85 passed, 0 failed, 0 skipped (including the run's node image build).
 
 These are unchanged-code baseline results, not coverage of ticket 07. No new red/green cycle, ADR, implementation commit or independent implementation review occurred: implementation stopped before those stages because of the material security decision. No manual/live-agent validation was claimed. All criteria remain unticked; ticket 07 stays open. Ticket 20 and all other implementation tickets are untouched.
+
+### Sequential implementation blocked: retained Feature trust boundary
+
+Fixed point: `6620211afd87ab888c537e2ecf5764ac76416235`. Initial tree contained only the user's ready-for-agent status and approved `runArgs` restriction in this ticket; both are preserved. Dependencies 01 and 04, tracker instructions, the spec and full design were read. The approved restriction resolves the earlier `runArgs` decision; it does not resolve Feature trust.
+
+**Concrete remaining conflict:** the design's Project container / Image and config row and this ticket require preserving `features`. Dev Container Feature metadata can itself supply `mounts` (including binds), `containerEnv`, `privileged`, `capAdd`, `securityOpt` and `entrypoint`, and can introduce dependencies through `dependsOn`. Thus a main-branch local Feature can request an additional host bind or privileged mode even when top-level `runArgs` and mounts are restricted. The pinned base image does not pin or validate these additional Features. Feature installation scripts can also modify that image; checking metadata alone is not a complete trust policy. This conflicts with the exact mount set and hardened-container requirements (SC-15–17). The approved comment explicitly does not authorize treating arbitrary Features as safe.
+
+Evidence inspected: `templates/node/.devcontainer/devcontainer.json`, `variants/node/devcontainer.json`, `quarterdeck/Dockerfile`, and the upstream Feature schema at https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainerFeature.schema.json (`definitions.Feature.properties`, notably the fields above). This is configuration/schema evidence, not a live exploit or acceptance test. No secret values were accessed.
+
+**Decision needed:** may the creator reject all project-added Features for this fixture slice (leaving the published image's own egress Feature metadata intact), with support for audited/pinned project Features deferred to an explicitly approved policy? Alternatively, specify the trusted Feature set, including local Feature content and transitive dependencies, and permitted runtime metadata. Rejecting all Features changes the documented accepted configuration contract and affects the planned local `playwright-deps` Feature; it must not be silently implemented. Environment substitutions also need fail-closed validation: a non-GitHub-named variable can reference `${localEnv:GH_TOKEN}`. The implementation must never resolve such references against the credential-bearing parent environment.
+
+Sketch is deferred at this material boundary. Expected ownership and reuse remain the Node creator → main export → pinned devcontainer CLI → existing proxy, using `jsonc-parser`, with SC-15/16/17 validated at the real fixture seam. No new abstraction, dependency-direction change, model-dispatch change or other ticket work was started.
+
+Actual check in this session: `docker info --format '{{.ServerVersion}}'` succeeded with `28.1.1`. No test suite was run in this session; the earlier baseline counts above are historical, not new results. No red-green cycle, implementation, ADR, architecture reconciliation or independent implementation reviews occurred because the implement skill requires stopping for this security-contract decision before building. No manual/live-agent validation is claimed. All criteria remain unticked and the ticket remains open; its user-set status is preserved. Ticket 20 and all other implementation tickets are untouched. This comment is committed as the blocker record, not as a completed implementation.
