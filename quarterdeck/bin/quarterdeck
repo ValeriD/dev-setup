@@ -115,6 +115,7 @@ start() {
     -v "$work:$work" -e "QD_WORK_ROOT=$work" -e "QD_RUN_LABEL=${QUARTERDECK_RUN_LABEL:-}" \
     -v "$work/quarterdeck/claude:/home/node/.claude" \
     -v "$work/pool:/home/node/.treehouse" \
+    -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL \
     ${mount[@]+"${mount[@]}"} \
     "$image" >/dev/null
   # Ready when egress is locked and Herdr's server answers; stop waiting if the container dies.

@@ -1,0 +1,63 @@
+#!/bin/bash
+# FirstMate calls Claude unchanged. Only pool launches cross into the project container.
+set -euo pipefail
+cwd=$(pwd -P)
+root=${QD_WORK_ROOT:-/home/valeri/work}
+route=quarterdeck
+container=
+model=
+argv=("$@")
+for ((i=0; i<${#argv[@]}; i++)); do
+  case "${argv[i]}" in
+    --model) model=${argv[i+1]:-} ;;
+    --model=*) model=${argv[i]#--model=} ;;
+  esac
+done
+die() { echo "claude launcher: $*" >&2; exit 1; }
+case "$cwd/" in
+  /home/node/.treehouse/) die 'launch from the exact worktree, not the pool root' ;;
+  /home/node/.treehouse/*)
+    route=project
+    inbox=${FM_TASK_INBOX:-}
+    [[ "$inbox" = /*/state/*.inbox ]] || die 'project launch requires FM_TASK_INBOX=<home>/state/<id>.inbox'
+    state=${inbox%/*}
+    [[ "${state##*/}" = state ]] || die 'invalid inbox path'
+    home=$(realpath -e "${state%/*}")
+    work=$(realpath -e "$root")
+    [[ "$home" = "$work/"* ]] || die 'home must be under QD_WORK_ROOT'
+    ids=$(docker ps -q --no-trunc --filter label=quarterdeck.creator=qd-project-up --filter "label=quarterdeck.home=$home")
+    [[ -n "$ids" && "$ids" != *$'\n'* ]] || die 'expected exactly one running project container for home; run qd-project-up'
+    container=$ids
+    ;;
+esac
+# JSONL preserves one record even for unusual paths; never log full argv or credentials.
+mkdir -p "$root/quarterdeck/logs"
+node -e 'const fs=require("fs"); const [file,route,container,cwd,model]=process.argv.slice(1); fs.appendFileSync(file,JSON.stringify({route,container,cwd,model})+"\n")' "$root/quarterdeck/logs/launch.log" "$route" "$container" "$cwd" "$model"
+if [[ "$route" = quarterdeck ]]; then exec /usr/local/bin/claude "$@"; fi
+# No forwarded env on this preparation exec: use the container's own CLAUDE_CONFIG_DIR.
+docker exec -u node "$container" node -e '
+const fs=require("fs"), path=require("path");
+const dir=process.env.CLAUDE_CONFIG_DIR;
+if (!dir) throw Error("CLAUDE_CONFIG_DIR is required");
+const file=path.join(dir,".claude.json");
+fs.mkdirSync(dir,{recursive:true});
+let text="";
+try { text=fs.readFileSync(file,"utf8"); } catch(e) { if(e.code!=="ENOENT") throw e; }
+const config=text.trim() ? JSON.parse(text) : {hasCompletedOnboarding:true};
+if (!config || typeof config!=="object" || Array.isArray(config)) throw Error("invalid Claude config");
+config.projects ??= {};
+if (typeof config.projects!=="object" || Array.isArray(config.projects)) throw Error("invalid Claude projects");
+const cwd=process.argv[1];
+config.projects[cwd]={...config.projects[cwd],hasTrustDialogAccepted:true};
+const tmp=file+".qd-"+process.pid;
+fs.writeFileSync(tmp,JSON.stringify(config),{mode:0o600});
+fs.renameSync(tmp,file);
+' "$cwd"
+args=(-u node -it -w "$cwd")
+# compgen lists exported names, not values (including multiline values).
+while IFS= read -r name; do
+  case "$name" in
+    FM_*|GIT_CONFIG_*|CLAUDE_CODE_*|GIT_AUTHOR_*|GIT_COMMITTER_*|COMPACT_ADVISER_DISABLE|TRACEPARENT) args+=(-e "$name") ;;
+  esac
+done < <(compgen -e)
+HERDR_AGENT=claude exec docker exec "${args[@]}" "$container" claude "$@"

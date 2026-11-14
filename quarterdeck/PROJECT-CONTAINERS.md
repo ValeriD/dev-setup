@@ -10,4 +10,12 @@ Containers are selected by creator, project and canonical home labels (plus `QD_
 
 All bind sources are prepared as the invoking user. The host work root must map to the same path in Docker and be writable by uid 1000, as required by `quarterdeck`. The pool uses the host `QD_WORK_ROOT/pool` source and `/home/node/.treehouse` destination in both containers.
 
+## Claude launches
+
+FirstMate invokes `/opt/qd/bin/claude` through PATH. From a directory below `/home/node/.treehouse`, it resolves the home from `FM_TASK_INBOX=<home>/state/<id>.inbox` and requires exactly one running `qd-project-up` container labelled for that canonical home. Run the creator first; missing/ambiguous containers fail rather than launching locally. The pool root itself is refused. Other directories exec `/usr/local/bin/claude` unchanged. The publish marker route belongs to ticket 12 and is not implemented here.
+
+Before project launches, a `node -e` exec as `node` merges exact-directory trust into the container's own `$CLAUDE_CONFIG_DIR/.claude.json`. Missing/empty files get onboarding completed; existing valid content is retained, and malformed content fails without replacement. The Quarterdeck's config is untouched. Claude runs interactively as `node`, with the original argv and working directory. The Docker process carries `HERDR_AGENT=claude`. Only the ticket's allowlisted environment names cross; no GitHub variable crosses through this launcher. This does not remove creation-time credentials or establish isolation from shared mounts/Features described above.
+
+The host command passes `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` at Quarterdeck creation; restart it to change those values. JSONL records in `<work root>/quarterdeck/logs/launch.log` contain route, container, cwd and model only, not full prompts or environment values. Real Herdr state and Claude prompt behavior still require `CHECKLIST.md` validation.
+
 Test-only seam: `QD_PROJECT_TEST_IMAGE=<exact image name>` permits that one locally built image instead of a published `ghcr.io/valerid/dev-setup/<variant>@sha256:…` image. Do not set it for ordinary project starts. `QD_RUN_LABEL=key=value` propagates the host command's test-run label. No registry egress additions were needed for the local Feature fixture; remote Feature registries remain unvalidated.

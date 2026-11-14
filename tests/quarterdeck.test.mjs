@@ -76,6 +76,8 @@ const quarterdeck = (...args) =>
   run(COMMAND, args, {
     env: {
       ...process.env,
+      GIT_AUTHOR_NAME: 'Host Author', GIT_AUTHOR_EMAIL: 'author@example.invalid',
+      GIT_COMMITTER_NAME: 'Host Committer', GIT_COMMITTER_EMAIL: 'committer@example.invalid',
       QUARTERDECK_NAME: name,
       QUARTERDECK_IMAGE: image,
       QUARTERDECK_WORK_ROOT: work,
@@ -93,6 +95,100 @@ const okInside = (script) => {
 };
 
 let firstId;
+
+function testLauncherFixture({ home, wt, cid, put, probe }) {
+  assert.equal(inside('test -x /opt/qd/bin/claude').code, 0, 'launcher installed');
+  const shim = `${home}/launcher-shim`;
+  okInside(`mkdir -p ${shim}`);
+  put(`${shim}/docker`, `#!/usr/bin/env node
+const fs = require('fs'), cp = require('child_process');
+const args = process.argv.slice(2);
+fs.appendFileSync('${home}/docker-record', JSON.stringify({args, hint: process.env.HERDR_AGENT}) + '\\n');
+if (args[0] === 'ps' && process.env.QD_TEST_IDS !== undefined) {
+ process.stdout.write(process.env.QD_TEST_IDS); process.exit(0);
+}
+const r = cp.spawnSync('/usr/local/bin/docker', args, {stdio: 'inherit'});
+process.exit(r.status ?? 1);
+`);
+  okInside(`chmod +x ${shim}/docker`);
+  // Replace only the fixture container's executable, never an image or real Claude session.
+  const stub = `#!/usr/bin/env node
+const fs = require('fs'), cp = require('child_process');
+fs.writeFileSync('launcher-result.json', JSON.stringify({argv:process.argv.slice(2), env:process.env, uid:process.getuid()}));
+if (!fs.existsSync('launcher-commit')) {
+ fs.writeFileSync('launcher-commit', 'proof');
+ cp.execFileSync('git', ['add', 'launcher-commit']);
+ cp.execFileSync('git', ['commit', '-qm', 'launcher identity']);
+}
+`;
+  assert.equal(run('docker', ['exec', '-i', '-u', 'root', cid, 'sh', '-c', 'rm /usr/local/bin/claude; cat > /usr/local/bin/claude; chmod 755 /usr/local/bin/claude'], { input: stub }).code, 0);
+  const ownConfig = okInside('cat "$CLAUDE_CONFIG_DIR/.claude.json"');
+  const launch = () => inside(`cd ${wt}; PATH=${shim}:$PATH FM_TASK_INBOX=${home}/state/job.inbox FM_TASK_ID=job CLAUDE_CODE_OAUTH_TOKEN=dummy-launcher GH_TOKEN=dummy-forbidden GITHUB_TOKEN=dummy-forbidden DEV_SETUP_GITHUB_PAT=dummy-forbidden COMPACT_ADVISER_DISABLE=1 TRACEPARENT=trace timeout 30 script -qec 'claude --model sonnet "argument with spaces"' ${home}/terminal-record`);
+  assert.equal(probe('rm -f "$CLAUDE_CONFIG_DIR/.claude.json"').code, 0);
+  let r = launch();
+  assert.equal(r.code, 0, r.out + r.err + okInside(`cat ${home}/terminal-record`));
+  const result = JSON.parse(okInside(`cat ${wt}/launcher-result.json`));
+  assert.deepEqual(result.argv, ['--model', 'sonnet', 'argument with spaces']);
+  assert.equal(result.uid, 1000);
+  assert.equal(result.env.CLAUDE_CODE_OAUTH_TOKEN, 'dummy-launcher');
+  assert.equal(result.env.FM_TASK_ID, 'job');
+  assert.equal(result.env.COMPACT_ADVISER_DISABLE, '1');
+  assert.equal(result.env.TRACEPARENT, 'trace');
+  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'DEV_SETUP_GITHUB_PAT']) assert.equal(result.env[key], undefined);
+  assert.equal(probe(`git -C ${wt} log -1 --format='%an <%ae>|%cn <%ce>'`).out.trim(), 'Host Author <author@example.invalid>|Host Committer <committer@example.invalid>');
+  const config = () => JSON.parse(probe('cat "$CLAUDE_CONFIG_DIR/.claude.json"').out);
+  assert.equal(config().hasCompletedOnboarding, true);
+  assert.deepEqual(config().projects, { [wt]: { hasTrustDialogAccepted: true } });
+  assert.equal(probe(`node -e 'const fs=require("fs");fs.writeFileSync(process.env.CLAUDE_CONFIG_DIR+"/.claude.json",JSON.stringify({hasCompletedOnboarding:false,keep:42,projects:{"/previous":{keep:true}}}))'`).code, 0);
+  r = launch();
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.deepEqual(config(), { hasCompletedOnboarding: false, keep: 42, projects: { '/previous': { keep: true }, [wt]: { hasTrustDialogAccepted: true } } });
+  assert.equal(okInside('cat "$CLAUDE_CONFIG_DIR/.claude.json"'), ownConfig);
+  const records = okInside(`cat ${home}/docker-record`).trim().split('\n').map(JSON.parse);
+  const executions = records.filter(v => v.args.includes('claude'));
+  assert.equal(executions.length, 2);
+  for (const { args, hint } of executions) {
+    assert.equal(hint, 'claude');
+    assert.equal(args[args.indexOf('-u') + 1], 'node');
+    assert.ok(args.includes('-it'));
+    assert.equal(args[args.indexOf('-w') + 1], wt);
+    assert.deepEqual(args.slice(args.indexOf(cid)), [cid, 'claude', '--model', 'sonnet', 'argument with spaces']);
+    const forwarded = args.flatMap((v, i) => v === '-e' ? [args[i + 1]] : []);
+    assert.ok(forwarded.includes('CLAUDE_CODE_OAUTH_TOKEN'));
+    assert.ok(forwarded.includes('GIT_AUTHOR_NAME'));
+    assert.ok(forwarded.every(v => /^(FM_|GIT_CONFIG_|CLAUDE_CODE_|GIT_AUTHOR_|GIT_COMMITTER_|COMPACT_ADVISER_DISABLE$|TRACEPARENT$)/.test(v) && !v.includes('=')));
+  }
+  const logs = okInside(`cat ${work}/quarterdeck/logs/launch.log`).trim().split('\n').map(JSON.parse).filter(v => v.cwd === wt);
+  assert.deepEqual(logs.map(v => [v.route, v.container, v.model]), [['project', cid, 'sonnet'], ['project', cid, 'sonnet']]);
+  assert.equal(JSON.stringify(JSON.parse(run('docker', ['inspect', cid]).out)[0].Config.Env).includes('dummy-launcher'), false);
+  // Malformed config must not be overwritten or followed by Claude; empty config is seeded.
+  assert.equal(probe('printf broken > "$CLAUDE_CONFIG_DIR/.claude.json"').code, 0);
+  assert.notEqual(launch().code, 0);
+  assert.equal(probe('cat "$CLAUDE_CONFIG_DIR/.claude.json"').out, 'broken');
+  assert.equal(probe(': > "$CLAUDE_CONFIG_DIR/.claude.json"').code, 0);
+  assert.equal(launch().code, 0);
+  assert.equal(config().hasCompletedOnboarding, true);
+  assert.deepEqual(Object.keys(config().projects), [wt]);
+  assert.notEqual(inside(`cd ${wt}; env -u FM_TASK_INBOX claude --version`).code, 0);
+  for (const ids of ['', 'one\ntwo']) {
+    const failed = inside(`cd ${wt}; PATH=${shim}:$PATH FM_TASK_INBOX=${home}/state/job.inbox QD_TEST_IDS='${ids}' claude --version`);
+    assert.notEqual(failed.code, 0);
+    assert.match(failed.err, /exactly one running project container/);
+  }
+  const poolRoot = inside(`cd /home/node/.treehouse; FM_TASK_INBOX=${home}/state/job.inbox claude --version`);
+  assert.notEqual(poolRoot.code, 0);
+  assert.deepEqual(Object.keys(config().projects), [wt], 'never trust the pool root');
+  // Replace the local executable temporarily to observe exact argv and exit status without an agent.
+  const swap = s => run('docker', ['exec', '-u', 'root', name, 'sh', '-c', s]);
+  assert.equal(swap(`mv /usr/local/bin/claude /usr/local/bin/claude.saved; printf '#!/bin/sh\\nprintf "%%s\\\\n" "$@"\\nexit 23\\n' > /usr/local/bin/claude; chmod +x /usr/local/bin/claude`).code, 0);
+  try {
+    const local = inside(`cd ${home}; claude --model=opus 'two words'`);
+    assert.equal(local.code, 23);
+    assert.deepEqual(local.out.trim().split('\n'), ['--model=opus', 'two words']);
+    const last = JSON.parse(okInside(`tail -1 ${work}/quarterdeck/logs/launch.log`));
+    assert.deepEqual(last, { route: 'quarterdeck', container: '', cwd: home, model: 'opus' });
+  } finally { assert.equal(swap('mv /usr/local/bin/claude.saved /usr/local/bin/claude').code, 0); }
+}
 
 // Run this fixture independently with --test-name-pattern='qd-project-up fixture'.
 async function testProjectFixture(extensionsToken = '', t) {
@@ -145,6 +241,7 @@ async function testProjectFixture(extensionsToken = '', t) {
     assert.deepEqual(c.Mounts.filter(m => m.Type === 'volume').map(m => m.Destination).sort(), ['/home/node/.claude', '/home/node/.codex']);
     assert.equal(probe(`touch ${clone}/.git/hooks/forbidden`).code === 0, false);
     assert.equal(probe(`echo forbidden >> ${clone}/.git/config`).code === 0, false);
+    if (!extensionsToken) testLauncherFixture({ home, wt, cid, put, probe });
     const beforeCommit = okInside(`git -C ${wt} rev-parse HEAD`).trim();
     const commit = probe(`set -e; cd ${wt}; echo committed > proof; git add proof; git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm proof; git rev-parse HEAD`);
     assert.equal(commit.code, 0, commit.err);

@@ -34,3 +34,28 @@ A launcher named `claude`, first on the Quarterdeck's path, that FirstMate's spa
 ## Blocked by
 
 - 07: `qd-project-up` creates the project container from the project's main branch
+
+## Comments
+
+### Implementation handoff (steps 1–5 only)
+
+Fixed point: `2590e60e6fd972ae1fba9ef764405c132468ef07`. Implemented the launcher, image wiring, host identity forwarding, hardened-fixture/stub coverage, operating docs and manual checklist. No publish route or other implementation ticket was built; product dispatch is unchanged. Acceptance checkboxes and status are deliberately unchanged pending the parent's independent reviews and closure decision.
+
+The launcher resolves the canonical home from `FM_TASK_INBOX`, requires exactly one running creator/home-labelled container, prepares its own Claude config as `node`, forwards allowlisted names only, and execs interactive Claude with the same argv. Local launches exec the real binary. JSONL logs contain route/container/cwd/model, not prompts. Tests cover missing/empty/merged/malformed config, exact-folder trust without pool-root trust, untouched Quarterdeck config, Docker's Herdr hint, dummy OAuth forwarding without container-config persistence, GitHub-variable exclusion, host-derived commit identity, local argv/exit status, and missing/ambiguous routing refusal.
+
+Validation actually run:
+- Initial targeted attempt timed out because the absent launcher reached the real Claude binary with a dummy token; no real token was used and no successful live-agent observation is claimed. The run's labelled containers were removed. Added an explicit installed-launcher assertion and a 30-second execution bound.
+- Targeted red: installed-launcher assertion failed. Targeted green: hardened fixture passed after implementation and test-shim path correction.
+- Second red: pool-root trust was written. Green after refusing the pool root; local stub formatting was corrected before the final targeted pass.
+- Final `npm run test:quarterdeck`: exit 0; **29 tests, 28 pass, 0 fail, 1 todo**. The existing todo assertion still fails on ticket 08's dummy extensions token in `/etc/environment`; it is not evidence of file absence.
+- `bash -n` on both changed shell scripts, `node --check tests/quarterdeck.test.mjs`, and `git diff --check` passed.
+- Broader regressions intentionally not run: `npm test`, `test:skill`, and all unrelated suites. No real secrets or unsafe credential probes were used.
+
+Exact outstanding evidence/policy limitations:
+- Real Herdr working/blocked/done states and prompt-free Claude behavior through the hardened container remain unrun manual evidence: `quarterdeck/CHECKLIST.md`, ticket 09 row. The recording shim proves only the Docker process hint; the stub proves config shape, not the vendor UI.
+- Dependency 07's implementation is present and usable. Its outstanding arbitrary Feature/configuration trust and shared Git-store guarantees remain security-review concerns **01** and **03**, not missing launcher code. Existing concern **05** tracks creation-time extensions-token file persistence, unrelated to the launcher's OAuth exec-only delivery. No new distinct security concern was identified, and no preexisting concern was edited or committed.
+- This routing assumes FirstMate's supplied home and the single-container-per-home model; it does not establish a new isolation boundary or validate arbitrary project Features.
+
+Independent-review pointers: this ticket and `.scratch/quarterdeck/{spec,design}.md`; implementation `quarterdeck/bin/claude`, `quarterdeck/bin/quarterdeck`, `quarterdeck/Dockerfile`; validation `testLauncherFixture` in `tests/quarterdeck.test.mjs` (runs within `qd-project-up fixture`); current architecture `ARCHITECTURE.md` and `quarterdeck/PROJECT-CONTAINERS.md`. No independent review or final closure was performed here.
+
+Preserved outside this commit: preexisting changes to `grill-notes.md`, ticket 07, `CONTEXT.md`, and untracked security-review concern 01.
