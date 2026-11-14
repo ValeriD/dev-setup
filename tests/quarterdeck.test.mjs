@@ -103,7 +103,7 @@ const put = (p, content) => {
 let firstId;
 const crewImage = `dev-setup-quarterdeck:test-crew-${id}`;
 
-// Test script plays the Second Mate (qd-spec-run steps 2–8); no product checker.
+// Test script plays the Second Mate (qd-spec-run steps 2–9); no product checker.
 async function testTicketLoop(t, failure = false) {
   buildImage();
   const built = run('docker', ['build', '--build-arg', `NODE_IMAGE=${IMAGE}`, '--label', runLabel,
@@ -173,7 +173,7 @@ async function testTicketLoop(t, failure = false) {
   };
   const relaunch = (model, note) => {
     const r = inside(`cd ${home}; FM_HOME=${home} bin/fm-control.sh ${slug} relaunch --model ${model} --note '${note}'`);
-    assert.equal(r.code, 0, r.out + r.err);
+    assert.equal(r.code, 0, r.out + r.err + inside(`cat ${statusPath}`).out);
   };
   await wait(1);
   const plan = wg('rev-parse HEAD');
@@ -231,6 +231,48 @@ async function testTicketLoop(t, failure = false) {
     assert.equal(observed[2].start, plan);
     assert.match(observed[2].note, /Retry of ticket 01/);
     assert.equal(inside(`test -e ${wt}/ticket-02`).code, 1);
+  }
+  if (!failure) {
+    // Swap only this throwaway Quarterdeck's Claude/gh; no real model or forge call.
+    const ghStub = `#!/usr/bin/env node
+const fs = require('fs');
+const args = process.argv.slice(2);
+if (args[0] !== 'pr' || args[1] !== 'create') process.exit(2);
+fs.appendFileSync('${home}/gh-calls', JSON.stringify(args) + '\\n');
+console.log('https://github.com/fixture/loop/pull/1');
+`;
+    const root = (script, input) => run('docker', ['exec', '-i', '-u', 'root', name, 'sh', '-c', script], { input });
+    assert.equal(root('mv /usr/local/bin/claude /usr/local/bin/claude.saved; cat > /usr/local/bin/claude; chmod +x /usr/local/bin/claude', readFileSync(join(REPO, 'tests/fixtures/quarterdeck-crewmate/claude.mjs'), 'utf8')).code, 0);
+    assert.equal(root('mv /usr/local/bin/gh /usr/local/bin/gh.saved; cat > /usr/local/bin/gh; chmod +x /usr/local/bin/gh', ghStub).code, 0);
+    try {
+      okInside(`printf quarterdeck > ${home}/data/${slug}/qd-route`);
+      relaunch('sonnet', 'Publish.');
+      await wait(4);
+      assert.match(lastStatus(), /^done \[at=\d+\]: PR https:\/\/github.com\/fixture\/loop\/pull\/1$/);
+      assert.equal(inside(`test -e ${home}/data/${slug}/qd-route`).code, 1);
+      const published = sessions().at(-1);
+      assert.match(published.note, /(?:^|\n)Publish\.$/);
+      assert.equal(published.cwd, wt);
+      assert.equal(published.head, observed[2].head);
+      assert.ok(!observed.some(s => s.session === published.session));
+      assert.deepEqual(published.argv.slice(-2), ['--setting-sources', 'user']);
+      const route = JSON.parse(read(`${work}/quarterdeck/logs/launch.log`).trim().split('\n').at(-1));
+      assert.deepEqual(route, { route: 'publish', container: '', cwd: wt, model: 'sonnet' });
+      assert.equal(okInside(`git --git-dir=${origin} rev-parse refs/heads/feat/${slug}`).trim(), published.head);
+      assert.deepEqual(okInside(`git --git-dir=${origin} log --reverse --format=%s main..feat/${slug}`).trim().split('\n'), ['plan', 'ticket 01', 'ticket 02']);
+      const calls = read(`${home}/gh-calls`).trim().split('\n').map(JSON.parse);
+      assert.equal(calls.length, 1);
+      const option = key => calls[0][calls[0].indexOf(key) + 1];
+      assert.equal(option('--base'), 'main');
+      assert.equal(option('--head'), `feat/${slug}`);
+      assert.equal(option('--body'), 'Tickets implemented in this Spec Run:\n\n- 01: about skills, prompts or agent tools\n- 02: ordinary code\n');
+      const state = fm(`bin/fm-crew-state.sh ${slug}`);
+      assert.doesNotMatch(state, /unreachable|blocked/);
+      assert.match(state, /done[\s\S]*PR https:\/\/github.com\/fixture\/loop\/pull\/1/);
+      t.diagnostic(`published: ${state.trim()}`);
+    } finally {
+      assert.equal(root('mv /usr/local/bin/claude.saved /usr/local/bin/claude; mv /usr/local/bin/gh.saved /usr/local/bin/gh').code, 0);
+    }
   }
   assert.equal(fm(`find state -maxdepth 1 -name '*.meta' -printf '%f\\n'`).trim(), `${slug}.meta`, 'one FirstMate record');
   assert.equal(okInside(`git -C ${home} status --porcelain --untracked-files=no`).trim(), '', 'FirstMate unpatched');
@@ -329,6 +371,23 @@ if (!fs.existsSync('launcher-commit')) {
     assert.deepEqual(local.out.trim().split('\n'), ['--model=opus', 'two words']);
     const last = JSON.parse(okInside(`tail -1 ${work}/quarterdeck/logs/launch.log`));
     assert.deepEqual(last, { route: 'quarterdeck', container: '', cwd: home, model: 'opus' });
+    // state/ and worktree markers are writable by the project, not routing authority.
+    okInside(`mkdir -p ${home}/state/job ${home}/data/job; touch ${home}/state/job/qd-route ${wt}/qd-route`);
+    assert.equal(launch().code, 0);
+    assert.equal(JSON.parse(okInside(`tail -1 ${work}/quarterdeck/logs/launch.log`)).route, 'project');
+    assert.notEqual(probe(`touch ${home}/data/job/qd-route`).code, 0, 'project cannot write private routing data');
+    assert.equal(swap(`printf '#!/bin/sh\nprintf "%%s\\n" "$@"\ngit config --get core.hooksPath > ${home}/publish-hooks\ngit config --get core.fsmonitor > ${home}/publish-fsmonitor\nexit 23\n' > /usr/local/bin/claude`).code, 0);
+    okInside(`touch ${home}/data/job/qd-route`);
+    const published = inside(`cd ${wt}; FM_TASK_INBOX=${home}/state/job.inbox FM_TASK_ID=not-job GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/hostile GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=true claude --model sonnet`);
+    assert.equal(published.code, 23, published.out + published.err);
+    assert.deepEqual(published.out.trim().split('\n'), ['--model', 'sonnet', '--setting-sources', 'user']);
+    assert.equal(okInside(`cat ${home}/publish-hooks`).trim(), '/dev/null');
+    assert.equal(okInside(`cat ${home}/publish-fsmonitor`).trim(), 'false');
+    assert.equal(inside(`test -e ${home}/data/job/qd-route`).code, 1, 'marker consumed');
+    assert.equal(JSON.parse(okInside(`tail -1 ${work}/quarterdeck/logs/launch.log`)).route, 'publish');
+    assert.equal(launch().code, 0, 'next launch returns to project');
+    assert.equal(JSON.parse(okInside(`tail -1 ${work}/quarterdeck/logs/launch.log`)).route, 'project');
+    okInside(`rm ${wt}/qd-route`);
   } finally { assert.equal(swap('mv /usr/local/bin/claude.saved /usr/local/bin/claude').code, 0); }
 }
 
@@ -911,7 +970,7 @@ test('a missing branch, a failing push and a failing gh all exit non-zero and pr
   assert.deepEqual(lines, ['missing:', 'code=1', 'no-tickets:', 'code=1', 'push:', 'code=128', 'rejected:', 'code=1', 'gh:', 'code=1'], r.out);
 });
 
-test('ticket loop: plan and ordered fresh Crewmates without push (SC-03–06,13–14)', t => testTicketLoop(t));
+test('ticket loop: plan and ordered fresh Crewmates then publish (SC-03–06,08,13–14)', t => testTicketLoop(t));
 test('ticket loop failure: preserve one attempt, retry once, stop without push (SC-11,13)', t => testTicketLoop(t, true));
 
 test('qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)', () => testProjectFixture());

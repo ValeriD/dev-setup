@@ -42,6 +42,13 @@ try {
     git('add', root);
     git('commit', '-qm', 'plan');
     status(`done: plan committed ${git('rev-parse', 'HEAD')}; 2 tickets`);
+  } else if (/(?:^|\n)Publish\.$/.test(note)) {
+    if (argv.at(-2) !== '--setting-sources' || argv.at(-1) !== 'user') throw Error('publish must use the Quarterdeck route');
+    const home = dirname(state);
+    const project = brief.match(/^Project: (\S+)/m)?.[1];
+    if (!project) throw Error('missing publish project');
+    const url = execFileSync('qd-publish', [home, project, git('branch', '--show-current'), id], { encoding: 'utf8' }).trim();
+    status(`done: PR ${url}`);
   } else {
     if (!ticket) throw Error('unknown latest Progress note');
     const file = ticket === '01' ? '01-skills.md' : '02-code.md';
