@@ -22,7 +22,7 @@ Nothing beyond ticket 03 and ticket 08. This ticket only fixes their open choice
 - [x] Ticket 03 is implemented with the mechanism in decision 1, and its acceptance criteria hold.
 - [x] No root-owned secrets file, no root process reading a secrets file, no `--env-file`, nothing sourced as shell.
 - [x] The file's path, the names it may hold, and the warning for a missing name are documented where the `quarterdeck` command is documented.
-- [ ] Ticket 08's ADR records decision 3, with the Git gate named as the fix.
+- [x] Ticket 08's ADR records decision 3, with the Git gate named as the fix.
 
 ## Technical context
 
@@ -56,3 +56,15 @@ Fixed point: `8f61970e79d34e172c5cdc3053b3a40384a18ca8`. Read tickets 01, 03 and
 **Review handoff:** parent to dispatch fresh independent reviewers against the fixed point above, with this ticket, `.scratch/quarterdeck/spec.md`, `.scratch/quarterdeck/design.md`, tickets 03/08 and ADR 0010 as references. Historical ticket 08 reports are [implementation review](../reviews/08-independent-review.md) and [revalidation review](../reviews/08-revalidation-review.md); neither is a fresh review of this handoff. No independent review or final closure performed here. Acceptance checkboxes are deliberately unchanged for the parent's review, including the now-present ADR criterion. Ticket 20 remains open because ticket 08 is not complete; status is `ready-for-human` for its outstanding decision/evidence.
 
 Only this ticket's documentation is committed, with its path in the commit message. Existing edits to `grill-notes.md`, ticket 07 and `CONTEXT.md`, and untracked security concern 01 are preserved and excluded.
+
+### Resolution / human handoff — independent review recorded
+
+Implementation/handoff commit: `80c2a70` (`80c2a70e36c6e7101e277a58ff8217d2c19f42f0`), reviewed against fixed point `8f61970e79d34e172c5cdc3053b3a40384a18ca8`. This work records the existing token-delivery implementation and its limits; no new product behavior was built.
+
+Fresh independent reports are preserved verbatim in [20-independent-review.md](../reviews/20-independent-review.md). Dispositions: **Standards: 0 findings; Design: 0 findings; Spec: 0 findings.** No findings require fixing or declining; existing acceptance blockers remain, not waived.
+
+Verified [ADR 0010](../../../docs/adr/0010-read-only-agent-extensions-token.md): its Consequences explicitly accept project-container `docker inspect` visibility for the MVP on this laptop and name the later Git gate as the replacement. The ADR acceptance criterion is now ticked. This does not accept filesystem persistence.
+
+Validation remains the prior Quarterdeck-only `npm run test:quarterdeck` report: **31 passes, 0 ordinary failures, 1 failing TODO (32 total)**. This is **not full acceptance**. Neither the independent reviewers nor this documentation-only close/record phase reran tests; broader regression was intentionally not run. No unsafe probes, real-secret checks, or new product changes were performed.
+
+**Status remains open / `ready-for-human`.** Despite all listed checkboxes now being satisfied, the ticket's completion condition requires both 03 and 08 to be complete. Ticket 08 remains incomplete: security concern 05 tracks devcontainer CLI persistence to `/etc/environment`, requiring supported prevention or explicit human narrowing; actual private Project-layer installation, absent-token private-source failure, and read-only/repository-scoped permission evidence remain pending. Follow the existing safe handoff above after the persistence decision; accepted inspect visibility does not waive that blocker. No design/spec is closed and no other ticket is implemented. Unrelated working-tree changes remain excluded from this record commit.
