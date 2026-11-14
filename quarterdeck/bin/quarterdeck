@@ -93,7 +93,7 @@ warnings() { docker logs "$name" 2>&1 | grep '^dev-setup: WARNING' >&2 || true; 
 start() {
   docker image inspect "$image" >/dev/null 2>&1 || build
   if [ -n "$(running)" ]; then
-    wait_ready
+    if [ "$first_mate" = no ]; then wait_ready; fi
     # A normal invocation after a manual start opens the skipped workspace through Herdr,
     # whose server (not this exec process) supplies the pane's tokens.
     local has_first_mate

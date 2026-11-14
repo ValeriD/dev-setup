@@ -531,8 +531,6 @@ test('quarterdeck with no image and no container builds the image, starts one co
   const r = quarterdeck();
   assert.equal(r.code, 0, `${r.out}\n${r.err}`);
   assert.match(r.out, /status: running/, 'attach reached the Herdr server');
-  assert.equal(okInside('git -C /opt/firstmate rev-parse --is-shallow-repository').trim(), 'false');
-  assert.equal(okInside('git -C /opt/firstmate rev-parse HEAD').trim(), arg('FIRSTMATE_COMMIT'));
   // SC-19: the one declared name missing from the file is warned about by name, never a value.
   assert.match(r.err, /WARNING: secret QUARTERDECK_EXTENSIONS_TOKEN /);
   assert.doesNotMatch(r.err, /WARNING: secret (CLAUDE_CODE_OAUTH_TOKEN|QUARTERDECK_GITHUB_TOKEN)/);
@@ -545,11 +543,18 @@ test('quarterdeck with no image and no container builds the image, starts one co
   assert.equal(run('docker', ['inspect', firstId, '--format', '{{index .Config.Labels "' + RUN_LABEL + '"}}']).out.trim(), id);
 });
 
-test('a second quarterdeck while the first runs starts no second container and attaches (SC-01)', () => {
-  const r = quarterdeck();
-  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
-  assert.match(r.out, /status: running/);
-  assert.deepEqual(ours(), [firstId]);
+test('a second quarterdeck attaches without replacing a running container, including one without the new readiness marker (SC-01)', () => {
+  // A container started by the previous entrypoint has no completion marker.
+  const removed = run('docker', ['exec', '-u', 'root', name, 'rm', '-f', '/run/quarterdeck-ready']);
+  assert.equal(removed.code, 0, removed.err);
+  try {
+    const r = quarterdeck();
+    assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+    assert.match(r.out, /status: running/);
+    assert.deepEqual(ours(), [firstId]);
+  } finally {
+    run('docker', ['exec', '-u', 'root', name, 'touch', '/run/quarterdeck-ready']);
+  }
 });
 
 test('the proxy runs beside the Quarterdeck: pinned by digest, host socket read-only, labelled with the run, DOCKER_HOST over the volume', () => {
@@ -628,6 +633,7 @@ test('Herdr runs as node, the tools exist at their paths, /opt/firstmate is read
   for (const t of ['herdr', 'treehouse', 'gh', 'docker', 'devcontainer', 'jq', 'claude']) okInside(`command -v ${t}`);
   assert.equal(okInside('devcontainer --version').trim(), arg('DEVCONTAINER_CLI_VERSION'));
   assert.equal(okInside('git -c safe.directory=/opt/firstmate -C /opt/firstmate rev-parse HEAD').trim(), arg('FIRSTMATE_COMMIT'));
+  assert.equal(okInside('git -c safe.directory=/opt/firstmate -C /opt/firstmate rev-parse --is-shallow-repository').trim(), 'false');
   assert.match(arg('FIRSTMATE_COMMIT'), /^[0-9a-f]{40}$/);
   assert.notEqual(inside('touch /opt/firstmate/probe').code, 0);
   assert.notEqual(inside('touch /opt/firstmate/bin/probe').code, 0);
@@ -905,7 +911,7 @@ mkdir -p /tmp/history22/fleet /tmp/history22/claude /tmp/history22/bin
 # file:// honors depth, unlike Git's local-clone optimization.
 git clone -q --depth 1 file:///opt/firstmate /tmp/history22/fleet/firstmate
 chown -R node:node /tmp/history22
-setpriv --reuid=1000 --regid=1000 --init-groups bash -se <<'NODE'
+setpriv --reuid=1000 --regid=1000 --init-groups env HOME=/home/node bash -se <<'NODE'
 set -euo pipefail
 export QD_WORK_ROOT=/tmp/history22 CLAUDE_CONFIG_DIR=/tmp/history22/claude
 h=$QD_WORK_ROOT/fleet/firstmate
@@ -920,6 +926,7 @@ printf 'existing state\n' > "$h/state/preserved"
 printf 'untracked\n' > "$h/untracked-history22"
 git -C "$h" config history22.preserved yes
 git -C "$h" commit -q --allow-empty -m 'local home commit'
+git -C "$h" branch local-history22
 f=$(git -C "$h" ls-files | sed -n '1p')
 printf '\nstaged history22\n' >> "$h/$f"
 git -C "$h" add -- "$f"
