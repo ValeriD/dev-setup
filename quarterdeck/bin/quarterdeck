@@ -1,0 +1,181 @@
+#!/bin/bash
+# quarterdeck [attach|start [--no-first-mate]|stop|rebuild]
+#   attach   (default) build the image if missing, start the container if it is not running, attach to Herdr
+#   start    start without attaching; --no-first-mate seeds the home without opening its workspace or launching Claude
+#   stop     remove the Quarterdeck container, its Docker proxy and the proxy's volume that this command labelled, nothing else
+#   rebuild  build the image again (run `quarterdeck stop` first to use it)
+# Token file: a file you own (not root), mode 0600, at $QUARTERDECK_SECRETS (default
+# ~/.config/quarterdeck/secrets.env), with `NAME=value` lines. This command never reads it: it checks
+# the owner and mode and mounts it read-only at /run/quarterdeck/secrets.env. Inside, a non-root process
+# (qd-server) takes only these names and gives them to Herdr's server, so Herdr's panes hold them and a
+# `docker exec` shell does not:
+#   CLAUDE_CODE_OAUTH_TOKEN         the Claude token (also read by the mates in the Quarterdeck)
+#   QUARTERDECK_GITHUB_TOKEN        GitHub token for the project repository (becomes GH_TOKEN and DEV_SETUP_GITHUB_PAT)
+#   QUARTERDECK_EXTENSIONS_TOKEN    read-only token for private Agent Extension repositories (ticket 08)
+# A missing or empty name is warned about by name when the container starts. Edit the file, then
+# `quarterdeck stop` and `quarterdeck` again: a running container keeps the values it started with.
+# The container user is uid 1000, so the file must be owned by uid 1000 to be readable there.
+# Overrides (the tests use them): QUARTERDECK_NAME, QUARTERDECK_IMAGE, QUARTERDECK_WORK_ROOT,
+# QUARTERDECK_RUN_LABEL (key=value added to everything created), QUARTERDECK_ATTACH_CMD (default: herdr),
+# QUARTERDECK_DOCKER_SOCKET (the host socket the proxy mounts read-only, default /var/run/docker.sock).
+# --no-first-mate refuses a running container with a firstmate workspace; it never stops existing sessions.
+# Docker: the Quarterdeck never sees the host socket. A socket proxy (quarterdeck/docker-proxy.conf: pin and
+# allowed list) mounts it read-only and listens on a Unix socket in the volume <name>-docker, which the
+# Quarterdeck mounts at /run/docker-proxy (DOCKER_HOST is set in its image). A Unix socket is not network
+# traffic, so Base's egress rules do not apply to it and did not change.
+set -euo pipefail
+
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+repo=$(cd "$here/../.." && pwd)
+name=${QUARTERDECK_NAME:-quarterdeck}
+image=${QUARTERDECK_IMAGE:-dev-setup-quarterdeck:local}
+work=${QUARTERDECK_WORK_ROOT:-$HOME/work}
+label_key=io.github.valerid.quarterdeck
+extra=()
+[ -z "${QUARTERDECK_RUN_LABEL:-}" ] || extra=(--label "$QUARTERDECK_RUN_LABEL")
+# The ownership label goes on the container only. On the image it would be inherited by every
+# container started from it, and `stop` would remove those too.
+labels=(--label "$label_key=$name")
+labels+=("${extra[@]+"${extra[@]}"}")
+# The proxy and its volume carry their own key (so `mine` and `running` mean the Quarterdeck only) and the run label.
+proxy=$name-docker-proxy
+volume=$name-docker
+proxy_label_key=io.github.valerid.quarterdeck.proxy
+proxy_labels=(--label "$proxy_label_key=$name")
+proxy_labels+=("${extra[@]+"${extra[@]}"}")
+host_socket=${QUARTERDECK_DOCKER_SOCKET:-/var/run/docker.sock}
+# shellcheck source=quarterdeck/docker-proxy.conf
+. "$here/../docker-proxy.conf"
+
+secrets=${QUARTERDECK_SECRETS:-}
+secrets_explicit=1
+if [ -z "$secrets" ]; then secrets=$HOME/.config/quarterdeck/secrets.env; secrets_explicit=; fi
+
+die() { echo "quarterdeck: $*" >&2; exit 1; }
+command -v docker >/dev/null || die "docker not found"
+
+# Containers this command labelled for this name.
+mine() { docker ps -aq --filter "label=$label_key=$name" 2>/dev/null; }
+running() { docker ps -q --filter "label=$label_key=$name" --filter "status=running"; }
+
+build() {
+  local rev; rev=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
+  echo "quarterdeck: building $image" >&2
+  docker build -f "$repo/quarterdeck/Dockerfile" -t "$image" ${extra[@]+"${extra[@]}"} --build-arg "REVISION=$rev" "$repo" >&2
+}
+
+# The proxy container and volume this command labelled for this name. The volume is removed only if it carries the label.
+proxies() { docker ps -aq --filter "label=$proxy_label_key=$name" 2>/dev/null; }
+proxy_down() {
+  proxies | xargs -r docker rm -f >/dev/null
+  if [ -n "$(docker volume ls -q --filter "label=$proxy_label_key=$name" --filter "name=^$volume\$")" ]; then
+    docker volume rm "$volume" >/dev/null
+  fi
+}
+# File mode 438 is decimal for 0666. A fresh volume each start, so no stale socket. Root with every capability dropped: it only needs the host
+# socket's group (read-only mount) and to create the socket, which is mode 0666 inside the volume that only
+# the Quarterdeck mounts.
+proxy_up() {
+  proxy_down
+  [ -S "$host_socket" ] || die "$host_socket is not a Docker socket (set QUARTERDECK_DOCKER_SOCKET)"
+  docker volume create "${proxy_labels[@]}" "$volume" >/dev/null
+  docker run -d --name "$proxy" "${proxy_labels[@]}" --user 0:0 --group-add "$(stat -c %g "$host_socket")" \
+    --cap-drop ALL --security-opt no-new-privileges --read-only --restart no \
+    -v "$host_socket:/var/run/docker.sock:ro" -v "$volume:/run/docker-proxy" \
+    "$PROXY_IMAGE" \
+    -socketpath /var/run/docker.sock -proxysocketendpoint /run/docker-proxy/docker.sock -proxysocketendpointfilemode 438 \
+    -allowGET "$ALLOW_GET" -allowPOST "$ALLOW_POST" -allowDELETE "$ALLOW_DELETE" >/dev/null
+}
+
+# Warnings the container printed at start (missing secret names), shown to the user; never values.
+warnings() { docker logs "$name" 2>&1 | grep '^dev-setup: WARNING' >&2 || true; }
+
+start() {
+  docker image inspect "$image" >/dev/null 2>&1 || build
+  if [ -n "$(running)" ]; then
+    wait_ready
+    # A normal invocation after a manual start opens the skipped workspace through Herdr,
+    # whose server (not this exec process) supplies the pane's tokens.
+    local has_first_mate
+    has_first_mate=$(docker exec -u node "$name" bash -o pipefail -c 'herdr --session default workspace list | jq '\''[.. | objects | select(.label? == "firstmate")] | length > 0'\''') || die "could not inspect First Mate workspace"
+    if [ "$first_mate" = no ] && [ "$has_first_mate" = true ]; then
+      die "the First Mate workspace already exists; stop the container before an agent-free start (existing sessions were not stopped)"
+    fi
+    if [ "$first_mate" = yes ] && [ "$has_first_mate" = false ]; then
+      docker exec -u node "$name" /opt/qd/bin/qd-first-mate
+    fi
+    return 0
+  fi
+  mkdir -p "$work/quarterdeck/claude" "$work/pool"
+  # The token file is mounted, never read, here. Names only in messages.
+  local mount=()
+  if [ -e "$secrets" ]; then
+    [ -f "$secrets" ] || die "$secrets is not a regular file"
+    [ "$(stat -c %u "$secrets")" = "$(id -u)" ] || die "$secrets must be owned by you, not by another user (root)"
+    [ "$(stat -c %a "$secrets")" = 600 ] || echo "quarterdeck: WARNING: $secrets should have mode 0600 (it is $(stat -c %a "$secrets"))" >&2
+    mount=(-v "$secrets:/run/quarterdeck/secrets.env:ro")
+  elif [ -n "$secrets_explicit" ]; then
+    die "QUARTERDECK_SECRETS=$secrets does not exist"
+  else
+    echo "quarterdeck: WARNING: no token file at $secrets (set QUARTERDECK_SECRETS); starting without tokens" >&2
+  fi
+  # Remove an exited container of ours so the name is free; never touches an unlabelled one.
+  mine | xargs -r docker rm -f >/dev/null
+  proxy_up
+  # No user-defined network: Docker's embedded DNS (127.0.0.11) works through NAT rules in the container,
+  # and Base's egress ruleset begins with `flush ruleset`, which removes them. On the default bridge the
+  # resolver is a real address and works. The Docker proxy talks over a socket in a volume, not a network.
+  docker run -d --init --name "$name" "${labels[@]}" --hostname quarterdeck \
+    --user root --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --cap-add DAC_READ_SEARCH \
+    --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges \
+    -v "$volume:/run/docker-proxy" \
+    -v "$work:$work" -e "QD_WORK_ROOT=$work" -e "QD_RUN_LABEL=${QUARTERDECK_RUN_LABEL:-}" \
+    -e "QD_FIRST_MATE=$first_mate" \
+    -v "$work/quarterdeck/claude:/home/node/.claude" \
+    -v "$work/pool:/home/node/.treehouse" \
+    -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL \
+    ${mount[@]+"${mount[@]}"} \
+    "$image" >/dev/null
+  wait_ready
+}
+
+wait_ready() {
+  # Ready only after seeding finishes, egress is locked, the proxy works and Herdr answers.
+  local i
+  for i in $(seq 1 120); do
+    [ -n "$(running)" ] || { docker logs "$name" >&2 || true; die "the container stopped while starting"; }
+    docker exec -u node "$name" sh -c 'test -e /run/egress/ready && docker version >/dev/null 2>&1 && herdr --session default status server | grep -q "status: running" && { test -e /run/quarterdeck-ready || herdr --session default workspace list | jq -e '\''[.. | objects | select(.label? == "firstmate")] | length > 0'\'' >/dev/null; }' && { warnings; return 0; }
+    sleep 0.5
+  done
+  docker logs "$name" >&2 || true
+  die "the Quarterdeck did not become ready"
+}
+
+attach() {
+  start
+  local tty=-i
+  if [ -t 0 ] && [ -t 1 ]; then tty=-it; fi
+  # shellcheck disable=SC2086
+  exec docker exec $tty -u node -w /home/node "$name" ${QUARTERDECK_ATTACH_CMD:-herdr}
+}
+
+stop() {
+  mine | xargs -r docker rm -f >/dev/null
+  proxy_down
+}
+
+first_mate=yes
+case "${1:-attach}" in
+  attach) attach ;;
+  start)
+    case "${2:-}" in
+      '') [ "$#" -eq 1 ] || die "usage: quarterdeck start [--no-first-mate]" ;;
+      --no-first-mate) [ "$#" -eq 2 ] || die "usage: quarterdeck start [--no-first-mate]"; first_mate=no ;;
+      *) die "usage: quarterdeck start [--no-first-mate]" ;;
+    esac
+    start
+    ;;
+  stop) stop ;;
+  rebuild) build ;;
+  *) die "usage: quarterdeck [attach|start [--no-first-mate]|stop|rebuild]" ;;
+esac

@@ -32,7 +32,8 @@ env:
 
 jobs:
   # Decides what runs. Path groups: image = what goes into the image;
-  # tests = what the acceptance suite or CI itself reads; template = templates/.
+  # tests = what the acceptance suite or CI itself reads; template = templates/;
+  # quarterdeck = quarterdeck/ (built and tested, never published).
   # schedule, workflow_dispatch, a missing/all-zero `before` and an unreachable
   # base (force push) count as everything changed.
   changes:
@@ -42,6 +43,7 @@ jobs:
       image: ${{ steps.diff.outputs.image }}
       tests: ${{ steps.diff.outputs.tests }}
       template: ${{ steps.diff.outputs.template }}
+      quarterdeck: ${{ steps.diff.outputs.quarterdeck }}
       publish_image: ${{ steps.diff.outputs.publish_image }}
       publish_template_only: ${{ steps.diff.outputs.publish_template_only }}
     steps:
@@ -69,14 +71,15 @@ jobs:
             everything=true
           fi
 
-          image=false tests=false template=false
+          image=false tests=false template=false quarterdeck=false
           if [ "$everything" = true ]; then
-            image=true tests=true template=true
+            image=true tests=true template=true quarterdeck=true
           else
             echo "changed files:"; echo "$files"
             grep -Eq '^(base|installer|extensions|variants/node)/' <<<"$files" && image=true
             grep -Eq '^(tests/|templates/|skills/dev-container/|package\.json$|\.github/|renovate\.json$)' <<<"$files" && tests=true
             grep -Eq '^templates/' <<<"$files" && template=true
+            grep -Eq '^quarterdeck/' <<<"$files" && quarterdeck=true
           fi
 
           on_main=false
@@ -89,6 +92,7 @@ jobs:
             echo "image=$image"
             echo "tests=$tests"
             echo "template=$template"
+            echo "quarterdeck=$quarterdeck"
             echo "publish_image=$publish_image"
             echo "publish_template_only=$publish_template_only"
           } | tee -a "${GITHUB_OUTPUT:-/dev/null}"
@@ -117,7 +121,7 @@ jobs:
   # image, and hands the same image to the publish job as a zstd tarball.
   acceptance:
     needs: changes
-    if: needs.changes.outputs.image == 'true' || needs.changes.outputs.tests == 'true' || needs.changes.outputs.template == 'true'
+    if: needs.changes.outputs.image == 'true' || needs.changes.outputs.tests == 'true' || needs.changes.outputs.template == 'true' || needs.changes.outputs.quarterdeck == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -136,6 +140,13 @@ jobs:
             --config variants/node/devcontainer.json \
             --platform "$PLATFORM" \
             --image-name "$TEST_IMAGE"
+      # Builds the Quarterdeck image after the node image so the suite starts from a warm cache.
+      # Loaded into the local daemon only; no publish job or step pushes it.
+      - name: Build the Quarterdeck image (not published)
+        if: needs.changes.outputs.quarterdeck == 'true' || needs.changes.outputs.tests == 'true' || needs.changes.outputs.image == 'true'
+        env:
+          DEV_SETUP_REVISION: ${{ github.sha }}
+        run: docker build -f quarterdeck/Dockerfile -t dev-setup-quarterdeck:ci --build-arg "REVISION=$DEV_SETUP_REVISION" .
       - name: Host deps for the skill helper test
         run: |
           (cd installer && npx -y pnpm@11.0.0 install --frozen-lockfile)

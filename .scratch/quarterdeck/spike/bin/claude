@@ -1,0 +1,22 @@
+#!/bin/bash
+# Spike launcher. FirstMate wires hooks only when the command is named `claude`,
+# so this takes that name. In a worktree it starts Claude inside the project's
+# container; anywhere else it starts the real Claude here.
+real=/usr/local/bin/claude
+case "$PWD/" in
+  "${QD_WORKTREES:?}"/*) ;;
+  *) exec "$real" "$@" ;;
+esac
+args=(-w "$PWD")
+[ -t 0 ] && args+=(-it) || args+=(-i)
+# Pass what FirstMate exported into the tab; docker exec forwards nothing by default.
+while IFS='=' read -r name _; do
+  case "$name" in
+    FM_*|GIT_CONFIG_*|CLAUDE_CODE_*|COMPACT_ADVISER_DISABLE|TRACEPARENT) args+=(-e "$name") ;;
+  esac
+done < <(env)
+# Mirror FirstMate's folder trust (bin/fm-claude-trust.sh writes it only on the
+# launching side) into the project container's own Claude config.
+docker exec "${QD_PROJECT_CONTAINER:?}" sh -c 'f=$HOME/.claude.json; [ -s "$f" ] || echo "{\"hasCompletedOnboarding\":true}" > "$f"; jq --arg p "$1" ".projects[\$p].hasTrustDialogAccepted = true" "$f" > "$f.tmp" && mv "$f.tmp" "$f"' _ "$PWD"
+echo "$(date -Is) cwd=$PWD args=$*" >> "${QD_LAUNCH_LOG:-/tmp/qd-launch.log}"
+HERDR_AGENT=claude exec docker exec "${args[@]}" "${QD_PROJECT_CONTAINER:?}" claude "$@"

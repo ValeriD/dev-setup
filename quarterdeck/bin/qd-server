@@ -1,0 +1,49 @@
+#!/bin/bash
+# Runs as `node`, never as root: reads the user's token file by name and execs Herdr's server with the
+# values in its environment, so only processes started from Herdr's panes hold them (a `docker exec`
+# shell does not). The file is mounted read-only at $QD_SECRETS_FILE. It is parsed, never sourced:
+# `NAME=value` lines, split at the first `=`, nothing executed or expanded. Only names the Quarterdeck
+# declares (the container-wide `secrets` of quarterdeck/extensions.json, rendered to /etc/dev-setup/secrets)
+# are taken; anything else in the file is ignored. Values are never printed.
+set -uo pipefail
+
+file=${QD_SECRETS_FILE:-/run/quarterdeck/secrets.env}
+list=${DEV_SETUP_SECRETS_LIST:-/etc/dev-setup/secrets}
+
+declare -A wanted=()
+if [ -r "$list" ]; then
+  while IFS=$'\t' read -r n _; do [ -z "$n" ] || wanted[$n]=1; done <"$list"
+fi
+
+if [ ! -e "$file" ]; then
+  echo "dev-setup: WARNING: no secrets file was mounted ($file); set QUARTERDECK_SECRETS on the host." >&2
+elif [ ! -r "$file" ]; then
+  echo "dev-setup: WARNING: the secrets file is not readable by the node user (uid $(id -u)); it must be owned by uid $(id -u) with mode 0600." >&2
+else
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    name=${line%%=*}
+    value=${line#*=}
+    [ -n "${wanted[$name]:-}" ] || continue
+    # One pair of matching quotes around the whole value is dropped; nothing else is interpreted.
+    case "$value" in
+      \"*\") value=${value#\"}; value=${value%\"} ;;
+      \'*\') value=${value#\'}; value=${value%\'} ;;
+    esac
+    [ -z "$value" ] || export "$name=$value"
+  done <"$file"
+fi
+
+# The project repository's token under the names `gh`/git and Base's credential helper read.
+if [ -n "${QUARTERDECK_GITHUB_TOKEN:-}" ]; then
+  export GH_TOKEN=$QUARTERDECK_GITHUB_TOKEN DEV_SETUP_GITHUB_PAT=$QUARTERDECK_GITHUB_TOKEN
+fi
+
+# A name that is missing or empty is warned about by name (Base's check-secrets.sh; values are never read).
+/usr/local/share/dev-setup/check-secrets.sh
+# Panes get the two names above, not a third copy under the file's own name.
+unset QUARTERDECK_GITHUB_TOKEN
+
+cd /home/node && exec herdr --session default server

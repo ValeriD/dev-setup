@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+// qd-project-up <home> <project>: main-branch config -> devcontainer CLI -> socket proxy.
+// Features are trusted executable project input, not sandboxed by this renderer (security-review 01).
+// QD_PROJECT_TEST_IMAGE permits exactly one local fixture image instead of the published digest.
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { createHash } from 'node:crypto';
+import { parse } from 'jsonc-parser';
+
+function main() {
+  const [homeArg, project, ...rest] = process.argv.slice(2);
+  if (!homeArg || !project || rest.length || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(project)) throw Error('usage: qd-project-up <home> <project> (plain project name)');
+  const home = fs.realpathSync(homeArg);
+  const root = fs.realpathSync(process.env.QD_WORK_ROOT || '/home/valeri/work');
+  if (!home.startsWith(root + '/')) throw Error('home must be under QD_WORK_ROOT');
+  for (const p of [home, root]) if (/[,$\n\r]/.test(p)) throw Error('unsupported mount path');
+  const clone = path.join(home, 'projects', project);
+  const gitdir = path.join(clone, '.git');
+  if (!fs.lstatSync(gitdir).isDirectory()) throw Error('project must have a clone git directory');
+  const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+  // Keep the image-owned credential helper for fetch, never a caller-selected global config.
+  Object.assign(gitEnv, { GIT_CONFIG_GLOBAL: '/etc/dev-setup/gitconfig', GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null', GIT_CONFIG_KEY_1: 'core.fsmonitor', GIT_CONFIG_VALUE_1: 'false' });
+  const git = (...args) => execFileSync('git', ['--git-dir', gitdir, ...args], { cwd: '/', env: gitEnv, maxBuffer: 64 << 20 });
+  git('fetch', '--quiet', 'origin', '+refs/heads/main:refs/remotes/origin/main');
+  const tree = git('rev-parse', 'refs/remotes/origin/main:.devcontainer').toString().trim();
+  const errors = [];
+  const source = parse(git('show', `${tree}:devcontainer.json`).toString(), errors, { allowTrailingComma: true });
+  if (errors.length || !source || typeof source !== 'object' || Array.isArray(source)) throw Error('invalid devcontainer JSONC');
+  if (typeof source.image !== 'string' || (!/^ghcr\.io\/valerid\/dev-setup\/[a-z0-9-]+@sha256:[a-f0-9]{64}$/.test(source.image) && source.image !== process.env.QD_PROJECT_TEST_IMAGE)) throw Error('image must be a digest-pinned published Variant');
+  const runArgs = source.runArgs ?? [];
+  if (!Array.isArray(runArgs) || runArgs.some(v => typeof v !== 'string' || !/^(--cap-drop=ALL|--memory=[1-9][0-9]*[kmg]?|--pids-limit=[1-9][0-9]*)$/.test(v))) throw Error('unsupported runArgs; only Template capability-drop, memory and PID limits are allowed');
+  const containerEnv = {};
+  for (const [key, value] of Object.entries(source.containerEnv ?? {})) {
+    if (/github|^GH_|token|secret|password|credential/i.test(key)) continue;
+    if (typeof value !== 'string' || value.includes('${')) throw Error('containerEnv must contain literal non-secret strings');
+    containerEnv[key] = value;
+  }
+  // The home discriminator prevents two homes with the same project/tree sharing rendered mounts.
+  const owner = createHash('sha256').update(home).digest('hex').slice(0, 16);
+  const exported = path.join(root, 'quarterdeck/config', project, owner, tree);
+  fs.mkdirSync(path.join(exported, '.devcontainer'), { recursive: true });
+  for (const entry of git('ls-tree', '-rz', tree).toString().split('\0').filter(Boolean)) {
+    const [meta, filename] = entry.split('\t');
+    if (!/^100(644|755) blob /.test(meta) || filename.split('/').some(p => p === '..') || path.isAbsolute(filename)) throw Error('export supports regular files only');
+    const dest = path.join(exported, '.devcontainer', filename);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, git('show', `${tree}:${filename}`), { mode: meta.startsWith('100755') ? 0o755 : 0o644 });
+  }
+  const pool = path.join(root, 'pool');
+  const hooks = path.join(gitdir, 'hooks');
+  const bin = path.join(home, 'bin');
+  const state = path.join(home, 'state');
+  for (const dir of [pool, gitdir, hooks, bin, state]) {
+    fs.mkdirSync(dir, { recursive: true });
+    const stat = fs.lstatSync(dir);
+    if (!stat.isDirectory() || stat.uid !== process.getuid()) throw Error('mount sources must be user-owned directories');
+  }
+  const configFile = path.join(gitdir, 'config');
+  fs.closeSync(fs.openSync(configFile, 'a'));
+  if (!fs.lstatSync(configFile).isFile() || fs.lstatSync(configFile).uid !== process.getuid()) throw Error('git config must be a user-owned regular file');
+  const bind = (src, target, ro = false) => `source=${src},target=${target},type=bind${ro ? ',readonly' : ''}`;
+  const extensionsToken = process.env.QUARTERDECK_EXTENSIONS_TOKEN;
+  if (!extensionsToken) console.error('qd-project-up: warning: QUARTERDECK_EXTENSIONS_TOKEN is unset; private Agent Extensions cannot be fetched');
+  const config = {
+    image: source.image, features: source.features,
+    runArgs: [...new Set(['--cap-drop=ALL', ...runArgs]), ...(extensionsToken ? ['-e', 'DEV_SETUP_GITHUB_PAT'] : [])], containerEnv,
+    updateRemoteUserUID: false, workspaceFolder: '/workspace',
+    workspaceMount: bind(exported, '/workspace', true),
+    mounts: [bind(pool, '/home/node/.treehouse'), bind(gitdir, gitdir), bind(hooks, hooks, true), bind(configFile, configFile, true), bind(bin, bin, true), bind(state, state)],
+  };
+  fs.writeFileSync(path.join(exported, '.devcontainer/devcontainer.json'), JSON.stringify(config, null, 2));
+  // Isolate the pane's environment/home; only the creation CLI gets the extensions token.
+  // Retained Features can access that value: security-review 01 (not a sandbox).
+  const cleanHome = fs.mkdtempSync(path.join(os.tmpdir(), 'qd-project-'));
+  const env = { PATH: '/usr/local/bin:/usr/bin:/bin:/opt/qd/bin', HOME: cleanHome, DOCKER_HOST: process.env.DOCKER_HOST || 'unix:///run/docker-proxy/docker.sock' };
+  const command = (name, args) => execFileSync(name, args, {
+    cwd: '/', env: name === 'devcontainer' && extensionsToken ? { ...env, DEV_SETUP_GITHUB_PAT: extensionsToken } : env,
+    stdio: 'pipe', encoding: 'utf8', maxBuffer: 64 << 20,
+  });
+  const labels = { 'quarterdeck.creator': 'qd-project-up', 'quarterdeck.project': project, 'quarterdeck.home': home };
+  if (process.env.QD_RUN_LABEL) {
+    const i = process.env.QD_RUN_LABEL.indexOf('=');
+    const key = process.env.QD_RUN_LABEL.slice(0, i);
+    if (i < 1 || key.startsWith('quarterdeck.')) throw Error('invalid QD_RUN_LABEL');
+    labels[key] = process.env.QD_RUN_LABEL.slice(i + 1);
+  }
+  try {
+    const filters = Object.entries(labels).flatMap(([k, v]) => ['--filter', `label=${k}=${v}`]);
+    const ids = command('docker', ['ps', '-aq', '--no-trunc', ...filters]).trim().split('\n').filter(Boolean);
+    let current;
+    for (const id of ids) {
+      const [info] = JSON.parse(command('docker', ['inspect', id]));
+      if (info.Config.Labels['quarterdeck.config'] === tree && !current) current = id;
+      else command('docker', ['rm', '-f', id]);
+    }
+    if (!current) {
+      const result = command('devcontainer', ['up', '--workspace-folder', exported, '--skip-post-create', ...Object.entries({ ...labels, 'quarterdeck.config': tree }).flatMap(([k, v]) => ['--id-label', `${k}=${v}`])]);
+      current = JSON.parse(result.trim().split('\n').pop()).containerId;
+    } else command('docker', ['start', current]);
+    command('docker', ['exec', '-u', 'node', current, 'sh', '/usr/local/share/egress/wait-ready.sh']);
+    console.log(current);
+  } finally { fs.rmSync(cleanHome, { recursive: true, force: true }); }
+}
+try { main(); } catch (e) {
+  const token = process.env.QUARTERDECK_EXTENSIONS_TOKEN;
+  const message = token ? e.message.replaceAll(token, '[redacted]') : e.message;
+  console.error(`qd-project-up: ${message}`);
+  process.exitCode = 1;
+}
