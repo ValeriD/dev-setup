@@ -66,3 +66,64 @@ Fixed point and starting HEAD: `cf3b4490845dfd6a972a5f317666a3079562cdb0`. Inspe
 **Next validation:** follow the new ticket 17 checklist after the specific prerequisites above. Capture startup through the single instruction and final report without steering; correlate session/model/route sequence, ordered commits and identity, final-tree gate, real PR, verbatim report, attention and autonomous supervision. Inventory preexisting branches so they are not misclassified as run-created branches. Validate SC-20 separately on a quiescent authorized copy with isolated path mapping; byte equality alone does not prove absolute worktree links resolve. Record interventions as failures of unattended operation, never erase them with a retry. Any machinery escalation requires the documented separate `working` experiment and approval before a FirstMate patch.
 
 All nine acceptance criteria remain unchecked; instructions are not observations. Ticket remains open, `ready-for-human`. Existing numbered security concerns remain separate human follow-up, not blanket policy gates; no new distinct concern was identified or duplicated. Unsupported `runArgs` rejection, retained Features and Opus/Sonnet product dispatch remain unchanged. Only ticket 17 and its checklist changes are staged/committed; preexisting grill notes, ticket 07, `CONTEXT.md`, and untracked security-review 01 are preserved outside this work. No other ticket implementation or review was started.
+
+### Independent review closure — tracker only; acceptance still blocked
+
+Implementation commit: `3fb463b33865d922629736e1b39de67cf1166333`. Independent Standards, Design and Spec reviews each report zero findings; no fixes or declines needed. Their reports are reproduced verbatim below.
+
+Ticket remains `ready-for-human`, with all nine acceptance criteria unchecked. Remaining blockers are those detailed in the prior **“Resumed steps 1–5 handoff — end-to-end validation remains blocked”** comment, under **Dependencies: implementation versus evidence** and **Next validation**: ticket 13's approved agent-free startup procedure, concern 07 disposition and real throwaway GitHub proof; ticket 11's shipped shallow-home lineage provisioning gap; ticket 08/security-review 05's `/etc/environment` token persistence failure (repair or explicit acceptance before real-token validation); ticket 16/14's real planning, private-skill, prompt-free, gate and hook evidence; ticket 12's real settings/instruction loading, watcher/PR registration and supervision observations; and ticket 15's conditional disposition based on actual hook/supervision results. The authorized fresh home/clone, scoped-token/Claude provisioning, identity, decided two-category product work and authorization for the pomoplan gate/implementation are still required. The unattended end-to-end run and separate authorized SC-20 restore validation remain unperformed.
+
+No new validation evidence is claimed. Prior allowed test evidence remains 31 pass, 0 ordinary failures, 1 failing TODO; process exit status unrecorded. Broader regression intentionally not run. No tests or runtime probes were run for this tracker closure; model dispatch and security policy are unchanged.
+
+#### Verbatim report: `/tmp/qd17-review-Standards.log`
+
+```markdown
+## Standards
+
+No findings in `git diff cf3b4490845dfd6a972a5f317666a3079562cdb0...HEAD` (commit `3fb463b`).
+
+- Ticket comments and `ready-for-human` status follow `docs/agents/issue-tracker.md` and `triage-labels.md`.
+- The checklist preserves ADR 0008’s approval boundary and ADR 0010’s unresolved token-persistence limitation.
+- Both changed files explicitly distinguish future validation from observed evidence. All nine acceptance criteria remain unchecked; this is a blocked handoff, not completed end-to-end acceptance.
+- Ticket 14 contains no observed hook/supervision results; the change correctly neither implements nor waives conditional ticket 15.
+- No applicable baseline code smells or changed-test maintenance concerns: the diff changes documentation only.
+
+No tests or runtime probes performed during this review. Broader regression intentionally not run. Unrelated working-tree edits preserved.
+
+**Standards: 0 findings; runtime acceptance remains unverified.**
+```
+
+#### Verbatim report: `/tmp/qd17-review-Design.log`
+
+```markdown
+## Design
+
+No material design violations found in `cf3b449...HEAD` (`3fb463b`).
+
+- The checklist extension preserves the design’s existing manual-validation seam without adding runtime infrastructure or changing module ownership.
+- `quarterdeck/CHECKLIST.md:81–105` covers slice 7’s planned observations: unattended handoff, dispatch, ordered commits, final-tree gate, publication, report, supervision and restore.
+- Conditional ticket 15 remains dependent on actual hook/supervision observations, consistent with design open question 3. FirstMate patches still require approval under ADR 0008.
+- Ticket 17 explicitly remains open with all acceptance criteria unchecked. Missing live evidence is honestly recorded—not presented as completion.
+
+No tests or live validation performed during this review; broader regression intentionally not run. Working-tree changes left untouched.
+
+**Design: 0 findings. End-to-end acceptance remains blocked and unproven.**
+```
+
+#### Verbatim report: `/tmp/qd17-review-Spec.log`
+
+```markdown
+## Spec
+
+No actionable spec violations found in `cf3b449...HEAD` (`3fb463b`).
+
+**Open acceptance, not completion:** Ticket 17 requires “one sentence” through a real pomoplan PR and report without intervention. Its nine acceptance criteria remain unchecked. The changed ticket explicitly says “none; no live run occurred” and remains `ready-for-human`. The new `quarterdeck/CHECKLIST.md:81–105` supplies a future validation procedure—not evidence that SC-02–10, SC-14 or SC-20 passed.
+
+The procedure preserves the required two-ticket model split, ordered commits, final-tree gate, Quarterdeck publication, verbatim report, attention mark and autonomous supervision. Planning is consistent with grill decision 39, which supersedes the older spec’s planning exclusion.
+
+Conditional ticket 15 remains correctly undecided pending actual ticket 14 hook/supervision results. Recorded prerequisite and security failures are not presented as successful validation.
+
+No tests or runtime probes performed during this review; broader regression intentionally not run. Working-tree edits were untouched.
+
+**Spec: 0 findings; end-to-end acceptance remains blocked and unproven.**
+```
