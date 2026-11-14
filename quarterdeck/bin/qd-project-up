@@ -20,7 +20,8 @@ function main() {
   const gitdir = path.join(clone, '.git');
   if (!fs.lstatSync(gitdir).isDirectory()) throw Error('project must have a clone git directory');
   const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
-  Object.assign(gitEnv, { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null', GIT_CONFIG_KEY_1: 'core.fsmonitor', GIT_CONFIG_VALUE_1: 'false' });
+  // Keep the image-owned credential helper for fetch, never a caller-selected global config.
+  Object.assign(gitEnv, { GIT_CONFIG_GLOBAL: '/etc/dev-setup/gitconfig', GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null', GIT_CONFIG_KEY_1: 'core.fsmonitor', GIT_CONFIG_VALUE_1: 'false' });
   const git = (...args) => execFileSync('git', ['--git-dir', gitdir, ...args], { cwd: '/', env: gitEnv, maxBuffer: 64 << 20 });
   git('fetch', '--quiet', 'origin', '+refs/heads/main:refs/remotes/origin/main');
   const tree = git('rev-parse', 'refs/remotes/origin/main:.devcontainer').toString().trim();
