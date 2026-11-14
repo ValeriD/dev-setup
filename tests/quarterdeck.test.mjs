@@ -420,6 +420,31 @@ test('Herdr runs as node, the tools exist at their paths, /opt/firstmate is read
   assert.equal(okInside('echo "$PATH"').split(':')[0], '/opt/qd/bin');
 });
 
+test('mate procedures: managed skills, Charter and Brief contract are installed with real FirstMate commands', () => {
+  const started = quarterdeck();
+  assert.equal(started.code, 0, started.err);
+  const installed = p => okInside(`node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1], "utf8"))' '${p}'`);
+  const root = '/etc/claude-code/.claude/skills';
+  const first = installed(`${root}/qd-first-mate/SKILL.md`);
+  const spec = installed(`${root}/qd-spec-run/SKILL.md`);
+  const brief = installed(`${root}/qd-spec-run/references/brief.md`);
+  const report = installed(`${root}/qd-spec-run/references/report.md`);
+  const charter = installed('/opt/qd/fleet/charter.md');
+  for (const [name, text] of [['qd-first-mate', first], ['qd-spec-run', spec]]) {
+    assert.match(text, new RegExp(`^---\\nname: ${name}\\ndescription: .+\\n---`));
+  }
+  const text = [first, spec, brief, report, charter].join('\n');
+  assert.doesNotMatch(text, /\b(Helm|worker|pause|resume|Ideas)\b/i);
+  const commands = [...new Set(text.match(/fm-[a-z-]+\.sh/g))];
+  assert.ok(commands.length >= 5);
+  for (const command of commands) okInside(`test -x /opt/firstmate/bin/${command}`);
+  for (const line of ["## Captain's intent", '## Firstmate spec', '## Progress note', '# Setup', '# Rules', '# Definition of done', 'Delivery contract: mode=direct-PR', 'Ship branch:', 'done: ticket NN committed <sha>', 'pnpm install --frozen-lockfile', 'refs/quarterdeck/failed/NN-1', 'Retry of ticket NN', 'Publish.']) assert.ok(brief.includes(line), line);
+  for (const line of ['Spec Run: <slug>', 'Branch prefix: <prefix>', 'Project: <project>', 'FM_SECONDMATE_CHARTER', 'project-management', 'verbatim']) assert.ok(first.includes(line), line);
+  for (const line of ['--mode direct-PR --branch-prefix', '--harness claude --model sonnet', 'refs/quarterdeck/failed/$NN-1', 'git status --porcelain', 'build ok, lint ok, test ok', 'needs-decision', 'qd-route', 'done [key=<slug>]', 'FM_HOME="$S"']) assert.ok(spec.includes(line), line);
+  for (const line of ['<project>', '<build command>', '<lint command>', '<test command>', 'qd-spec-run']) assert.ok(charter.includes(line), line);
+  for (const line of ['PR opened', 'stopped at ticket NN', 'stopped: question', 'local only', 'failed twice:', 'Question:']) assert.ok(report.includes(line), line);
+});
+
 test("Claude's policy keeps Base's keys except allowManagedHooksOnly", () => {
   const rendered = JSON.parse(okInside('cat /etc/claude-code/managed-settings.json'));
   const base = JSON.parse(readFileSync(join(REPO, 'base/claude/managed-settings.json'), 'utf8'));

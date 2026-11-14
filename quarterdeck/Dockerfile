@@ -90,7 +90,9 @@ COPY skills/dev-container/scripts/package.json skills/dev-container/scripts/pnpm
 RUN cd /opt/qd && pnpm install --prod --frozen-lockfile --ignore-scripts
 COPY quarterdeck/bin/claude quarterdeck/bin/qd-entry quarterdeck/bin/qd-server quarterdeck/bin/qd-first-mate quarterdeck/bin/qd-publish quarterdeck/bin/qd-project-up /opt/qd/bin/
 COPY quarterdeck/fleet/ /opt/qd/fleet/
-RUN mkdir -p /opt/qd/empty/.devcontainer /home/node/.claude /home/node/.treehouse \
+COPY quarterdeck/skills/ /etc/claude-code/.claude/skills/
+RUN chmod -R u=rwX,go=rX /etc/claude-code/.claude/skills \
+ && mkdir -p /opt/qd/empty/.devcontainer /home/node/.claude /home/node/.treehouse \
  && chown node:node /home/node/.claude /home/node/.treehouse \
  && chmod 755 /opt/qd/bin/claude /opt/qd/bin/qd-project-up /opt/qd/bin/qd-entry /opt/qd/bin/qd-server /opt/qd/bin/qd-first-mate /opt/qd/bin/qd-publish /usr/local/bin/claude-yolo /usr/local/bin/codex-yolo \
       /usr/local/share/dev-setup/check-secrets.sh /usr/local/share/egress/*.sh \

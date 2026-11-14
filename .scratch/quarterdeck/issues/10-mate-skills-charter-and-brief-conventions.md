@@ -42,3 +42,28 @@ The written procedure the mates follow. Two managed skills, `qd-first-mate` and 
 ## Blocked by
 
 - 05: The First Mate's home is seeded and its tab opens on start
+
+## Comments
+
+### Implementation handoff (review and closure deferred)
+
+Fixed point: `84e32ef7a5fa20633663b4a615ac3e63ed4c0758`. Implementation-only scope per user; status and acceptance boxes remain unchanged for independent reviewers. The implementation-model override does not change product dispatch.
+
+Built the two managed skills, Brief/report references and filled-field Charter template; Dockerfile installs them at the required image paths. `ARCHITECTURE.md` now indexes mate-procedure ownership and explicitly separates structural coverage from later runtime proof. No FirstMate source, dispatch config, launcher or project-container policy was changed.
+
+Criteria evidence:
+
+- Image/content/frontmatter and structural checks: new `mate procedures: managed skills, Charter and Brief contract are installed with real FirstMate commands` test in `tests/quarterdeck.test.mjs` reads the built image, checks both skills and references plus `/opt/qd/fleet/charter.md`, and verifies every named `fm-*.sh` is executable in `/opt/firstmate/bin`.
+- First Mate procedure: `quarterdeck/skills/qd-first-mate/SKILL.md` steps 0–1 cover registration, explicit-home provisioning, verbatim handoff, prefix selection, sole Second Mate project dispatch and verbatim report relay.
+- Second Mate procedure: `quarterdeck/skills/qd-spec-run/SKILL.md` steps 2–10 cover planning on Sonnet, numbered-ticket dispatch by the unchanged Opus/Sonnet rule, gate/commit/clean-tree checks, one preserved retry, terminal stop rules, publish marker/relaunch, and correlated parent report. Commands carry explicit `FM_HOME`. Initial spawn also records typed resolution as off using the pinned FirstMate command required by its configuration contract; it does not enable typed resolution.
+- Brief: `references/brief.md` preserves generated Setup/Rules and delivery/branch lines, fills verbatim intent and ticket-neutral brief notes, and replaces intermediate publishing with commit-and-gate completion. Report: `references/report.md` defines the seven-line maximum, including honest unavailable/failed evidence rather than invented success. The Charter names the project, home fields, gate commands, exclusive Crewmate ownership and stop rules. Both Charter and procedure explain expected unreachable-head state.
+- Writing method: loaded `writing-for-agents` and `SKILL-MECHANICS.md`; used model-invoked role-specific triggers, ordered steps with completion bounds, and mandatory pointers to the Brief/report references. No forbidden role/scope terms in shipped text (structural assertion).
+
+Validation:
+
+- RED: targeted Quarterdeck test failed on ENOENT for `/etc/claude-code/.claude/skills/qd-first-mate/SKILL.md` before implementation.
+- GREEN: `DEV_SETUP_TEST_SKIP_BUILD=1 node --test --test-global-setup=tests/global-setup.mjs --test-timeout=900000 --test-name-pattern='mate procedures:' tests/quarterdeck.test.mjs` — 1 pass, 0 failures.
+- End-of-implementation: `npm run test:quarterdeck` — 29 pass, 0 failures, 1 existing TODO (30 tests). The TODO reproduces ticket 08's known dummy extensions-token persistence in `/etc/environment`, already tracked by `.scratch/quarterdeck-security-review/issues/05-devcontainer-cli-persists-extensions-token.md`. No real credentials were used. Local command logs: `/tmp/qd10-red.log`, `/tmp/qd10-green.log`, `/tmp/qd10-quarterdeck.log` (not committed).
+- Broader regression intentionally not run: no `npm test`, `test:skill`, or unrelated suites. No separate typecheck script exists in the root manifest; changes are Markdown, Dockerfile copy wiring and the exercised JavaScript test.
+
+Dependencies/limits: ticket 05 implementation is present and marked done; its real-Claude SC-02/SC-10 evidence remains human work, not missing prerequisite code. No blocker to this ticket's structural/content slice was observed. Publish routing is still missing implementation owned by ticket 12; loop, planning, First Mate end-to-end and failure behavior remain proof for 11/16/17/18. No live agent or real GitHub run was performed, and these documents do not establish behavioral guarantees. Existing security concern 05 was reproduced, not a new distinct concern. Review was not dispatched and this ticket was not closed, as requested.
