@@ -41,3 +41,32 @@ The user supplies the token value; that is a human step needed only for the real
 ## Blocked by
 
 - 07: `qd-project-up` creates the project container from the project's main branch
+
+## Comments
+
+### Implementation handoff — independent review and closure deferred
+
+Fixed point: `2c203cc0b101c47959c276d4e32ca1f31879b2ef`. Implemented only this ticket's independent creation transport: `qd-project-up` maps `QUARTERDECK_EXTENSIONS_TOKEN` to `DEV_SETUP_GITHUB_PAT` in the devcontainer creation CLI's environment, adds name-only `-e DEV_SETUP_GITHUB_PAT`, warns for absent/empty input, and leaves the project-config credential filtering intact. Other Docker calls use the minimal environment without this token. CLI stderr is captured and the exact token is redacted from reported errors. No new helper, dependency, launcher, model-dispatch change, or Base/Variant/Template change.
+
+ADR 0010 records the narrowing of ADR 0007 and ticket 20's accepted inspect exposure until the Git gate. Architecture, operating docs, relevant design wording and the human checklist are reconciled. The source file delivery is already implemented by ticket 03; its former decision blocker is resolved by ticket 20. The referenced `.scratch/pat-container-env/issues/01` is absent in this checkout; Base's helper and Variant startup metadata were inspected directly.
+
+**Actual validation (dummy credentials only):**
+
+- New selected extensions fixture red: container-level token hash mismatch before implementation; green after creation transport was added.
+- Ordinary Template fixture, including absent/empty extensions input: creates successfully and warns by name; existing mount/main-tree reuse/egress/Feature/runArgs rejection checks pass.
+- Extensions fixture: container-level and `git credential fill` password hashes match; `example.com` credential fill fails without output; forbidden GitHub variables and the dummy project token are absent; exported files, creator output, container logs and image history contain no supplied extensions-token value.
+- Initial full `npm test`: 86 passed, 1 failed, revealing `/etc/environment` persistence. Focused rerun confirmed the path. The failing assertion is retained as an explicit nested TODO, not claimed fixed.
+- Final `npm run test:quarterdeck`: **28 passed, 0 ordinary failures, 1 failing TODO**.
+- Final full `npm test`: **87 passed, 0 ordinary failures, 1 failing TODO**, including the run's image build and existing Template acceptance tests. Exit success with a TODO is not full ticket acceptance. After tightening the missing-input fixture to explicitly `env -u QUARTERDECK_EXTENSIONS_TOKEN` (rather than empty input), that selected fixture passed again: 1 passed, 0 failed.
+- `node --check quarterdeck/bin/qd-project-up`, `node --check tests/quarterdeck.test.mjs`, and `git diff --check` passed. `git diff -- base/ variants/ templates/` is empty.
+
+**Exact blockers / unclaimed evidence:**
+
+1. **Implementation contract blocker, not missing human evidence:** the pinned devcontainer CLI copies the container environment into `/etc/environment` even with `--skip-post-create`. Thus the no-file criterion fails on the ordinary Template. Security-review **05** records the observed dummy-only evidence and review criteria. No after-the-fact file deletion or undocumented CLI-marker workaround was introduced; neither would establish the required behavior reliably. A supported prevention mechanism or an explicit human narrowing remains required.
+2. **Real permission/startup evidence:** no real token, private repository fetch, denied private read or denied write was tested. The public fixture has no private source, so the installer's private-source failure with the variable absent is not claimed exercised. After concern 05 is resolved or explicitly accepted, follow `quarterdeck/CHECKLIST.md`: supply a human-provisioned fine-grained Contents read-only token for `ValeriD/skills`, recreate the verified project container, confirm startup installs its pinned Project layer, then record only success/denial statuses for skills read, other-private read, and dry-run push. Repeat absent-token startup on the private-source project and retain the installer's existing `cannot fetch ...` diagnostic without values.
+3. **Launcher prerequisite:** ticket 09's launcher does not yet exist in this checkout. Nothing here forwards tokens through it or changes Claude delivery; its future end-to-end allowlist remains ticket 09's proof, not an implemented or tested claim here.
+4. **Trust/provisioning limits:** existing security concern **01** was extended for the now credential-bearing CLI's retained Feature/substitution inputs, preserving all initial content and remaining untracked/uncommitted. New concern **04** covers actual GitHub permissions and rotation. Existing concern **03** covers credentials already in the shared Git store. Dummy transport tests cannot establish universal credential absence or no persistence under arbitrary trusted Features. Image history was scanned, not every image layer's filesystem.
+
+**Operator notes:** token changes do not alter tree-based container identity. Updating the source file requires a fresh Herdr session; updating an already-created project's token requires deliberate removal/recreation of only the container whose creator/home/project labels you verified. Revocation is done at GitHub; unsetting the variable does not revoke a reused container's old token. Keep tracing disabled and never print token values, raw credential-fill output or raw inspect output as evidence. No real-token run was performed or requested from the agent.
+
+All acceptance checkboxes and status are left for the parent after independent review; this is not closure. No other implementation ticket was changed. Preexisting modifications to `grill-notes.md` and ticket 07 are preserved outside commits, as is the initially untracked concern 01 (including this session's appended evidence). Concurrent edits appeared in `CONTEXT.md` and additional `grill-notes.md` content during validation; they are not this implementation's changes and remain unstaged. Implementation and documentation are committed together with this ticket path in the commit message.

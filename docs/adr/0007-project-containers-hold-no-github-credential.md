@@ -1,5 +1,7 @@
 # Project containers hold no GitHub credential; the push is done in the Quarterdeck
 
+Narrowed by [ADR 0010](0010-read-only-agent-extensions-token.md): one read-only, single-repository token is allowed for fetching Agent Extensions. The project repository credential and push remain in the Quarterdeck.
+
 A Consuming Project's container started by the Quarterdeck gets no GitHub credential. Crewmates commit locally. The push and the pull request are done by a Crewmate in the Quarterdeck, where the token lives. The project folder holds the same files on both sides, so a commit made in the project container is visible in the Quarterdeck at once; the spike confirmed this. This removes a GitHub login from every container, and a compromised Crewmate can neither push nor read other repositories.
 
 Today a Template passes an optional repo-scoped token, `DEV_SETUP_GITHUB_PAT`, into the container; left unset, the container has no credential (`README.md`, `templates/node/`). That stays as it is for a project opened by hand. This decision is about containers the Quarterdeck creates: they never receive the variable. The Quarterdeck itself gets one fine-grained token for the project's repository, passed by name.

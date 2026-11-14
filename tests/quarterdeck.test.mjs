@@ -95,14 +95,15 @@ const okInside = (script) => {
 let firstId;
 
 // Run this fixture independently with --test-name-pattern='qd-project-up fixture'.
-function testProjectFixture() {
+async function testProjectFixture(extensionsToken = '', t) {
   buildImage();
   const started = quarterdeck();
   assert.equal(started.code, 0, started.err);
-  const home = `${work}/fleet/fixture`;
+  const suffix = extensionsToken ? '-extensions' : '';
+  const home = `${work}/fleet/fixture${suffix}`;
   const clone = `${home}/projects/fixture`;
-  const origin = `${work}/origin.git`;
-  const wt = `/home/node/.treehouse/qd-${id}`;
+  const origin = `${work}/origin${suffix}.git`;
+  const wt = `/home/node/.treehouse/qd-${id}${suffix}`;
   const template = readFileSync(join(REPO, 'templates/node/.devcontainer/devcontainer.json'), 'utf8')
     .replace('${templateOption:image}', IMAGE).replaceAll('${templateOption:patEnvVar}', 'GH_TOKEN');
   okInside(`mkdir -p ${clone}/.devcontainer ${home}/bin ${home}/state; git init -q --bare -b main ${origin}; git init -q -b main ${clone}; git -C ${clone} config user.name Fixture; git -C ${clone} config user.email fixture@example.invalid`);
@@ -118,7 +119,8 @@ function testProjectFixture() {
   const volumes = new Set();
   const derivedImages = new Set();
   const up = () => {
-    const r = inside(`GH_TOKEN=dummy-parent-only QD_PROJECT_TEST_IMAGE=${IMAGE} QD_RUN_LABEL=${runLabel} qd-project-up ${home} fixture`);
+    const r = inside(`env ${extensionsToken ? `QUARTERDECK_EXTENSIONS_TOKEN='${extensionsToken}'` : '-u QUARTERDECK_EXTENSIONS_TOKEN'} GH_TOKEN=dummy-parent-only GITHUB_TOKEN=dummy-parent-only QUARTERDECK_GITHUB_TOKEN=dummy-parent-only DEV_SETUP_GITHUB_PAT=dummy-project-only QD_PROJECT_TEST_IMAGE=${IMAGE} QD_RUN_LABEL=${runLabel} qd-project-up ${home} fixture`);
+    assert.equal((r.out + r.err).includes(extensionsToken || 'dummy-project-only'), false, 'creator output contains no supplied credential');
     if (r.code === 0) {
       const [c] = JSON.parse(run('docker', ['inspect', r.out.trim()]).out);
       for (const m of c.Mounts.filter(m => m.Type === 'volume')) volumes.add(m.Name);
@@ -148,7 +150,32 @@ function testProjectFixture() {
     assert.equal(commit.code, 0, commit.err);
     assert.notEqual(commit.out.trim(), beforeCommit, 'a new commit was made, not just an existing HEAD read');
     assert.equal(okInside(`git -C ${wt} rev-parse HEAD`).trim(), commit.out.trim());
-    assert.equal(probe('env | grep -Ei "github|^GH_TOKEN="').code, 1);
+    if (extensionsToken) {
+      const pat = c.Config.Env.find(v => v.startsWith('DEV_SETUP_GITHUB_PAT='))?.slice('DEV_SETUP_GITHUB_PAT='.length);
+      assert.equal(sha(pat), sha(extensionsToken), 'container-level token hash');
+      const credential = probe(`printf 'protocol=https\\nhost=github.com\\n\\n' | GIT_TERMINAL_PROMPT=0 git credential fill | awk -F= '/^password=/{print substr($0,10)}' | sha256sum`);
+      assert.equal(credential.code, 0);
+      assert.equal(credential.out.trim().split(' ')[0], sha(extensionsToken));
+      const other = probe(`printf 'protocol=https\\nhost=example.com\\n\\n' | GIT_TERMINAL_PROMPT=0 git credential fill`);
+      assert.notEqual(other.code, 0);
+      assert.equal(other.out, '');
+      assert.equal(probe('env | grep -E "^(GH_TOKEN|GITHUB_TOKEN|QUARTERDECK_GITHUB_TOKEN|QUARTERDECK_EXTENSIONS_TOKEN)="').code, 1);
+      assert.equal(JSON.stringify(c.Config.Env).includes('dummy-project-only'), false);
+      const exportScan = inside(`grep -rFl -- '${extensionsToken}' ${work}/quarterdeck/config`);
+      assert.equal(exportScan.code, 1, 'token absent from every exported file');
+      const diskScan = run('docker', ['exec', '-u', 'root', cid, 'sh', '-c', 'grep -rFl -- "$DEV_SETUP_GITHUB_PAT" /home /etc /tmp /var /opt /usr/local']);
+      await t.test('extensions token is absent from container files', {
+        todo: 'ticket 08 blocker: pinned devcontainer CLI persists container environment in /etc/environment; security-review 05',
+      }, () => assert.equal(diskScan.code, 1, `token found (paths only): ${diskScan.out}`));
+      for (const args of [['logs', cid], ['history', '--no-trunc', c.Config.Image]]) {
+        const output = run('docker', args);
+        assert.equal(output.code, 0);
+        assert.equal((output.out + output.err).includes(extensionsToken), false);
+      }
+    } else {
+      assert.match(first.err, /warning.*QUARTERDECK_EXTENSIONS_TOKEN/);
+      assert.equal(probe('env | grep -Ei "github|^GH_TOKEN="').code, 1);
+    }
     assert.equal(probe('test "$SAFE" = kept && test ! -e /run/quarterdeck/secrets.env && test ! -e /home/node/.config/gh/hosts.yml').code, 0);
     assert.equal(existsSync(`${home}/HOST-COMMAND-RAN`), false);
     assert.equal(probe('sh /usr/local/share/egress/wait-ready.sh').code, 0);
@@ -624,4 +651,5 @@ test('a missing branch, a failing push and a failing gh all exit non-zero and pr
   assert.deepEqual(lines, ['missing:', 'code=1', 'no-tickets:', 'code=1', 'push:', 'code=128', 'rejected:', 'code=1', 'gh:', 'code=1'], r.out);
 });
 
-test('qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)', testProjectFixture);
+test('qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)', () => testProjectFixture());
+test('qd-project-up extensions fixture: creation-only read token, helper and persistence checks (SC-16, SC-19)', t => testProjectFixture(`dummy-extensions-${id}`, t));

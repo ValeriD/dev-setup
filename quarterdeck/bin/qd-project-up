@@ -61,18 +61,24 @@ function main() {
   fs.closeSync(fs.openSync(configFile, 'a'));
   if (!fs.lstatSync(configFile).isFile() || fs.lstatSync(configFile).uid !== process.getuid()) throw Error('git config must be a user-owned regular file');
   const bind = (src, target, ro = false) => `source=${src},target=${target},type=bind${ro ? ',readonly' : ''}`;
+  const extensionsToken = process.env.QUARTERDECK_EXTENSIONS_TOKEN;
+  if (!extensionsToken) console.error('qd-project-up: warning: QUARTERDECK_EXTENSIONS_TOKEN is unset; private Agent Extensions cannot be fetched');
   const config = {
     image: source.image, features: source.features,
-    runArgs: [...new Set(['--cap-drop=ALL', ...runArgs])], containerEnv,
+    runArgs: [...new Set(['--cap-drop=ALL', ...runArgs]), ...(extensionsToken ? ['-e', 'DEV_SETUP_GITHUB_PAT'] : [])], containerEnv,
     updateRemoteUserUID: false, workspaceFolder: '/workspace',
     workspaceMount: bind(exported, '/workspace', true),
     mounts: [bind(pool, '/home/node/.treehouse'), bind(gitdir, gitdir), bind(hooks, hooks, true), bind(configFile, configFile, true), bind(bin, bin, true), bind(state, state)],
   };
   fs.writeFileSync(path.join(exported, '.devcontainer/devcontainer.json'), JSON.stringify(config, null, 2));
-  // Never let the CLI resolve localEnv or credential helpers against a Herdr pane's environment/home.
+  // Isolate the pane's environment/home; only the creation CLI gets the extensions token.
+  // Retained Features can access that value: security-review 01 (not a sandbox).
   const cleanHome = fs.mkdtempSync(path.join(os.tmpdir(), 'qd-project-'));
   const env = { PATH: '/usr/local/bin:/usr/bin:/bin:/opt/qd/bin', HOME: cleanHome, DOCKER_HOST: process.env.DOCKER_HOST || 'unix:///run/docker-proxy/docker.sock' };
-  const command = (name, args) => execFileSync(name, args, { cwd: '/', env, encoding: 'utf8', maxBuffer: 64 << 20 });
+  const command = (name, args) => execFileSync(name, args, {
+    cwd: '/', env: name === 'devcontainer' && extensionsToken ? { ...env, DEV_SETUP_GITHUB_PAT: extensionsToken } : env,
+    stdio: 'pipe', encoding: 'utf8', maxBuffer: 64 << 20,
+  });
   const labels = { 'quarterdeck.creator': 'qd-project-up', 'quarterdeck.project': project, 'quarterdeck.home': home };
   if (process.env.QD_RUN_LABEL) {
     const i = process.env.QD_RUN_LABEL.indexOf('=');
@@ -97,4 +103,9 @@ function main() {
     console.log(current);
   } finally { fs.rmSync(cleanHome, { recursive: true, force: true }); }
 }
-try { main(); } catch (e) { console.error(`qd-project-up: ${e.message}`); process.exitCode = 1; }
+try { main(); } catch (e) {
+  const token = process.env.QUARTERDECK_EXTENSIONS_TOKEN;
+  const message = token ? e.message.replaceAll(token, '[redacted]') : e.message;
+  console.error(`qd-project-up: ${message}`);
+  process.exitCode = 1;
+}
