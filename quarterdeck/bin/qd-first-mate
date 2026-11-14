@@ -33,7 +33,7 @@ fi
 if [ "$(git -C "$home" rev-parse --is-shallow-repository)" = true ]; then
   # Git clears command-scoped config for upload-pack; pass the ownership exception to that child.
   QD_FIRSTMATE_UPLOAD_SOURCE="$src" GIT_ALLOW_PROTOCOL=file git -C "$home" fetch \
-    --upload-pack='git -c safe.directory="$QD_FIRSTMATE_UPLOAD_SOURCE" upload-pack' \
+    --upload-pack='git -c safe.directory="$QD_FIRSTMATE_UPLOAD_SOURCE/.git" upload-pack' \
     --unshallow --no-tags --no-write-fetch-head --recurse-submodules=no "$src" HEAD
 fi
 
