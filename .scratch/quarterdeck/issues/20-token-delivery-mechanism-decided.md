@@ -1,6 +1,6 @@
 # 20: Token delivery mechanism decided
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 **Model:** Sonnet
 **Design slice:** 1 (Quarterdeck up), credentials
 
@@ -37,3 +37,22 @@ Nothing beyond ticket 03 and ticket 08. This ticket only fixes their open choice
 ## Comments
 
 2026-11-13: Ticket 03 is done to decision 1. Ticked: ticket 03 implemented; no root-owned secrets file, root reader, `--env-file` or sourcing; the path, names and missing-name warning are documented in the `quarterdeck` header and `README.md`. Still open: the ADR criterion (decision 3), which belongs to ticket 08. Ticket 20 stays open until 08 is done.
+
+### Implementation handoff at 8f61970 — review and closure deferred
+
+Fixed point: `8f61970e79d34e172c5cdc3053b3a40384a18ca8`. Read tickets 01, 03 and 08, the spec, design capsule and credential/project-container sections, decisions 44/47/48, and the implementation anchors. The historical comment above predates ticket 08's implementation: [ADR 0010](../../../docs/adr/0010-read-only-agent-extensions-token.md) now explicitly records decision 3 and names the Git gate as its replacement. No duplicate ADR or credential implementation is needed.
+
+**Pre-change sketch:** reuse the existing host path-only mount, non-root `qd-server` parser, manifest names, Base secret warning/helper, and `qd-project-up` creation-only transport unchanged (reuse ladder rung 1: no new code needed for the recorded choice). Update this ticket's evidence/handoff only. No abstraction, dependency direction, interface or architecture change. Reuse `tests/quarterdeck.test.mjs` for SC-19 and ticket 08's SC-16 exception; real private-source startup and permission checks remain manual. No other implementation ticket begins.
+
+**Validation:** ran only `npm run test:quarterdeck`: **31 passed, 0 ordinary failures, 1 failing TODO**, 32 tests total. The retained dummy-token assertion again found `/etc/environment` (path only); exit success is not full acceptance. Quarterdeck-side Herdr inheritance, plain-exec absence, inspect/history checks, missing-file handling and the extensions transport fixture passed. No real credentials or private permission probes were used. Broader regression intentionally not run. Existing test coverage was reused; no new behavior was introduced requiring a red-green cycle.
+
+**Remaining work, distinguished by kind:**
+
+- **Missing implementation-contract compliance:** ticket 08's no-file requirement remains violated by the pinned devcontainer CLI's `/etc/environment` persistence. Existing [security concern 05](../../quarterdeck-security-review/issues/05-devcontainer-cli-persists-extensions-token.md), `ready-for-human`, owns this exact concern; no duplicate is created. A supported prevention mechanism or explicit human narrowing is still required. Accepted inspect visibility is not acceptance of disk persistence. No marker workaround, after-the-fact deletion, or invented isolation guarantee was added.
+- **Missing human evidence:** ticket 08 still lacks actual private Project-layer installation, absent-token private-source failure, and verification that the supplied token can read only `ValeriD/skills` and cannot push. Follow `quarterdeck/CHECKLIST.md` and `quarterdeck/PROJECT-CONTAINERS.md` after concern 05 is resolved or explicitly accepted: provision the restricted token outside the repository, restart Herdr to reload it, recreate only the label-verified project container, and record only statuses/denial categories and value-free installer diagnostics. Do not record raw environment, inspect, or credential-helper output. No real token is required to establish the existing dummy transport evidence.
+- **Historical dependency note:** ticket 08's older comments say the ticket 09 launcher was absent. It exists at this fixed point; that historical absence is no longer a missing implementation. This ticket does not reopen or implement ticket 09, nor claim its real-agent/manual evidence complete.
+- **Existing security limits:** concerns 01 (config/Feature trust), 03 (shared Git store), 04 (permission provisioning) and 05 remain separately tracked. No new distinct concern was identified. Unsupported `runArgs` rejection and retained Features are unchanged; no product dispatch/model change.
+
+**Review handoff:** parent to dispatch fresh independent reviewers against the fixed point above, with this ticket, `.scratch/quarterdeck/spec.md`, `.scratch/quarterdeck/design.md`, tickets 03/08 and ADR 0010 as references. Historical ticket 08 reports are [implementation review](../reviews/08-independent-review.md) and [revalidation review](../reviews/08-revalidation-review.md); neither is a fresh review of this handoff. No independent review or final closure performed here. Acceptance checkboxes are deliberately unchanged for the parent's review, including the now-present ADR criterion. Ticket 20 remains open because ticket 08 is not complete; status is `ready-for-human` for its outstanding decision/evidence.
+
+Only this ticket's documentation is committed, with its path in the commit message. Existing edits to `grill-notes.md`, ticket 07 and `CONTEXT.md`, and untracked security concern 01 are preserved and excluded.
