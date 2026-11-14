@@ -1,6 +1,6 @@
 # 07: `qd-project-up` creates the project container from the project's main branch
 
-**Status:** ready-for-agent
+**Status:** needs-info
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), the fixture half
 
@@ -45,3 +45,21 @@
 
 - 01: Quarterdeck image and the `quarterdeck` host command
 - 04: The Quarterdeck reaches Docker only through a filtering socket proxy
+
+## Comments
+
+### Implementation blocked: `runArgs` security contract
+
+Fixed point: `d4b0a3d0c650d57bece5412f2a99c1095ccb7869`; initial working tree clean. Dependencies 01 and 04 were read and are done. No implementation was started and no acceptance criterion is claimed satisfied.
+
+The ticket's technical context and the design's “Project container / Image and config” row require retaining main-branch `runArgs`. That conflicts with the exact mount set, credential exclusion and hardened-container requirements (SC-15–17) unless the creator also restricts those arguments. Docker accepts additional mounts through `--volume`/`--mount`, environment delivery through `--env`/`--env-file`, and hardening overrides such as `--privileged`/`--entrypoint`. In particular, `--env GH_TOKEN` can forward the invoking Quarterdeck process's variable by name even after `containerEnv` and `remoteEnv` have been sanitized. These are API/configuration observations, not live credential probes; no real secret was read or forwarded.
+
+**Decision needed:** may `qd-project-up` reject unsupported main-branch `runArgs` before invoking the CLI, rather than preserve them unconditionally? Recommendation: initially allow only explicitly validated capability-drop, memory and PID-limit options used by `templates/node/.devcontainer/devcontainer.json`; reject everything else pending a documented extension. This changes the accepted project-configuration contract and must be approved rather than silently implemented. Arbitrary retained Features and environment substitutions must also be considered when defining the trust boundary; the proposed argument restriction alone is not a claim of complete sanitization.
+
+Pending that decision, the implementation sketch is deferred at the security boundary. Expected ownership remains `quarterdeck/bin/qd-project-up` → main-branch export → pinned devcontainer CLI → existing proxy; JSONC parsing reuses `jsonc-parser`. Planned validation remains the real fixture seam in `tests/quarterdeck.test.mjs` for SC-15, SC-16 and SC-17, using the existing node image and labelled cleanup. No Variant, Template or product dispatch change is proposed.
+
+Actual baseline validation before stopping:
+- `npm run test:quarterdeck`: 26 passed, 0 failed, 0 skipped.
+- `npm test`: 85 passed, 0 failed, 0 skipped (including the run's node image build).
+
+These are unchanged-code baseline results, not coverage of ticket 07. No new red/green cycle, ADR, implementation commit or independent implementation review occurred: implementation stopped before those stages because of the material security decision. No manual/live-agent validation was claimed. All criteria remain unticked; ticket 07 stays open. Ticket 20 and all other implementation tickets are untouched.
