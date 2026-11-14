@@ -126,11 +126,6 @@ async function testTicketLoop(t, failure = false) {
   put(`${parent}/projects/loop/.gitignore`, '.claude/\n');
   okInside(`cd ${parent}/projects/loop; git add .; git commit -qm initial; git remote add origin ${origin}; git push -q origin main`);
   put(`${parent}/data/projects.md`, `- loop [direct-PR branch=feat/] - Token-free loop fixture\n`);
-  // FirstMate's publication guard needs real roots to distinguish this fixture
-  // from its own repository. Fetch public history without any credential helper.
-  if (okInside(`git -C ${parent} rev-parse --is-shallow-repository`).trim() === 'true') {
-    okInside(`git -C ${parent} -c credential.helper= fetch --unshallow https://github.com/ValeriD/firstmate $(git -C ${parent} rev-parse HEAD)`);
-  }
   okInside(`cd ${parent}; FM_HOME=${parent} FM_SECONDMATE_CHARTER='Second Mate for loop. Commit only.' bin/fm-brief.sh ${mate} --secondmate loop; FM_HOME=${parent} bin/fm-home-seed.sh ${mate} ${home} loop`);
   // No model plays this Second Mate, so install the same shipped home config
   // normally inherited when its pane is spawned.
@@ -536,6 +531,8 @@ test('quarterdeck with no image and no container builds the image, starts one co
   const r = quarterdeck();
   assert.equal(r.code, 0, `${r.out}\n${r.err}`);
   assert.match(r.out, /status: running/, 'attach reached the Herdr server');
+  assert.equal(okInside('git -C /opt/firstmate rev-parse --is-shallow-repository').trim(), 'false');
+  assert.equal(okInside('git -C /opt/firstmate rev-parse HEAD').trim(), arg('FIRSTMATE_COMMIT'));
   // SC-19: the one declared name missing from the file is warned about by name, never a value.
   assert.match(r.err, /WARNING: secret QUARTERDECK_EXTENSIONS_TOKEN /);
   assert.doesNotMatch(r.err, /WARNING: secret (CLAUDE_CODE_OAUTH_TOKEN|QUARTERDECK_GITHUB_TOKEN)/);
@@ -822,9 +819,141 @@ test('First Mate: the first start seeds the home at the pinned commit and opens 
   // The home is the pinned commit; nothing in it is tracked-modified; only the four ignored folders are untracked-ignored.
   const pin = dockerfile.match(/^ARG FIRSTMATE_COMMIT=(\w+)/m)[1];
   assert.equal(run('git', ['-C', home(), 'rev-parse', 'HEAD']).out.trim(), pin);
+  assert.equal(run('git', ['-C', home(), 'rev-parse', '--is-shallow-repository']).out.trim(), 'false');
   assert.equal(run('git', ['-C', home(), 'status', '--porcelain']).out.trim(), '');
   const ignored = run('git', ['-C', home(), 'status', '--porcelain', '--ignored']).out.trim().split('\n').map((l) => l.slice(3)).sort();
   assert.deepEqual(ignored.filter((p) => !['config/', 'data/', 'state/', 'projects/'].includes(p)), [], `unexpected entries: ${ignored}`);
+});
+
+test('First Mate: manual start seeds without an agent or attachment, then normal starts activate First Mate', () => {
+  const manualName = `${name}-manual`;
+  const manualWork = projectDir('qd-manual-');
+  const manualHome = join(manualWork, 'fleet/firstmate');
+  for (const d of [manualWork, join(manualWork, 'quarterdeck'), join(manualWork, 'quarterdeck/claude'), join(manualWork, 'pool')]) {
+    mkdirSync(d, { recursive: true });
+    if (process.getuid?.() !== 1000) chmodSync(d, 0o777);
+  }
+  const command = (...args) => run(COMMAND, args, { env: {
+    ...process.env, QUARTERDECK_NAME: manualName, QUARTERDECK_IMAGE: stubImage,
+    QUARTERDECK_WORK_ROOT: manualWork, QUARTERDECK_RUN_LABEL: runLabel,
+    QUARTERDECK_SECRETS: secretsFile,
+    QUARTERDECK_ATTACH_CMD: 'touch /tmp/unexpected-attach',
+  } });
+  const probe = script => run('docker', ['exec', '-u', 'node', manualName, 'sh', '-c', script]);
+  const good = script => { const r = probe(script); assert.equal(r.code, 0, r.out + r.err); return r.out; };
+  const count = () => JSON.stringify(JSON.parse(good('herdr --session default workspace list'))).match(/"label":"firstmate"/g)?.length ?? 0;
+  const cid = () => run('docker', ['inspect', '--format', '{{.Id}}', manualName]).out.trim();
+  const started = (...args) => { const r = command(...args); assert.equal(r.code, 0, r.out + r.err); };
+  try {
+    started('start', '--no-first-mate');
+    const first = cid();
+    assert.equal(count(), 0);
+    good('test ! -e /tmp/stub-claude.out && test ! -e /tmp/unexpected-attach');
+    assert.doesNotMatch(good('ps -eo comm,args'), /\/opt\/qd\/bin\/claude|\/usr\/local\/bin\/claude/);
+    good('docker version >/dev/null && test -e /run/egress/ready');
+    assert.equal(good(`git -C ${manualHome} rev-parse HEAD`).trim(), arg('FIRSTMATE_COMMIT'));
+    assert.equal(good(`git -C ${manualHome} rev-parse --is-shallow-repository`).trim(), 'false');
+    for (const f of ['backend', 'claude-permission-mode', 'secondmate-harness', 'crew-dispatch.json']) {
+      assert.equal(readFileSync(join(manualHome, 'config', f), 'utf8'), readFileSync(join(REPO, 'quarterdeck/fleet/config', f), 'utf8'));
+    }
+    const cfg = JSON.parse(readFileSync(join(manualWork, 'quarterdeck/claude/.claude.json'), 'utf8'));
+    assert.equal(cfg.hasCompletedOnboarding, true);
+    assert.equal(cfg.projects[manualHome].hasTrustDialogAccepted, true);
+    for (const key of ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'DEV_SETUP_GITHUB_PAT', 'QUARTERDECK_GITHUB_TOKEN', 'QUARTERDECK_EXTENSIONS_TOKEN']) {
+      assert.equal(probe(`printenv ${key}`).code, 1);
+    }
+    const inspect = run('docker', ['inspect', manualName]).out;
+    assert.equal(inspect.includes(CLAUDE), false);
+    assert.equal(inspect.includes(GITHUB), false);
+    started('start', '--no-first-mate');
+    assert.equal(cid(), first);
+    assert.equal(count(), 0);
+    good('test ! -e /tmp/stub-claude.out');
+    started('start');
+    assert.equal(cid(), first);
+    assert.equal(count(), 1);
+    good('test ! -e /tmp/unexpected-attach');
+    for (let n = 0; n < 60 && probe('test -e /tmp/stub-claude.out').code; n++) run('sleep', ['0.5']);
+    assert.match(good('cat /tmp/stub-claude.out'), /arg=opus/);
+    started('start');
+    assert.equal(count(), 1);
+    const refused = command('start', '--no-first-mate');
+    assert.notEqual(refused.code, 0);
+    assert.match(refused.err, /First Mate workspace already exists/);
+    assert.equal(cid(), first, 'refusal preserves the running container');
+    assert.equal(count(), 1, 'refusal preserves the existing workspace');
+    good('test -e /tmp/stub-claude.out');
+    started('stop');
+    started('start', '--no-first-mate');
+    assert.equal(count(), 0);
+    good('test ! -e /tmp/stub-claude.out');
+    started('stop');
+    started('start');
+    assert.equal(count(), 1);
+    good('test ! -e /tmp/unexpected-attach');
+  } finally {
+    command('stop');
+    run('docker', ['run', '--rm', '--label', runLabel, '--user', 'root', '--entrypoint', 'rm', '-v', `${manualWork}:${manualWork}`, stubImage, '-rf', join(manualWork, 'fleet')]);
+    rmSync(manualWork, { recursive: true, force: true });
+  }
+});
+
+test('First Mate: an old shallow home repairs offline without replacing its state', () => {
+  const r = run('docker', ['run', '--rm', '--label', runLabel, '--network', 'none',
+    '--entrypoint', 'bash', image, '-ceu', String.raw`
+mkdir -p /tmp/history22/fleet /tmp/history22/claude /tmp/history22/bin
+# file:// honors depth, unlike Git's local-clone optimization.
+git clone -q --depth 1 file:///opt/firstmate /tmp/history22/fleet/firstmate
+chown -R node:node /tmp/history22
+setpriv --reuid=1000 --regid=1000 --init-groups bash -se <<'NODE'
+set -euo pipefail
+export QD_WORK_ROOT=/tmp/history22 CLAUDE_CONFIG_DIR=/tmp/history22/claude
+h=$QD_WORK_ROOT/fleet/firstmate
+export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
+export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+[ "$(git -C "$h" rev-parse --is-shallow-repository)" = true ]
+mkdir -p "$h/config" "$h/data" "$h/state"
+cp /opt/qd/fleet/config/* "$h/config/"
+printf 'default\n' > "$h/config/claude-permission-mode"
+printf 'existing data\n' > "$h/data/preserved"
+printf 'existing state\n' > "$h/state/preserved"
+printf 'untracked\n' > "$h/untracked-history22"
+git -C "$h" config history22.preserved yes
+git -C "$h" commit -q --allow-empty -m 'local home commit'
+f=$(git -C "$h" ls-files | sed -n '1p')
+printf '\nstaged history22\n' >> "$h/$f"
+git -C "$h" add -- "$f"
+printf '\nunstaged history22\n' >> "$h/$f"
+printf 'preserve FETCH_HEAD\n' > "$h/.git/FETCH_HEAD"
+head=$(git -C "$h" rev-parse HEAD)
+refs=$(git -C "$h" show-ref)
+index=$(sha256sum "$h/.git/index")
+config=$(sha256sum "$h/.git/config")
+fetch=$(sha256sum "$h/.git/FETCH_HEAD")
+files=$(cd "$h"; find . -path ./.git -prune -o -type f -print0 | sort -z | xargs -0 sha256sum)
+printf '{"preserved":"yes"}\n' > "$CLAUDE_CONFIG_DIR/.claude.json"
+# Seed-only setup must not invoke either agent/session command.
+printf '#!/bin/sh\nexit 97\n' > "$QD_WORK_ROOT/bin/herdr"
+printf '#!/bin/sh\nexit 98\n' > "$QD_WORK_ROOT/bin/claude"
+chmod +x "$QD_WORK_ROOT/bin/herdr" "$QD_WORK_ROOT/bin/claude"
+export PATH="$QD_WORK_ROOT/bin:$PATH"
+qd-first-mate --seed-only
+[ "$(git -C "$h" rev-parse --is-shallow-repository)" = false ]
+[ "$(git -C "$h" rev-parse HEAD)" = "$head" ]
+[ "$(git -C "$h" show-ref)" = "$refs" ]
+[ "$(sha256sum "$h/.git/index")" = "$index" ]
+[ "$(sha256sum "$h/.git/config")" = "$config" ]
+[ "$(sha256sum "$h/.git/FETCH_HEAD")" = "$fetch" ]
+[ "$(cd "$h"; find . -path ./.git -prune -o -type f -print0 | sort -z | xargs -0 sha256sum)" = "$files" ]
+jq -e --arg h "$h" '.preserved == "yes" and .hasCompletedOnboarding == true and .projects[$h].hasTrustDialogAccepted == true' "$CLAUDE_CONFIG_DIR/.claude.json"
+qd-first-mate --seed-only
+[ "$(git -C "$h" rev-parse HEAD)" = "$head" ]
+printf broken > "$CLAUDE_CONFIG_DIR/.claude.json"
+if qd-first-mate --seed-only; then echo 'invalid trust config accepted' >&2; exit 1; fi
+[ "$(cat "$CLAUDE_CONFIG_DIR/.claude.json")" = broken ]
+NODE
+`]);
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
 });
 
 test('First Mate: the shipped configuration is in the home and no dispatch variable is in .env (SC-06)', () => {

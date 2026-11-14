@@ -43,9 +43,10 @@ RUN curl -fsSL -o /tmp/docker.tgz https://download.docker.com/linux/static/stabl
 
 # FirstMate at the pinned commit, read-only. Its own scripts install Herdr and treehouse (SHA-256 checked).
 RUN git init -q /opt/firstmate \
- && git -C /opt/firstmate fetch -q --depth 1 https://github.com/ValeriD/firstmate ${FIRSTMATE_COMMIT} \
+ && git -C /opt/firstmate fetch -q https://github.com/ValeriD/firstmate ${FIRSTMATE_COMMIT} \
  && git -C /opt/firstmate checkout -q FETCH_HEAD \
  && test "$(git -C /opt/firstmate rev-parse HEAD)" = "${FIRSTMATE_COMMIT}" \
+ && test "$(git -C /opt/firstmate rev-parse --is-shallow-repository)" = false \
  && bash /opt/firstmate/bin/fm-install-herdr.sh /usr/local/bin \
  && bash /opt/firstmate/bin/fm-install-treehouse.sh /usr/local/bin \
  && chown -R root:root /opt/firstmate && chmod -R go-w,a+rX /opt/firstmate \

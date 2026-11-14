@@ -36,10 +36,10 @@ Quarterdeck depends on Base material and the extension installer; nothing in `ba
 
 | Module | Code anchors | Responsibility |
 |---|---|---|
-| Image | `quarterdeck/Dockerfile`, `quarterdeck/extensions.json`, `quarterdeck/claude-policy.json` | Base plus mate tools and pinned FirstMate; not a Variant or Template. |
-| Host command | `quarterdeck/bin/quarterdeck`, `quarterdeck/docker-proxy.conf` | Build, start, attach and labelled cleanup; Docker access through an endpoint-filtering Unix-socket proxy. |
+| Image | `quarterdeck/Dockerfile`, `quarterdeck/extensions.json`, `quarterdeck/claude-policy.json` | Base plus mate tools and full-history pinned FirstMate; not a Variant or Template. |
+| Host command | `quarterdeck/bin/quarterdeck`, `quarterdeck/docker-proxy.conf` | Build, start with optional agent-free mode, attach and labelled cleanup; Docker access through an endpoint-filtering Unix-socket proxy. |
 | Entrypoint | `quarterdeck/bin/qd-entry`, `quarterdeck/bin/qd-server` | Root egress setup, then non-root token parsing and Herdr server. |
-| FirstMate configuration | `quarterdeck/bin/qd-first-mate`, `quarterdeck/fleet/config/` | Seed the home, preserve existing configuration, open the First Mate workspace. |
+| FirstMate configuration | `quarterdeck/bin/qd-first-mate`, `quarterdeck/fleet/config/` | Seed the home, repair shallow history locally, preserve existing configuration, optionally open the First Mate workspace. |
 | Claude launcher | `quarterdeck/bin/claude` | Route FirstMate launches into the owning project container or the Quarterdeck publish session. |
 | Project-container creator | `quarterdeck/bin/qd-project-up` | Render fetched main-branch configuration and manage the home's container through the devcontainer CLI. |
 | Publisher | `quarterdeck/bin/qd-publish` | Push from the clone's Git directory with hooks/fsmonitor disabled; open a PR listing committed tickets. |

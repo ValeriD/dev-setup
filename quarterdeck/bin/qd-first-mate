@@ -1,6 +1,6 @@
 #!/bin/bash
-# Runs as `node`, started by qd-entry once Herdr's server is up. Seeds the First Mate's home on first
-# start and opens the First Mate's Herdr workspace. Nothing already in the home is overwritten.
+# Runs as `node`, started by qd-entry. Seeds or repairs the First Mate's history without replacing
+# existing home files. --seed-only performs the same setup without opening a workspace or launching Claude.
 set -euo pipefail
 # Runs in the background, so say why it stopped: the host command only sees the workspace never appear.
 trap 'echo "qd-first-mate: failed at line $LINENO" >&2' ERR
@@ -13,15 +13,7 @@ label=firstmate
 cmd='claude --model opus --permission-mode auto'
 herdr=(herdr --session default)
 
-# Herdr's server answers before the workspace can be created.
-up=
-for _ in $(seq 1 120); do
-  if "${herdr[@]}" status server 2>/dev/null | grep -q 'status: running'; then up=1; break; fi
-  sleep 0.5
-done
-[ -n "$up" ] || { echo "qd-first-mate: Herdr's server did not answer in 60 seconds" >&2; exit 1; }
-
-# The home is a checkout of the pinned FirstMate commit. A home that exists is never touched.
+# The home starts at the pinned FirstMate commit; existing checkouts keep their HEAD and files.
 if [ ! -e "$home/.git" ]; then
   # A copy, not a clone: /opt/firstmate is root-owned, and git refuses to read it as node (the dubious-ownership
   # check also runs in the child process of a local clone, where no configuration can reach). The copy is already
@@ -36,6 +28,15 @@ if [ ! -e "$home/.git" ]; then
   mv "$tmp" "$home"
 fi
 
+# Older images seeded a shallow checkout. Fetch only history from the local image: no checkout,
+# ref update, FETCH_HEAD replacement, config edit or network access. Trust only this root-owned source.
+if [ "$(git -C "$home" rev-parse --is-shallow-repository)" = true ]; then
+  # Git clears command-scoped config for upload-pack; pass the ownership exception to that child.
+  QD_FIRSTMATE_UPLOAD_SOURCE="$src" GIT_ALLOW_PROTOCOL=file git -C "$home" fetch \
+    --upload-pack='git -c safe.directory="$QD_FIRSTMATE_UPLOAD_SOURCE" upload-pack' \
+    --unshallow --no-tags --no-write-fetch-head --recurse-submodules=no "$src" HEAD
+fi
+
 # Shipped configuration: only files that are missing, so a hand edit survives every later start.
 mkdir -p "$home/config"
 for f in "$fleet"/config/*; do
@@ -48,7 +49,18 @@ cfg=${CLAUDE_CONFIG_DIR:?CLAUDE_CONFIG_DIR is not set}/.claude.json
 mkdir -p "$(dirname "$cfg")"
 [ -s "$cfg" ] || echo '{}' >"$cfg"
 new=$(mktemp "$cfg.XXXXXX")
-jq --arg p "$home" '.hasCompletedOnboarding = true | .projects[$p].hasTrustDialogAccepted = true' "$cfg" >"$new" && mv "$new" "$cfg"
+jq --arg p "$home" '.hasCompletedOnboarding = true | .projects[$p].hasTrustDialogAccepted = true' "$cfg" >"$new"
+mv "$new" "$cfg"
+
+[ "${1:-}" != --seed-only ] || exit 0
+
+# Herdr's server answers before the workspace can be created.
+up=
+for _ in $(seq 1 120); do
+  if "${herdr[@]}" status server 2>/dev/null | grep -q 'status: running'; then up=1; break; fi
+  sleep 0.5
+done
+[ -n "$up" ] || { echo "qd-first-mate: Herdr's server did not answer in 60 seconds" >&2; exit 1; }
 
 # One First Mate workspace, however many times the container starts.
 if "${herdr[@]}" workspace list | jq -e --arg l "$label" '[.. | objects | select(.label? == $l)] | length > 0' >/dev/null; then

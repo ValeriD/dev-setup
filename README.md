@@ -45,6 +45,8 @@ It never commits. The skill finds this repository through the symlink, so if you
 
 `quarterdeck/` builds the image that runs Herdr and the mates. Put its command on your path once (`ln -s "$PWD/quarterdeck/bin/quarterdeck" ~/.local/bin/quarterdeck`), then `quarterdeck` builds the image if needed, starts the container and attaches to Herdr. `quarterdeck stop` removes it. The work root defaults to `~/work`; set `QUARTERDECK_WORK_ROOT` to change it.
 
+For manual work without an agent, use `quarterdeck start --no-first-mate` on a stopped container. It starts the Docker proxy and Herdr, seeds the same First Mate home and Claude trust/configuration as normal startup, then returns without attaching or opening the `firstmate` workspace. `quarterdeck start` starts normally without attaching; `quarterdeck` (or `quarterdeck attach`) still attaches. A later normal start or attach opens the First Mate even in the same running container, and reuses the same home after stop/start. The option refuses a running container with a `firstmate` workspace; it never stops existing sessions.
+
 The tokens come from one file you own (not root), mode 0600, at `~/.config/quarterdeck/secrets.env` or the path in `QUARTERDECK_SECRETS`, with plain `NAME=value` lines (nothing is sourced or expanded). The command mounts it read-only; it never reads it. A non-root process in the container takes only these names and hands them to Herdr's server, so processes started from Herdr's panes inherit the token variables and a plain `docker exec` shell does not. The mounted source file remains readable by the host user from an exec shell; ticket 21 accepts that access, not filesystem isolation:
 
 | Name | Holds |
