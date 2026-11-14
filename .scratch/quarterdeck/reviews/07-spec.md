@@ -1,0 +1,9 @@
+## Spec
+
+- **Partial — SC-15–17: retained Features bypass the stated container constraints.** Ticket 07 requires “bind mounts are exactly” the listed mounts; SC-17 requires “the hardened image … with the Egress Allowlist applied.” In `quarterdeck/bin/qd-project-up`, `features: source.features` forwards Features without restricting their runtime metadata or installation effects. Features can introduce extra mounts, credentials or hardening overrides. The benign local-Feature test does not establish these guarantees. **Already documented and deferred for human review**, not a newly discovered blocker; the requirements remain partial.
+
+- **Partial — SC-16: shared Git files can expose repository credentials.** The spec says: “The GitHub token is absent from the project container's environment and files.” `quarterdeck/bin/qd-project-up` mounts the entire clone Git directory, including readable `config`, without enforcing a credential-free clone prerequisite. A previously persisted authenticated remote URL would therefore expose its credential despite environment filtering. The fixture uses a credential-free local origin, so it cannot establish this broader guarantee. **Already recorded in security-review issue 03**; implementation permission does not establish requirement satisfaction.
+
+- **Missing acceptance coverage — SC-16: `remoteEnv` credential removal is not exercised.** Ticket 07 explicitly requires: “Even when the fixture's main-branch config declares `DEV_SETUP_GITHUB_PAT` in `containerEnv` and `remoteEnv`, the container has no GitHub variable and no GitHub file from that config.” The added fixture in `tests/quarterdeck.test.mjs` injects credentials only into `containerEnv`, not `remoteEnv`. The renderer omits `remoteEnv`, but the requested adversarial fixture is incomplete.
+
+No additional scope creep identified. The restricted `runArgs`, fixture image override and deferred security reviews have explicit ticket authorization.

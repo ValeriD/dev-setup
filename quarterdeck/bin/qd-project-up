@@ -47,8 +47,11 @@ function main() {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, git('show', `${tree}:${filename}`), { mode: meta.startsWith('100755') ? 0o755 : 0o644 });
   }
-  const sources = [path.join(root, 'pool'), gitdir, path.join(gitdir, 'hooks'), path.join(home, 'bin'), path.join(home, 'state')];
-  for (const dir of sources) {
+  const pool = path.join(root, 'pool');
+  const hooks = path.join(gitdir, 'hooks');
+  const bin = path.join(home, 'bin');
+  const state = path.join(home, 'state');
+  for (const dir of [pool, gitdir, hooks, bin, state]) {
     fs.mkdirSync(dir, { recursive: true });
     const stat = fs.lstatSync(dir);
     if (!stat.isDirectory() || stat.uid !== process.getuid()) throw Error('mount sources must be user-owned directories');
@@ -62,7 +65,7 @@ function main() {
     runArgs: [...new Set(['--cap-drop=ALL', ...runArgs])], containerEnv,
     updateRemoteUserUID: false, workspaceFolder: '/workspace',
     workspaceMount: bind(exported, '/workspace', true),
-    mounts: [bind(sources[0], '/home/node/.treehouse'), bind(gitdir, gitdir), bind(sources[2], sources[2], true), bind(configFile, configFile, true), bind(sources[3], sources[3], true), bind(sources[4], sources[4])],
+    mounts: [bind(pool, '/home/node/.treehouse'), bind(gitdir, gitdir), bind(hooks, hooks, true), bind(configFile, configFile, true), bind(bin, bin, true), bind(state, state)],
   };
   fs.writeFileSync(path.join(exported, '.devcontainer/devcontainer.json'), JSON.stringify(config, null, 2));
   // Never let the CLI resolve localEnv or credential helpers against a Herdr pane's environment/home.

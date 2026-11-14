@@ -143,8 +143,10 @@ function testProjectFixture() {
     assert.deepEqual(c.Mounts.filter(m => m.Type === 'volume').map(m => m.Destination).sort(), ['/home/node/.claude', '/home/node/.codex']);
     assert.equal(probe(`touch ${clone}/.git/hooks/forbidden`).code === 0, false);
     assert.equal(probe(`echo forbidden >> ${clone}/.git/config`).code === 0, false);
-    const commit = probe(`cd ${wt}; echo committed > proof; git add proof; git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm proof; git rev-parse HEAD`);
+    const beforeCommit = okInside(`git -C ${wt} rev-parse HEAD`).trim();
+    const commit = probe(`set -e; cd ${wt}; echo committed > proof; git add proof; git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm proof; git rev-parse HEAD`);
     assert.equal(commit.code, 0, commit.err);
+    assert.notEqual(commit.out.trim(), beforeCommit, 'a new commit was made, not just an existing HEAD read');
     assert.equal(okInside(`git -C ${wt} rev-parse HEAD`).trim(), commit.out.trim());
     assert.equal(probe('env | grep -Ei "github|^GH_TOKEN="').code, 1);
     assert.equal(probe('test "$SAFE" = kept && test ! -e /run/quarterdeck/secrets.env && test ! -e /home/node/.config/gh/hosts.yml').code, 0);
