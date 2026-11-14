@@ -152,3 +152,54 @@ Validation of the follow-up:
 - Manual checks: inspected the diff for retained launch/gate/retry assertions and identical writer arguments. Real-agent checks were **not performed**: normal seeded-home dispatch, real Stop-hook execution under hardened policy, automatic parent escalation, interim `working`, prompt-free supervision, and user-facing failure reporting remain outstanding. Publication remains excluded.
 
 Scope/structure: no product behavior, provisioning, model configuration, interfaces or dependency direction changed. Beyond the quoted hunks, the writer moved to file scope and its duplicate in `testProjectFixture` was removed; rule/default lookup and predicate assertions were added adjacent to routing. Thus test structure does extend beyond the quoted lines, deliberately to address the findings; no other behavior changed and no repeat review was dispatched per instruction. Unrelated grill notes, ticket 07, `CONTEXT.md`, and untracked security-review 01 remain untouched and excluded from commits. No new implementation ticket work was started; ticket/design/spec remain open.
+
+### Second-review comment — independent reports; ticket remains open
+
+Fixed point: `be01472`. Reviewed commits: `3fcef3d` and `32d76f8`. The three fresh independent reports below are appended verbatim from `/tmp/qd11-agents/standards2.log`, `/tmp/qd11-agents/design2.log`, and `/tmp/qd11-agents/spec2.log`.
+
+**Zero new actionable findings.** The previously documented provisioning blocker and outstanding manual evidence remain unresolved. Ticket 11 stays open; status and acceptance boxes are unchanged. This is a documentation-only addition: no implementation changes, no other ticket started, and no tests run or needed. Unrelated edits are preserved.
+
+## Standards
+
+Reviewed `git diff be01472...HEAD` directly: commits `3fcef3d` and `32d76f8`, against the linked repository guidance, full smell baseline, and supplied ticket/spec/design.
+
+**No actionable findings.** No documented-standard breaches or new baseline smells identified.
+
+- **Duplication resolved — `tests/quarterdeck.test.mjs:97–101`.** The shared `put` helper replaces both identical writers while retaining the `node` user, positional path argument, stdin delivery, and exit/error assertion. Neither integration scenario loses protection.
+- **Dispatch coupling improved — `tests/quarterdeck.test.mjs:184–199`.** Rule/default selection no longer assumes array position. The explicit predicate assertion guards the scripted Second Mate’s deliberately limited interpretation; this matches the design’s specified configuration rather than introducing a general dispatch engine.
+- **Test overlap is justified.** Predicate assertions overlap the existing configuration test at lines 749–758, but uniquely reject unsupported configuration in the loop’s seeded home when that scenario runs independently. Retain that guard and the independent observed launch-model assertions at lines 224–225. Removing either would weaken distinct protection.
+- **Ticket accounting remains qualified.** The documentation checks only criteria 1 and 8 and explicitly leaves prepared-home integration, stock startup, and real-agent evidence unresolved. Historical reviewer reports are clearly separated from follow-up dispositions.
+
+Read-only review; no tests run, no files changed, no secret probes. Broader regression intentionally not run.
+
+## Design review
+
+No material design violations found in `git diff be01472...HEAD` (commits `3fcef3d`, `32d76f8`).
+
+- The shared Docker writer preserves the existing user, argument-safe path, stdin delivery and failure assertion; it changes no ownership or interface.
+- Dispatch lookup remains test-local and matches the design’s explicit single-rule configuration. Actual launch-model assertions remain intact; no product dispatch engine or FirstMate lifecycle wrapper is introduced.
+- Existing integration scenarios and gate/retry assertions are retained. No automatic test-per-function coverage was added.
+
+The stock shallow-home provisioning blocker remains unresolved, but predates this diff. The updated ticket explicitly keeps criteria 2–7 unchecked and does not claim prepared-home tests prove shipped startup. This is an outstanding validation outcome, not a newly introduced violation.
+
+Read-only review; no tests or secret probes run. Broader regression intentionally not run.
+
+## Spec review
+
+Reviewed `git diff be01472...HEAD` directly: commits `3fcef3d` and `32d76f8`.
+
+**No new missing, incorrect, or out-of-scope requirements found in this follow-up.** The shared Docker writer preserves its arguments and behavior. Dispatch lookup no longer depends on array position; it explicitly checks the supported predicate and retains actual launch-model assertions, consistent with **SC-06**: “A ticket about skills, prompts or agent tools is implemented by an Opus Crewmate.”
+
+### Documented implementation blocker—not merely pending evidence
+
+- **SC-03:** “The Second Mate has ticket 1 implemented by a Crewmate in the project container, then ticket 2 by a new Crewmate.” Normal seeded-home dispatch remains unresolved: the fixture requires unshallowing FirstMate history before dispatch. This follow-up does not fix that prerequisite. Ticket 11 accurately retains criteria 2–7 as unchecked and distinguishes prepared-home results from shipped-startup proof. This is a pre-existing, documented blocker, not a regression introduced by these commits.
+
+### Pending evidence—not missing follow-up implementation
+
+- **SC-14:** “The mates do not stop it or report it as broken because the branch is not on GitHub yet.” Scripted continuation does not establish autonomous machinery behavior. Escalation and interim `working` remain manual checks; ticket 11 explicitly requires checklist entries rather than claiming those checks passed.
+- **SC-02 / SC-10:** “real state (working, blocked, done)” and “never asked to approve a tool call…” remain unproven with real agents. Simulated Stop-hook completion cannot establish hardened-policy compatibility or prompt-free supervision.
+- **SC-11:** “I get a report that names the failed ticket…” remains manual evidence. Ticket 11 expressly covers the token-free retry/stop half, not user-facing reporting.
+
+The newly checked criteria concern the existing stub image and checklist entries—not full scenario completion. Publication remains explicitly excluded by ticket 11; its absence is not scope loss.
+
+Read-only review. No tests or secret probes run; broader regression intentionally not run.
