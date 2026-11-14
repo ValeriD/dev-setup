@@ -74,6 +74,7 @@ VS Code's "Reopen in Container" works too, but VS Code passes more of the host i
 |---|---|---|
 | `npm run test:installer` | the Agent Extension installer | Node 24 |
 | `npm run test:skill` | the skill's helper scripts | Node 24 |
+| `npm run test:quarterdeck` | the Quarterdeck only: its image, host command, proxy, tokens and tools; skips the Node image build | Docker |
 | `npm test` | the whole image: build, Template, hardening, extensions, the skill against a real container | Docker, about 4 min |
 
 `npm test` deletes only the Docker containers, images and volumes it created. `DEV_SETUP_TEST_KEEP=1` keeps them so you can debug. Logins, VS Code and the skill's conversations are checked by hand: [`docs/manual/`](docs/manual/).
