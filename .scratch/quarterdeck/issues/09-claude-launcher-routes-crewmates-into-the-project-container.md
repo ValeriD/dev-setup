@@ -1,6 +1,6 @@
 # 09: The `claude` launcher runs a Crewmate in the project container with the right environment
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), launcher
 
@@ -10,14 +10,14 @@ A launcher named `claude`, first on the Quarterdeck's path, that FirstMate's spa
 
 ## Acceptance criteria
 
-- [ ] With the working directory under `/home/node/.treehouse`, the launcher runs `docker exec -u node -it <project container> claude <same argv>`; elsewhere it execs the real Claude with the same argv (SC-02).
+- [x] With the working directory under `/home/node/.treehouse`, the launcher runs `docker exec -u node -it <project container> claude <same argv>`; elsewhere it execs the real Claude with the same argv (SC-02).
 - [ ] The `docker` process carries `HERDR_AGENT=claude` (asserted through a recording `docker` shim in the test); real Herdr state through the project container is a manual checklist row (SC-02).
-- [ ] Forwarded by name only: `FM_*`, `GIT_CONFIG_*`, `CLAUDE_CODE_*`, `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `COMPACT_ADVISER_DISABLE`, `TRACEPARENT`. With `GH_TOKEN`, `GITHUB_TOKEN` and `DEV_SETUP_GITHUB_PAT` set in the launcher's environment, none reaches the project container through the launcher. The one GitHub credential a project container may hold, the read-only single-repository extensions token, is delivered at creation by ticket 08, never by the launcher (SC-16, SC-19).
-- [ ] `CLAUDE_CODE_OAUTH_TOKEN` reaches the exec by name from the launcher's own environment (the test sets a dummy; how a pane gets it is ticket 03's decision), and `docker inspect` of the project container shows no token (SC-19, project-container half).
-- [ ] Before each launch the launcher writes into the project container's `$CLAUDE_CONFIG_DIR/.claude.json`, as user `node` and with `node -e` (the hardened image has no `jq`): `hasCompletedOnboarding: true` if the file is empty or missing, and `projects[$PWD].hasTrustDialogAccepted: true` for the exact worktree path; an existing valid file is merged, not replaced; a trust entry for a parent folder is not relied on.
-- [ ] Committer identity: `quarterdeck` passes the host's `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` into the Quarterdeck, and a commit made by a stub in the project container carries them (SC-04, identity half).
-- [ ] Each launch appends one line to `<work root>/quarterdeck/logs/launch.log` (route, project container, working directory, model argument).
-- [ ] The launcher never writes a path other than the exact worktree into trust and never touches the Quarterdeck's own Claude config when routing into the project container.
+- [x] Forwarded by name only: `FM_*`, `GIT_CONFIG_*`, `CLAUDE_CODE_*`, `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `COMPACT_ADVISER_DISABLE`, `TRACEPARENT`. With `GH_TOKEN`, `GITHUB_TOKEN` and `DEV_SETUP_GITHUB_PAT` set in the launcher's environment, none reaches the project container through the launcher. The one GitHub credential a project container may hold, the read-only single-repository extensions token, is delivered at creation by ticket 08, never by the launcher (SC-16, SC-19).
+- [x] `CLAUDE_CODE_OAUTH_TOKEN` reaches the exec by name from the launcher's own environment (the test sets a dummy; how a pane gets it is ticket 03's decision), and `docker inspect` of the project container shows no token (SC-19, project-container half).
+- [x] Before each launch the launcher writes into the project container's `$CLAUDE_CONFIG_DIR/.claude.json`, as user `node` and with `node -e` (the hardened image has no `jq`): `hasCompletedOnboarding: true` if the file is empty or missing, and `projects[$PWD].hasTrustDialogAccepted: true` for the exact worktree path; an existing valid file is merged, not replaced; a trust entry for a parent folder is not relied on.
+- [x] Committer identity: `quarterdeck` passes the host's `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` into the Quarterdeck, and a commit made by a stub in the project container carries them (SC-04, identity half).
+- [x] Each launch appends one line to `<work root>/quarterdeck/logs/launch.log` (route, project container, working directory, model argument).
+- [x] The launcher never writes a path other than the exact worktree into trust and never touches the Quarterdeck's own Claude config when routing into the project container.
 
 ## Technical context
 
@@ -59,3 +59,22 @@ Exact outstanding evidence/policy limitations:
 Independent-review pointers: this ticket and `.scratch/quarterdeck/{spec,design}.md`; implementation `quarterdeck/bin/claude`, `quarterdeck/bin/quarterdeck`, `quarterdeck/Dockerfile`; validation `testLauncherFixture` in `tests/quarterdeck.test.mjs` (runs within `qd-project-up fixture`); current architecture `ARCHITECTURE.md` and `quarterdeck/PROJECT-CONTAINERS.md`. No independent review or final closure was performed here.
 
 Preserved outside this commit: preexisting changes to `grill-notes.md`, ticket 07, `CONTEXT.md`, and untracked security-review concern 01.
+
+### Step 7 resolution — implementation complete; human evidence outstanding
+
+Implementation commit: `a31a9adc8bd26ae16b7cd8b204471a10b060656e`; review fixed point: `2590e60e6fd972ae1fba9ef764405c132468ef07`. Built container/local Claude routing, same-argv exec, allowlisted name-only environment delivery, container-local first-run/trust merging, host commit identity forwarding, and launch logging. This follow-up changes bookkeeping and review records only; no implementation changes or other implementation tickets.
+
+Acceptance disposition: seven criteria are fully supported by the committed fixture/shim/stub evidence recorded above and are checked. The combined Herdr criterion remains unchecked: the recording Docker shim proves `HERDR_AGENT=claude`, but real working/blocked/done state through the project container has not been observed. Config-shape and exact-folder trust assertions satisfy the config-writing criteria; they do not prove prompt-free vendor behavior. SC-02 real state and SC-10 prompt-free behavior remain manual and unverified.
+
+Validation retained from the implementation handoff: final `npm run test:quarterdeck` exited 0 (29 tests: 28 pass, 0 fail, 1 todo); shell syntax, test-file syntax and diff whitespace checks passed. The todo still fails on ticket 08's dummy extensions token in `/etc/environment`, so this is not evidence of credential-file absence. No tests were rerun for this bookkeeping-only change. `npm test`, `test:skill`, and unrelated/broader suites were intentionally not run; broader regressions and real-agent integration are not established by this record. Publish routing remains deferred to ticket 12.
+
+Independent fresh Astra low reviews are preserved verbatim:
+- [Standards](../reviews/09-standards.md): 0 findings; no fix or decline required.
+- [Design](../reviews/09-design.md): 0 findings; manual integration limitation retained, not waived.
+- [Spec](../reviews/09-spec.md): 0 findings; real-agent acceptance limitation retained, not waived.
+
+The reports ran no tests. All findings are dispositioned (none); no follow-up implementation commit is needed. Existing security-review concerns [01](../../quarterdeck-security-review/issues/01-project-config-trust-boundary.md), [03](../../quarterdeck-security-review/issues/03-clone-git-store-credential-assumptions.md), and [05](../../quarterdeck-security-review/issues/05-devcontainer-cli-persists-extensions-token.md) remain unresolved. No new distinct concern was discovered, and none of those tickets is changed here.
+
+**Open / ready-for-human:** before real-token validation, a human must resolve or explicitly accept those recorded security-policy blockers; this resolution does not accept them. Then follow the ticket 09 row in `quarterdeck/CHECKLIST.md`: create the project container with `qd-project-up`, spawn a Crewmate through FirstMate from its owning Second Mate in a fresh pool worktree, observe Herdr's tab and `agent get` during working/blocked/done, and verify the first screen has no onboarding, trust, or login prompt. Repeat in a second fresh worktree to verify exact-folder trust. Record observed states and prompt outcomes only, never tokens or raw credential-bearing output. Append that evidence here; only then check the remaining combined Herdr criterion and close the ticket if all outcomes pass. A failed observation must be recorded rather than checked off. Ticket, design and spec remain open; no remaining launcher implementation defect is identified by these reviews.
+
+Unrelated edits to `grill-notes.md`, ticket 07 and `CONTEXT.md`, and the preexisting untracked security ticket 01 are preserved and excluded from this bookkeeping commit.
