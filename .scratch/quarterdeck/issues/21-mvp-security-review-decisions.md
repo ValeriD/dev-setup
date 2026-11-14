@@ -1,6 +1,6 @@
 # 21: MVP decisions on the security review and two unmet criteria
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** credentials, project container
 
@@ -26,11 +26,11 @@ Documentation and tests only. No change to product behaviour.
 
 ## Acceptance criteria
 
-- [ ] Decisions 1 to 5 are recorded in an ADR or the spec's accepted risks, each naming the feature that removes the risk.
-- [ ] `npm run test:quarterdeck` passes with no failing TODO for the extensions token; the test asserts the token is in none of: rendered config, work-root export, logs, image.
-- [ ] The SC-19 test asserts that a `docker exec` shell has no token variable, and no document claims the secrets file is unreadable from such a shell.
-- [ ] No document describes Features, the clone's git store or the publish session as proven isolation.
-- [ ] Review tickets 01, 02, 03, 05, 06 and 07 carry a resolution comment and Status done; 04 is unchanged.
+- [x] Decisions 1 to 5 are recorded in an ADR or the spec's accepted risks, each naming the feature that removes the risk.
+- [x] `npm run test:quarterdeck` passes with no failing TODO for the extensions token; the test asserts the token is in none of: rendered config, work-root export, logs, image.
+- [x] The SC-19 test asserts that a `docker exec` shell has no token variable, and no document claims the secrets file is unreadable from such a shell.
+- [x] No document describes Features, the clone's git store or the publish session as proven isolation.
+- [x] Review tickets 01, 02, 03, 05, 06 and 07 carry a resolution comment and Status done; 04 is unchanged.
 
 ## Blocked by
 
@@ -47,3 +47,11 @@ Sketch/build: reuse existing credential transport, fixture and SC-19 environment
 Validation: targeted baseline reproduced the failing `/etc/environment` TODO. First Quarterdeck run with file-backed image saves failed both save checks; host free space was only 2.8 GiB, so the test was changed to streaming rather than deleting unrelated resources. The save failure's stderr was not retained, so disk pressure is a diagnosis, not a proven error message. Targeted extensions fixture then passed 3/3; final `npm run test:quarterdeck` exited 0, **33 passed, 0 failed, 0 TODO**. Dummy credentials only; no real token/permission or agent probes. Broader regression intentionally not run under the test restriction.
 
 No mandatory human evidence is requested by this ticket's acceptance criteria. Review 04's token-scope/private-startup evidence, ticket 22's shallow-home repair and ticket 23's agent-free startup remain separate outstanding work; no observation or completion is claimed for them. Independent fresh review follows the implementation commit; checkboxes remain pending until its findings are dispositioned.
+
+### Resolution — done
+
+Implementation commit: `2f7ec2f`. [Independent review reports and dispositions](../reviews/21-independent-review.md) preserve the three fresh reviewers' reports verbatim. All used `openai-codex/gpt-6-astra` with low thinking; Standards 0, Design 0, Spec 0 findings. Nothing required a fix or decline.
+
+All five criteria are satisfied: decisions 1–5 and later fixes are recorded; the final Quarterdeck-only run passed 33/33 without TODOs; SC-19 explicitly tests environment non-inheritance and accepts mounted-source readability; current guidance qualifies historical isolation claims; reviews 01/02/03/05/06/07 are done with resolution comments and preserved historical bodies. Review 04 is byte-for-byte unchanged. No product behavior or dispatch changed.
+
+Skipped: broader regression (intentionally restricted), real token scope/private-source checks, real-Claude observations, and tickets 22/23 implementation. Those remain separate work, not mandatory evidence for ticket 21. No remaining blocker for this ticket. Other Quarterdeck tickets remain open, so the spec/design are not closed. Unrelated edits and planning remain unstaged and untouched.
