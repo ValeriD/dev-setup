@@ -1,6 +1,6 @@
 # 07: `qd-project-up` creates the project container from the project's main branch
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), the fixture half
 
@@ -17,16 +17,16 @@
 
 ## Acceptance criteria
 
-- [ ] `qd-project-up` on a fixture project (a Template-shaped `.devcontainer/` rendered from `templates/node`, with a local bare origin) leaves a running container whose bind mounts are exactly: the pool read-write at `/home/node/.treehouse`; `<clone>/.git` read-write with `hooks` and `config` read-only; `<home>/bin` read-only; `<home>/state` read-write; the export read-only at `/workspace`; plus the image's own Claude and Codex volumes (SC-15, SC-16).
-- [ ] A write to `.git/hooks` or `.git/config` from inside the container fails read-only; a commit on a worktree in the pool succeeds and is visible in the Quarterdeck at once (SC-15).
+- [x] `qd-project-up` on a fixture project (a Template-shaped `.devcontainer/` rendered from `templates/node`, with a local bare origin) leaves a running container whose bind mounts are exactly: the pool read-write at `/home/node/.treehouse`; `<clone>/.git` read-write with `hooks` and `config` read-only; `<home>/bin` read-only; `<home>/state` read-write; the export read-only at `/workspace`; plus the image's own Claude and Codex volumes (SC-15, SC-16).
+- [x] A write to `.git/hooks` or `.git/config` from inside the container fails read-only; a commit on a worktree in the pool succeeds and is visible in the Quarterdeck at once (SC-15).
 - [ ] Even when the fixture's main-branch config declares `DEV_SETUP_GITHUB_PAT` in `containerEnv` and `remoteEnv`, the container has no GitHub variable and no GitHub file from that config (the project's own credential is never passed on; ticket 08 alone may add the read-only extensions token), and `initializeCommand` and every other host-side lifecycle command did not run (SC-16).
-- [ ] The container's egress is ready (`wait-ready`) and the Egress Allowlist applies (SC-17).
-- [ ] A change to `.devcontainer/` on a branch other than `main` changes nothing; a change on `main` recreates the container; an unchanged main leaves the same container running (the hash of `origin/main:.devcontainer/` decides) (SC-16).
-- [ ] The container is labelled with the project, the home and the test run id, and `qd-project-up` removes only containers it labelled.
-- [ ] A container opened by hand from a Template still works unchanged, with or without the Quarterdeck: `git diff` shows no change under `base/`, `variants/` or `templates/`, and the existing acceptance suite passes. Nothing FirstMate-specific is added by this ticket to any image.
-- [ ] A new ADR (`docs/adr/0009-...`, written with the `domain-modeling` skill) records the MVP decision: a Crewmate can redirect a worktree's `.git` file, so git run in the Quarterdeck in that worktree could read a config the Crewmate wrote. It states what is already stopped (hooks and fsmonitor through environment overrides, `qd-publish` never using the worktree's `.git`), what remains (other keys such as a credential helper, limited by egress), that it is accepted for the MVP, and the option to fix it later (the Git gate, which takes the token out of the Quarterdeck).
-- [ ] Every mount source is created first, owned by the user, so Docker does not create root-owned folders.
-- [ ] The proxy's allowed list (ticket 04) is extended only by what the devcontainer CLI needed here, each addition recorded in the list's own comment; if the CLI's Feature fetch needs `ghcr.io` or similar in `quarterdeck/extensions.json`, that is added with the reason.
+- [x] The container's egress is ready (`wait-ready`) and the Egress Allowlist applies (SC-17).
+- [x] A change to `.devcontainer/` on a branch other than `main` changes nothing; a change on `main` recreates the container; an unchanged main leaves the same container running (the hash of `origin/main:.devcontainer/` decides) (SC-16).
+- [x] The container is labelled with the project, the home and the test run id, and `qd-project-up` removes only containers it labelled.
+- [x] A container opened by hand from a Template still works unchanged, with or without the Quarterdeck: `git diff` shows no change under `base/`, `variants/` or `templates/`, and the existing acceptance suite passes. Nothing FirstMate-specific is added by this ticket to any image.
+- [x] A new ADR (`docs/adr/0009-...`, written with the `domain-modeling` skill) records the MVP decision: a Crewmate can redirect a worktree's `.git` file, so git run in the Quarterdeck in that worktree could read a config the Crewmate wrote. It states what is already stopped (hooks and fsmonitor through environment overrides, `qd-publish` never using the worktree's `.git`), what remains (other keys such as a credential helper, limited by egress), that it is accepted for the MVP, and the option to fix it later (the Git gate, which takes the token out of the Quarterdeck).
+- [x] Every mount source is created first, owned by the user, so Docker does not create root-owned folders.
+- [x] The proxy's allowed list (ticket 04) is extended only by what the devcontainer CLI needed here, each addition recorded in the list's own comment; if the CLI's Feature fetch needs `ghcr.io` or similar in `quarterdeck/extensions.json`, that is added with the reason.
 
 ## Technical context
 
@@ -81,3 +81,35 @@ Evidence inspected: `templates/node/.devcontainer/devcontainer.json`, `variants/
 Sketch is deferred at this material boundary. Expected ownership and reuse remain the Node creator → main export → pinned devcontainer CLI → existing proxy, using `jsonc-parser`, with SC-15/16/17 validated at the real fixture seam. No new abstraction, dependency-direction change, model-dispatch change or other ticket work was started.
 
 Actual check in this session: `docker info --format '{{.ServerVersion}}'` succeeded with `28.1.1`. No test suite was run in this session; the earlier baseline counts above are historical, not new results. No red-green cycle, implementation, ADR, architecture reconciliation or independent implementation reviews occurred because the implement skill requires stopping for this security-contract decision before building. No manual/live-agent validation is claimed. All criteria remain unticked and the ticket remains open; its user-set status is preserved. Ticket 20 and all other implementation tickets are untouched. This comment is committed as the blocker record, not as a completed implementation.
+
+### Implementation and review resolution (2026-11-14)
+
+Fixed point: `1d2908f144e686887ee1b08568d21f2d9909efcc`. Implementation: `04d3a7f`; review fixes: `55b917c`; Base fetch-config correction: `4e3f113`. No other implementation ticket was started and product model dispatch was not changed.
+
+Built `qd-project-up`, image wiring, the real Template/local-origin fixture, exact decision-34 mounts, main-tree reuse/replacement, creator/home/project/run labels, restricted Template arguments, environment/lifecycle filtering, clean CLI environment/home, a benign local Feature build, and explicit readiness. Added ADR 0009 and current architecture/operating documentation. Only proxy POST `containers/{id}/attach` was added: the CLI's attached run failed with 403 without it. No registry allowlist change was needed for the local Feature. Home-specific export paths prevent rendered-mount collisions.
+
+**Validation actually run:**
+
+- Initial narrow fixture red: `qd-project-up: not found`. Subsequent integration failures exposed the missing proxy attach permission; the finished fixture passes through the real proxy and hardened node image.
+- Full `npm test`: **86 passed, 0 failed, 0 skipped** (including the run's node image build).
+- After review fixes, `npm run test:quarterdeck`: **27 passed, 0 failed, 0 skipped**.
+- After the Base fetch-config correction, the selected fixture: **1 passed, 0 failed, 0 skipped**.
+- `node --check quarterdeck/bin/qd-project-up` and `git diff --check` passed. No changes under `base/`, `variants/`, or `templates/`.
+- No real secret, credential probe, real GitHub/private fetch, pomoplan gate, or live Agent session was used. Those later-ticket/manual checks are not missing fixture implementation. Remote registry Feature fetching is not claimed validated.
+
+**Independent reviews:** fresh `pi -p --model openai-codex/gpt-6-astra --thinking low` processes, one per Standards/Design/Spec axis, with reference-only briefs. Reports are preserved verbatim in `.scratch/quarterdeck/reviews/07-*.md`; the follow-up review uses `04d3a7f` as its fixed point.
+
+Finding dispositions:
+
+1. Standards: commit probe could pass after a failed commit — **Fixed** in `55b917c`: fail on intermediate errors and require HEAD to change, then compare the Quarterdeck's HEAD.
+2. Standards: positional mount paths obscure security policy — **Fixed** in `55b917c`: named pool/hooks/bin/state paths.
+3. Design: no findings in either round.
+4. Spec: arbitrary Features can override mounts/hardening — **Declined as a code change under this ticket**, per the user's explicit instruction to retain Features and defer policy, not as a claim that the guarantee is met. Existing concern 01 was extended with evidence and impact. Feature trust remains unresolved.
+5. Spec: preexisting credentials in the shared clone Git store — **Declined as a code change pending human policy**, because decision 34 requires that mount and the user directed security concerns to separate human-review tickets. Recorded separately in security-review issue 03, with token-free evidence, impact, pointers and review criteria. No claim of universal credential absence is made.
+6. Spec: missing `remoteEnv` fixture — **Declined with evidence**: the fixture reads `templates/node/.devcontainer/devcontainer.json`, whose `remoteEnv` already contains `DEV_SETUP_GITHUB_PAT`; it substitutes the Template option with `GH_TOKEN`, invokes the creator with a dummy parent `GH_TOKEN`, and adds `containerEnv` separately. Thus both fields are present in the tested main-branch config. The follow-up Spec review repeated this historical claim; the same evidence applies.
+
+Follow-up reviewers found **0 new findings across all three axes**. Worktree Git redirection is separately recorded in security-review issue 02 and ADR 0009 as the user-accepted MVP risk.
+
+**Open / closure decision:** implementation of the fixture slice is complete, but this ticket remains **ready-for-human**, with the credential criterion unticked. Its ordinary Template fixture passes (including both credential environment fields); its broader wording that the project's credential is never passed cannot honestly be guaranteed for arbitrary retained Features/configuration or credentials already stored in the required clone mount. Concerns 01 and 03 need a human trust/provisioning policy or an explicit narrowing of that guarantee. These are recorded security-policy limitations, not a halt to independent implementation or a missing-runtime-evidence claim. No placeholder implementation was added.
+
+Preservation: preexisting `grill-notes.md` and the user's target-ticket comment remain outside commits. Existing untracked security-review concern 01 was extended in place but remains untracked so its preexisting content is not committed; new concerns 02 and 03 are committed. Only this session's target-ticket delta is staged through the index.
