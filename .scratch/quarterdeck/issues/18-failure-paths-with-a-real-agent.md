@@ -73,3 +73,57 @@ Append actual results here and link them from the checklist when performed. List
 **Validation and scope:** documentation-only change; no runtime tests or live probes run. Existing structural and prepared-home retry coverage was inspected, not rerun or claimed as new evidence. `git diff --check` is the whitespace validation for this change. Broader regression coverage intentionally not run: full acceptance suite, `npm test`, `test:skill`, installer/unrelated suites and pomoplan gate. No real Claude, GitHub operation, secret probe or death injection was performed.
 
 Only ticket 18 is changed and committed with its path reference. Preexisting grill notes, ticket 07, `CONTEXT.md` and untracked security-review 01 are preserved outside this work. No other ticket was started, no reviewer dispatched and no review performed; parent owns fresh independent review and any closure. Ticket remains open, **ready-for-human**.
+
+
+### Final validation and review resolution
+
+Commit `47190df` built the blocker handoff only; no product changes were made. Parent ran `npm run test:quarterdeck`: the first invocation was interrupted by the harness's 200-second timeout; the rerun completed with exit 0. `/tmp/qd18-tests-complete.log` records **32 tests, 31 pass, 0 fail, 1 todo**. The TODO is the known synthetic-fixture extensions-token persistence in `/etc/environment` (security-review 05), **not a pass**. No new distinct security concern was identified; known 05 is not duplicated.
+
+Broader regression intentionally not run: full acceptance suite, `npm test`, `test:skill`, installer/unrelated suites and pomoplan gate. No tests were repeated for this resolution. These Quarterdeck results do not prove real-agent acceptance: the real runs remain blocked and unperformed, all seven acceptance criteria remain unchecked, and the ticket remains **ready-for-human**.
+
+All three review axes have **0 findings**; there are no fixes or declines to resolve. Reviewer reports are preserved verbatim below. Their statements about not running tests describe reviewer activity, separately from the parent's validation above.
+
+```text
+## Standards
+
+No findings in `git diff 4b79f5955bb6b40b9f7b9bef73aab2922b2a0481...HEAD` (commit `47190df`).
+
+- Ticket status and appended comments follow `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
+- The handoff preserves ADR 0010’s distinction between accepted inspect visibility and unresolved token persistence.
+- Future validation is clearly separated from observed evidence; all acceptance criteria remain unchecked.
+- Documentation-only diff: no applicable baseline code smells or changed-test maintenance concerns.
+
+No tests, runtime probes, edits, or commits performed. Broader regression intentionally not run.
+
+**Standards: 0 findings; real-agent acceptance remains unverified.**
+```
+
+```text
+## Design
+
+No material design violations found in commit `47190df`.
+
+- The future validation preserves the design’s step 8 contract: one retry, original-start reset, and immediate question/death stops without publication (`.scratch/quarterdeck/issues/18-failure-paths-with-a-real-agent.md:62–73`; `.scratch/quarterdeck/design.md`, “Spec Run procedure”).
+- It preserves FirstMate ownership and existing orchestration rather than adding lifecycle wrappers or bypassing guards.
+- The handoff correctly distinguishes prepared-home tests from real-agent evidence. All acceptance criteria remain unchecked; the planned manual outcomes are not presented as completed validation (`…/18-failure-paths-with-a-real-agent.md:44–55,75–77`; design, “Validation plan”).
+
+No tests or live probes run. Broader regression intentionally not run.
+
+**Design: 0 findings. Real-agent validation remains blocked and unproven.**
+```
+
+```text
+## Spec
+
+No actionable spec violations found in commit `47190df`.
+
+Ticket 18 requires “Two real runs that end in a stop, and the report for each” (`.scratch/quarterdeck/issues/18-failure-paths-with-a-real-agent.md:13`). Those runs remain unperformed, and all seven acceptance criteria remain unchecked. The diff honestly records a blocked handoff, not completed acceptance.
+
+The future procedure preserves SC-11/13’s single retry, saved failed attempt, retained commits and no publication; SC-12’s unanswered question stop; SC-09/10’s unattended report and attention mark; and the separate death-stop criterion (`…/18-failure-paths-with-a-real-agent.md:63–73`). No pause/resume or guessed-answer behavior is introduced.
+
+No tests or runtime probes performed. Broader regression intentionally not run; working-tree files untouched.
+
+**Spec: 0 findings; real-agent acceptance remains blocked and unproven.**
+```
+
+Resolution scope: append this comment only; preserve unrelated dirty files and untracked security-review 01. Whitespace validation: `git diff --check`; stage and commit only this ticket with its path reference. No product or skill corrections were made.
