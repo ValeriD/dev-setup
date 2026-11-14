@@ -60,3 +60,48 @@ Fixed point: `acb9336fc52075a45f3de63431a7537442a0f309` (HEAD when work began). 
 **Validation:** ran the existing `tests/quarterdeck.test.mjs` checklist-format test in isolation via `node --input-type=module` and `node:test` (read/evaluate that exact test block with its filesystem/assert imports, without the file's global hooks): **1 passed, 0 failed**. This checks the existing SC-02/SC-10 table contract only, not new human outcomes or runtime security. Full `npm run test:quarterdeck` intentionally not run: the file includes an allowlisted-host network test and a GitHub FirstMate fetch in loop fixtures, conflicting with the no-GitHub instruction. Broader regression intentionally not run; neither `npm test`, `test:skill`, nor unrelated suites ran. No behavior change requiring a red-green implementation cycle.
 
 **Handoff:** documentation and concern 07 only; parent performs independent review after the commit, against the fixed point above. No reviewer dispatched and no fresh independent-review result claimed. The design/spec and this ticket remain open. Existing edits to `grill-notes.md`, issue 07 and `CONTEXT.md`, plus untracked security concern 01, remain untouched and excluded from the commit. Existing security concerns are not subsumed into config trust; unsupported `runArgs` rejection, retained Features and all product dispatch settings remain unchanged.
+
+### Independent review closeout — implementation commit `140b85d`
+
+Independent review reports are appended verbatim below. Zero findings; no review dispositions required. Ticket stays `ready-for-human`, all six acceptance criteria remain unchecked, and all existing blockers remain. This is documentation closeout only, not acceptance completion. No tests needed or run for this comment-only closeout; no GitHub contact or credentials access.
+
+## Standards
+
+No findings in `git diff acb9336fc52075a45f3de63431a7537442a0f309...HEAD` (commit `140b85d`).
+
+- Ticket comments and the separate `ready-for-human` security issue follow tracker conventions.
+- Unmet criteria remain unchecked; documentation distinguishes static evidence from unperformed validation.
+- No applicable baseline code smells; no production code or tests changed.
+
+Reviewed directly, without delegation. No tests run, GitHub contact, credential access, edits, or commits. Unrelated dirty files preserved.
+
+**Standards: 0 findings.**
+
+## Design
+
+No material design violations found in `acb9336...HEAD` (`140b85d`).
+
+- Documentation preserves existing module ownership, interfaces, dependency direction and reuse choices.
+- The checklist follows build-order slice 2’s attended, agent-free GitHub flow without claiming unattended or hardened-container validation.
+- Missing real-GitHub and SC-19 evidence remains explicitly unproven. Startup and credential-boundary blockers are recorded without introducing an unapproved implementation or narrowing requirements.
+- No tests or custom infrastructure were added.
+
+Tests not run; broader regression intentionally not run. No edits, GitHub contact or credential access performed.
+
+**Design: 0 findings.**
+
+## Spec
+
+No new findings in `acb9336...HEAD` (`140b85d`) under the user-authorized blocker-documentation scope.
+
+Outstanding acceptance gaps are accurately recorded, not claimed complete:
+
+- **SC-08 / ticket 13:** “fresh clone from GitHub” and a branch “pushed with `qd-publish`” remain unobserved. All six criteria stay unchecked.
+- **SC-19:** “a plain shell entered into the Quarterdeck from outside cannot” read tokens remains unsatisfied by the documented mount boundary. Security concern 07 separately records this for human review.
+- **No-agent constraint:** “Run, attended and with no agent in the loop” remains blocked by automatic Claude startup.
+
+The checklist preserves these limitations and does not substitute local/stub coverage for real-GitHub evidence. No scope creep identified.
+
+No tests run, GitHub contact, credential access, edits, or commits. Broader regression intentionally not run.
+
+**Summary: Spec — 0 new findings; real-GitHub acceptance remains open.**
