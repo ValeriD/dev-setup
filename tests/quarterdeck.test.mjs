@@ -94,6 +94,12 @@ const okInside = (script) => {
   return r.out;
 };
 
+// Shared by the project and ticket-loop fixtures: stdin content, argument-safe path.
+const put = (p, content) => {
+  const r = run('docker', ['exec', '-i', '-u', 'node', name, 'sh', '-c', 'cat > "$1"', 'sh', p], { input: content });
+  assert.equal(r.code, 0, r.err);
+};
+
 let firstId;
 const crewImage = `dev-setup-quarterdeck:test-crew-${id}`;
 
@@ -111,10 +117,6 @@ async function testTicketLoop(t, failure = false) {
   const origin = `${work}/${mate}-origin.git`;
   const clone = `${home}/projects/loop`;
   const slug = failure ? 'loop-failure' : 'loop-success';
-  const put = (p, content) => {
-    const r = run('docker', ['exec', '-i', '-u', 'node', name, 'sh', '-c', 'cat > "$1"', 'sh', p], { input: content });
-    assert.equal(r.code, 0, r.err);
-  };
   const fm = command => okInside(`cd ${home}; FM_HOME=${home} ${command}`);
   const read = p => okInside(`cat ${p}`);
   const git = args => fm(`git -C ${clone} ${args}`).trim();
@@ -180,11 +182,19 @@ async function testTicketLoop(t, failure = false) {
   assert.equal(wg('status --porcelain'), '');
   for (const file of ['spec.md', 'design.md', 'issues/01-skills.md', 'issues/02-code.md']) assert.ok(read(`${wt}/.scratch/${slug}/${file}`).trim());
   const dispatch = JSON.parse(read(`${home}/config/crew-dispatch.json`));
+  // This scripted mate supports this one natural-language predicate, not a dispatch engine.
+  const skillsRules = dispatch.rules.filter(rule => rule.use.harness === 'claude' && rule.use.model === 'opus');
+  assert.equal(skillsRules.length, 1, 'one intended Opus rule');
+  const skillsRule = skillsRules[0];
+  assert.equal(skillsRule.when, 'the ticket is about skills, prompts or agent tools');
+  const skillsTopic = skillsRule.when.replace('the ticket is ', '');
+  const defaultRoute = dispatch.default.find(route => route.harness === 'claude');
+  assert.ok(defaultRoute, 'Claude default route');
   let count = 1;
   for (const [nn, file] of [['01', '01-skills.md'], ['02', '02-code.md']]) {
     const ticket = `.scratch/${slug}/issues/${file}`;
     const text = read(`${wt}/${ticket}`);
-    const model = /about skills, prompts or agent tools/.test(text) ? dispatch.rules[0].use.model : dispatch.default[0].model;
+    const model = text.includes(skillsTopic) ? skillsRule.use.model : defaultRoute.model;
     const start = wg('rev-parse HEAD');
     relaunch(model, `Ticket ${nn}: ${ticket}. Start commit ${start}.`);
     await wait(++count);
@@ -336,10 +346,6 @@ async function testProjectFixture(extensionsToken = '', t) {
     .replace('${templateOption:image}', IMAGE).replaceAll('${templateOption:patEnvVar}', 'GH_TOKEN');
   okInside(`mkdir -p ${clone}/.devcontainer ${home}/bin ${home}/state; git init -q --bare -b main ${origin}; git init -q -b main ${clone}; git -C ${clone} config user.name Fixture; git -C ${clone} config user.email fixture@example.invalid`);
   const configPath = `${clone}/.devcontainer/devcontainer.json`;
-  const put = (p, content) => {
-    const r = run('docker', ['exec', '-i', '-u', 'node', name, 'sh', '-c', 'cat > "$1"', 'sh', p], { input: content });
-    assert.equal(r.code, 0, r.err);
-  };
   put(configPath, template.replace('"name": "node",', `"name": "node", "containerEnv": {"DEV_SETUP_GITHUB_PAT":"dummy-only", "GH_TOKEN":"dummy-only", "SAFE":"kept"},`)
     .replace('test -d .git || git init -q; mkdir -p .git/hooks .vscode .devcontainer; touch .git/config', `touch ${home}/HOST-COMMAND-RAN`));
   put(`${clone}/.devcontainer/extensions.json`, readFileSync(join(REPO, 'templates/node/.devcontainer/extensions.json')));
