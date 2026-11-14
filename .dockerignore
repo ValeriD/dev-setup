@@ -3,5 +3,12 @@
 !installer/
 !extensions/
 !quarterdeck/
+!skills/
+skills/**
+!skills/dev-container/
+!skills/dev-container/scripts/
+!skills/dev-container/scripts/package.json
+!skills/dev-container/scripts/pnpm-lock.yaml
+quarterdeck/node_modules
 !variants/node/extensions.json
 installer/node_modules

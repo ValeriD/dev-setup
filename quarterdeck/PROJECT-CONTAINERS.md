@@ -1,0 +1,13 @@
+# Quarterdeck-created project containers
+
+Run `qd-project-up <home> <project>` as `node` inside the Quarterdeck. The home must be under `QD_WORK_ROOT`; its clone is `projects/<project>`. Success prints the container ID after `wait-ready`. The command fetches main explicitly; local edits and other branches do not select configuration.
+
+The export lives under `quarterdeck/config/<project>/<home-hash>/<tree-hash>/`. The home discriminator prevents rendered mounts colliding between homes. Only regular files are exported; symlinks and submodules fail closed. The renderer replaces `devcontainer.json`, keeps the image and Features, allows only `--cap-drop=ALL`, positive memory limits and positive PID limits, and always supplies capability-drop. It drops project lifecycle commands and `remoteEnv`. Non-secret `containerEnv` values must be literal strings. GitHub, GH_, token, secret, password and credential names are excluded. These name checks cannot identify arbitrary literal secrets under innocuous names.
+
+The devcontainer CLI inherits neither the pane's credentials nor its home/configuration. It runs with a temporary empty home, fixed PATH and the Docker socket address. Features still execute during image construction and can supply runtime metadata; this is **not** a complete sandbox or a proof that arbitrary Features preserve the mount set, egress, or credential exclusion. Human review is tracked in `.scratch/quarterdeck-security-review/issues/01-project-config-trust-boundary.md`. The fixture proves the ordinary Template and a benign local Feature, not arbitrary project input.
+
+Containers are selected by creator, project and canonical home labels (plus `QD_RUN_LABEL`, if supplied). The tree hash controls replacement. Stopped matching containers are started again. Replacement removes containers, not named Claude/Codex volumes or old exports: those may contain session state and are not pruned. Concurrent calls for one home are unsupported in the MVP's sequential Spec Run model.
+
+All bind sources are prepared as the invoking user. The host work root must map to the same path in Docker and be writable by uid 1000, as required by `quarterdeck`. The pool uses the host `QD_WORK_ROOT/pool` source and `/home/node/.treehouse` destination in both containers.
+
+Test-only seam: `QD_PROJECT_TEST_IMAGE=<exact image name>` permits that one locally built image instead of a published `ghcr.io/valerid/dev-setup/<variant>@sha256:…` image. Do not set it for ordinary project starts. `QD_RUN_LABEL=key=value` propagates the host command's test-run label. No registry egress additions were needed for the local Feature fixture; remote Feature registries remain unvalidated.

@@ -85,11 +85,14 @@ RUN mkdir -p /opt/dev-setup/mcp /etc/dev-setup \
 
 # The Quarterdeck's own tools, first on PATH. /opt/qd/empty/.devcontainer is the empty "workspace"
 # the egress start-up step reads: no project layer, so only the image's allowlist applies.
-COPY quarterdeck/bin/qd-entry quarterdeck/bin/qd-server quarterdeck/bin/qd-first-mate quarterdeck/bin/qd-publish /opt/qd/bin/
+# Reuse the host skill's pinned JSONC dependency and lockfile, without its application code.
+COPY skills/dev-container/scripts/package.json skills/dev-container/scripts/pnpm-lock.yaml /opt/qd/
+RUN cd /opt/qd && pnpm install --prod --frozen-lockfile --ignore-scripts
+COPY quarterdeck/bin/qd-entry quarterdeck/bin/qd-server quarterdeck/bin/qd-first-mate quarterdeck/bin/qd-publish quarterdeck/bin/qd-project-up /opt/qd/bin/
 COPY quarterdeck/fleet/ /opt/qd/fleet/
 RUN mkdir -p /opt/qd/empty/.devcontainer /home/node/.claude /home/node/.treehouse \
  && chown node:node /home/node/.claude /home/node/.treehouse \
- && chmod 755 /opt/qd/bin/qd-entry /opt/qd/bin/qd-server /opt/qd/bin/qd-first-mate /opt/qd/bin/qd-publish /usr/local/bin/claude-yolo /usr/local/bin/codex-yolo \
+ && chmod 755 /opt/qd/bin/qd-project-up /opt/qd/bin/qd-entry /opt/qd/bin/qd-server /opt/qd/bin/qd-first-mate /opt/qd/bin/qd-publish /usr/local/bin/claude-yolo /usr/local/bin/codex-yolo \
       /usr/local/share/dev-setup/check-secrets.sh /usr/local/share/egress/*.sh \
  && chmod -R go-w,a+rX /opt/qd \
  && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod a-s {} + \

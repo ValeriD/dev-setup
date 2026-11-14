@@ -8,7 +8,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
-import { REPO, RUN_LABEL, run, projectDir } from './lib.mjs';
+import { REPO, RUN_LABEL, IMAGE, buildImage, run, projectDir } from './lib.mjs';
 
 const id = process.env.DEV_SETUP_TEST_RUN ?? randomBytes(4).toString('hex');
 const runLabel = `${RUN_LABEL}=${id}`;
@@ -50,6 +50,12 @@ before(() => {
   }
 });
 after(() => {
+  // Also covers a creator failure before the fixture's try/finally is entered.
+  for (const c of run('docker', ['ps', '-aq', '--filter', 'label=quarterdeck.creator=qd-project-up', '--filter', `label=${runLabel}`]).out.split('\n').filter(Boolean)) {
+    const volumes = JSON.parse(run('docker', ['inspect', c]).out)[0].Mounts.filter(m => m.Type === 'volume').map(m => m.Name);
+    run('docker', ['rm', '-fv', c]);
+    for (const v of volumes) run('docker', ['volume', 'rm', v]);
+  }
   for (const n of [name, proxyName, stranger, closedProbe, lifecycle]) run('docker', ['rm', '-fv', n]);
   run('docker', ['volume', 'rm', proxyVolume]);
   for (const c of run('docker', ['ps', '-aq', '--filter', `label=${runLabel}`, '--filter', `name=${name}`]).out.split('\n').filter(Boolean)) {
@@ -57,7 +63,7 @@ after(() => {
   }
   // Files node (uid 1000) wrote into the work root belong to another user when the host uid is not 1000: remove them from a labelled root container.
   if (process.getuid?.() !== 1000) {
-    run('docker', ['run', '--rm', '--label', runLabel, '--user', 'root', '--entrypoint', 'rm', '-v', `${work}:${work}`, image, '-rf', join(work, 'fleet')]);
+    run('docker', ['run', '--rm', '--label', runLabel, '--user', 'root', '--entrypoint', 'rm', '-v', `${work}:${work}`, image, '-rf', join(work, 'fleet'), join(work, 'quarterdeck/config'), join(work, 'pool')]);
   }
   run('docker', ['rmi', stubImage]);
   run('docker', ['rmi', image]);
@@ -87,6 +93,100 @@ const okInside = (script) => {
 };
 
 let firstId;
+
+// Run this fixture independently with --test-name-pattern='qd-project-up fixture'.
+function testProjectFixture() {
+  buildImage();
+  const started = quarterdeck();
+  assert.equal(started.code, 0, started.err);
+  const home = `${work}/fleet/fixture`;
+  const clone = `${home}/projects/fixture`;
+  const origin = `${work}/origin.git`;
+  const wt = `/home/node/.treehouse/qd-${id}`;
+  const template = readFileSync(join(REPO, 'templates/node/.devcontainer/devcontainer.json'), 'utf8')
+    .replace('${templateOption:image}', IMAGE).replaceAll('${templateOption:patEnvVar}', 'GH_TOKEN');
+  okInside(`mkdir -p ${clone}/.devcontainer ${home}/bin ${home}/state; git init -q --bare -b main ${origin}; git init -q -b main ${clone}; git -C ${clone} config user.name Fixture; git -C ${clone} config user.email fixture@example.invalid`);
+  const configPath = `${clone}/.devcontainer/devcontainer.json`;
+  const put = (p, content) => {
+    const r = run('docker', ['exec', '-i', '-u', 'node', name, 'sh', '-c', 'cat > "$1"', 'sh', p], { input: content });
+    assert.equal(r.code, 0, r.err);
+  };
+  put(configPath, template.replace('"name": "node",', `"name": "node", "containerEnv": {"DEV_SETUP_GITHUB_PAT":"dummy-only", "GH_TOKEN":"dummy-only", "SAFE":"kept"},`)
+    .replace('test -d .git || git init -q; mkdir -p .git/hooks .vscode .devcontainer; touch .git/config', `touch ${home}/HOST-COMMAND-RAN`));
+  put(`${clone}/.devcontainer/extensions.json`, readFileSync(join(REPO, 'templates/node/.devcontainer/extensions.json')));
+  okInside(`git -C ${clone} add .; git -C ${clone} commit -qm initial; git -C ${clone} remote add origin ${origin}; git -C ${clone} push -q origin main; git -C ${clone} worktree add -qb fixture ${wt}`);
+  const volumes = new Set();
+  const derivedImages = new Set();
+  const up = () => {
+    const r = inside(`GH_TOKEN=dummy-parent-only QD_PROJECT_TEST_IMAGE=${IMAGE} QD_RUN_LABEL=${runLabel} qd-project-up ${home} fixture`);
+    if (r.code === 0) {
+      const [c] = JSON.parse(run('docker', ['inspect', r.out.trim()]).out);
+      for (const m of c.Mounts.filter(m => m.Type === 'volume')) volumes.add(m.Name);
+      if (c.Config.Image !== IMAGE) derivedImages.add(c.Config.Image);
+    }
+    return r;
+  };
+  const foreign = `${name}-project-stranger`;
+  assert.equal(run('docker', ['create', '--name', foreign, '--label', runLabel, '--label', 'quarterdeck.project=fixture', '--label', `quarterdeck.home=${home}`, '--entrypoint', 'sleep', IMAGE, '300']).code, 0);
+  const first = up();
+  assert.equal(first.code, 0, first.err);
+  const cid = first.out.trim().split('\n').pop();
+  const probe = (s) => run('docker', ['exec', '-u', 'node', cid, 'sh', '-c', s]);
+  try {
+    const [c] = JSON.parse(run('docker', ['inspect', cid]).out);
+    assert.equal(c.State.Running, true);
+    assert.equal(c.Config.Labels['quarterdeck.project'], 'fixture');
+    assert.equal(c.Config.Labels['quarterdeck.home'], home);
+    assert.equal(c.Config.Labels[RUN_LABEL], id);
+    const binds = c.Mounts.filter(m => m.Type === 'bind').map(m => [m.Destination, m.RW]).sort();
+    assert.deepEqual(binds, [[wt.split('/qd-')[0], true], [`${clone}/.git`, true], [`${clone}/.git/hooks`, false], [`${clone}/.git/config`, false], [`${home}/bin`, false], [`${home}/state`, true], ['/workspace', false]].sort());
+    assert.deepEqual(c.Mounts.filter(m => m.Type === 'volume').map(m => m.Destination).sort(), ['/home/node/.claude', '/home/node/.codex']);
+    assert.equal(probe(`touch ${clone}/.git/hooks/forbidden`).code === 0, false);
+    assert.equal(probe(`echo forbidden >> ${clone}/.git/config`).code === 0, false);
+    const commit = probe(`cd ${wt}; echo committed > proof; git add proof; git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm proof; git rev-parse HEAD`);
+    assert.equal(commit.code, 0, commit.err);
+    assert.equal(okInside(`git -C ${wt} rev-parse HEAD`).trim(), commit.out.trim());
+    assert.equal(probe('env | grep -Ei "github|^GH_TOKEN="').code, 1);
+    assert.equal(probe('test "$SAFE" = kept && test ! -e /run/quarterdeck/secrets.env && test ! -e /home/node/.config/gh/hosts.yml').code, 0);
+    assert.equal(existsSync(`${home}/HOST-COMMAND-RAN`), false);
+    assert.equal(probe('sh /usr/local/share/egress/wait-ready.sh').code, 0);
+    const fetch = host => probe(`node -e 'fetch("https://${host}", {signal: AbortSignal.timeout(10000)}).then(r => process.exit(0)).catch(() => process.exit(1))'`);
+    assert.equal(fetch('api.anthropic.com').code, 0);
+    assert.notEqual(fetch('example.com').code, 0);
+    okInside(`echo branch-only >> ${wt}/.devcontainer/devcontainer.json; git -C ${wt} add .; git -C ${wt} commit -qm branch; git -C ${wt} push -q origin fixture`);
+    assert.equal(up().out.trim(), cid);
+    okInside(`echo ' ' >> ${configPath}; git -C ${clone} add .; git -C ${clone} commit -qm main; git -C ${clone} push -q origin main`);
+    const changed = up();
+    assert.equal(changed.code, 0, changed.err);
+    assert.notEqual(changed.out.trim(), cid);
+    assert.equal(up().out.trim(), changed.out.trim());
+    assert.equal(run('docker', ['inspect', foreign]).code, 0, 'matching home/project without the creator label is not ours');
+    // Retained local Features must actually build through the proxy, not just survive rendering.
+    okInside(`mkdir -p ${clone}/.devcontainer/features/proof; printf '%s' '{"id":"proof","version":"1.0.0","name":"proof"}' > ${clone}/.devcontainer/features/proof/devcontainer-feature.json; printf '#!/bin/sh\\necho installed > /feature-proof\\n' > ${clone}/.devcontainer/features/proof/install.sh`);
+    put(configPath, template.replace('"image":', '"features": {"./features/proof": {}}, "image":'));
+    okInside(`git -C ${clone} add .; git -C ${clone} commit -qm feature; git -C ${clone} push -q origin main`);
+    const featured = up();
+    assert.equal(featured.code, 0, featured.err);
+    assert.equal(run('docker', ['exec', featured.out.trim(), 'cat', '/feature-proof']).out.trim(), 'installed');
+    const survivor = featured.out.trim();
+    for (const args of [['--env', 'GH_TOKEN'], ['--volume=/tmp:/extra'], ['--privileged'], ['--entrypoint=sh']]) {
+      put(configPath, JSON.stringify({ image: IMAGE, runArgs: args }));
+      okInside(`git -C ${clone} add .; git -C ${clone} commit -qm rejected; git -C ${clone} push -q origin main`);
+      const rejected = up();
+      assert.notEqual(rejected.code, 0);
+      assert.match(rejected.err, /unsupported runArgs/);
+      assert.equal(run('docker', ['inspect', survivor, '--format', '{{.State.Running}}']).out.trim(), 'true', 'reject before removing the old container or invoking the CLI');
+    }
+    put(configPath, JSON.stringify({ image: IMAGE, containerEnv: { ALIAS: '${localEnv:GH_TOKEN}' } }));
+    okInside(`git -C ${clone} add .; git -C ${clone} commit -qm substitution; git -C ${clone} push -q origin main`);
+    assert.match(up().err, /literal non-secret/);
+  } finally {
+    for (const c of run('docker', ['ps', '-aq', '--filter', 'label=quarterdeck.project=fixture', '--filter', `label=${runLabel}`]).out.split('\n').filter(Boolean)) run('docker', ['rm', '-fv', c]);
+    run('docker', ['rm', '-fv', foreign]);
+    for (const v of volumes) run('docker', ['volume', 'rm', v]);
+    for (const img of derivedImages) run('docker', ['rmi', img]);
+  }
+}
 
 test('quarterdeck with no image and no container builds the image, starts one container and attaches to Herdr (SC-01)', () => {
   assert.notEqual(run('docker', ['image', 'inspect', image]).code, 0, 'the image must not exist yet');
@@ -162,10 +262,10 @@ test('Docker through the proxy: everything outside the allowed list is refused w
 test('the allowed list is in one file and is the design list; the proxy follows it and nothing else', () => {
   const cases = {
     GET: ['_ping', 'version', 'info', 'containers/json', 'containers/abc/json', 'exec/abc/json', 'images/library/node/json', 'volumes', 'events'],
-    POST: ['containers/create', 'containers/abc/start', 'containers/abc/stop', 'containers/abc/kill', 'containers/abc/wait', 'containers/abc/exec', 'exec/abc/start', 'exec/abc/resize', 'images/create', 'build', 'volumes/create'],
+    POST: ['containers/create', 'containers/abc/start', 'containers/abc/stop', 'containers/abc/kill', 'containers/abc/wait', 'containers/abc/attach', 'containers/abc/exec', 'exec/abc/start', 'exec/abc/resize', 'images/create', 'build', 'volumes/create'],
     DELETE: ['containers/abc'],
   };
-  const denied = { GET: ['containers/abc/archive', 'system/df', 'volumes/x/json', 'images/json'], POST: ['commit', 'auth', 'containers/prune', 'containers/abc/update', 'containers/abc/attach', 'swarm/init'], DELETE: ['volumes/abc', 'containers/abc/archive', 'images/abc'] };
+  const denied = { GET: ['containers/abc/archive', 'system/df', 'volumes/x/json', 'images/json'], POST: ['commit', 'auth', 'containers/prune', 'containers/abc/update', 'swarm/init'], DELETE: ['volumes/abc', 'containers/abc/archive', 'images/abc'] };
   for (const m of Object.keys(cases)) {
     const re = new RegExp(execSync(`. ${join(REPO, 'quarterdeck/docker-proxy.conf')}; printf %s "$ALLOW_${m}"`, { shell: '/bin/bash' }).toString());
     for (const p of cases[m]) assert.ok(re.test(`/${p}`) && re.test(`/v1.47/${p}`), `${m} ${p} must be allowed`);
@@ -521,3 +621,5 @@ test('a missing branch, a failing push and a failing gh all exit non-zero and pr
   const lines = r.out.trim().split('\n');
   assert.deepEqual(lines, ['missing:', 'code=1', 'no-tickets:', 'code=1', 'push:', 'code=128', 'rejected:', 'code=1', 'gh:', 'code=1'], r.out);
 });
+
+test('qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)', testProjectFixture);
