@@ -1,6 +1,6 @@
 # 16: A planning Crewmate commits the Spec, design and tickets on the Spec Run's branch
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 **Model:** Opus (the ticket exercises and corrects skill text and the planning Brief; the planning Crewmate itself runs on Sonnet)
 **Design slice:** 4 (Planning Crewmate)
 
@@ -41,3 +41,26 @@ The Second Mate is steered by hand with one handoff (grilling decisions verbatim
 
 - 10: Mate skills, Charter and Brief conventions
 - 14: The hardened project container on pomoplan runs the full gate for a hand-spawned Crewmate
+
+## Comments
+
+### Steps 1–5 handoff — planning runtime blocked, acceptance unclaimed
+
+Fixed point and starting HEAD: `5649e5c229ab01089044f6f685ee2c9b942613dd`. Read tracker/domain/architecture instructions, relevant ADRs 0006–0010, spec/design, decisions 21/39/40, spike link 4, dependency tickets 10/14, mate procedures/Brief, architecture and test manifest. Planning remains Sonnet; no dispatch configuration changed.
+
+**Sketch/build:** reuse the existing Second Mate → FirstMate commands → launcher → project-container flow and project planning skills (reuse rung 1: no new runtime component). Added the missing SC-planning checklist section with a concrete bounded handoff procedure and separate success, missing-decision and no-publication evidence rows. No new abstraction, external interface, ownership or dependency direction; architecture reconciliation is unnecessary. No runtime behavior or skill text changed, so no new uncovered behavior requiring TDD and no skill-edit writing workflow. Corrections to `qd-first-mate`, `qd-spec-run`, Brief or Charter attributed to a live run: **none**; no live run occurred.
+
+**Dependencies and precise blockers:**
+
+- Ticket 10 is done: managed procedures, Charter, Brief and structural coverage exist. Planning is not missing implementation merely because live proof is absent.
+- Ticket 14 remains ready-for-human with all real criteria unchecked. Its creator/launcher/token delivery implementations exist, but private-source installation, real prompt-free Claude, gate, hooks and Herdr observations remain pending manual evidence.
+- Ticket 14/11 records an actual stock shallow-home lineage-guard dispatch failure. Prepared-home stub tests fetch full history; that is not a supported production provisioning fix or proof of stock startup. Resolving that prerequisite is separate work, not silently implemented here.
+- Ticket 08/ADR 0010 records an actual implementation-contract failure: the CLI persists the extensions token in `/etc/environment`. This session reproduced it with a dummy token. Resolution or explicit acceptance of that specific failure is needed before real-token validation; accepted inspect visibility does not satisfy it.
+- Non-secret local checks: `docker ps --format '{{.Names}}'` showed only unrelated containers, no running Quarterdeck; `/home/valeri/work/fleet` does not exist; `git -C ../pomoplan rev-parse --verify refs/remotes/origin/main` failed. No authorized fresh owning-home clone, fetched main or live handoff was supplied. No claim is made that credentials do not exist elsewhere: their values/files were not examined. No fetch or developer-checkout modification occurred.
+- Human inputs still needed: an authorized fresh home/clone and main revision, scoped private-skills token and Claude authentication via supported delivery, plus actual grilling decisions for the complete and deliberately undecided cases. Do not invent a product request or secret scope. Existing security concerns remain individually tracked; no new distinct concern was identified. Pending policy reviews alone do not halt otherwise authorized work. Unsupported `runArgs` rejection and retained Features are unchanged.
+
+**Useful next validation:** follow `quarterdeck/CHECKLIST.md`, “Ticket 16 — SC-planning”. Use one handoff per fresh case, including the user's explicit planning-only stop boundary so normal Spec Run continuation does not implement another ticket. Observe the Second Mate writing the Brief and dispatching Sonnet through the container route. Capture the main base before spawn; verify branch ancestry, exactly one commit, committed artifacts/count, matching timestamped status, clean tree and no publication. Separately leave a necessary decision unanswered and require `needs-decision`, no commit and no further dispatch. Record sanitized evidence and only then correct any observed skill errors. No pomoplan gate, `/implement`, credential probe, upstream patch, lineage bypass or speculative hook extension is authorized by this handoff.
+
+**Validation actually run:** `npm run test:quarterdeck` exited 0: **32 tests, 31 pass, 0 ordinary failures, 1 failing TODO** (known dummy extensions-token persistence, security-review 05). Log: `/tmp/qd16-quarterdeck.log` (ephemeral). Structural mate tests and prepared-home stub loop pass; neither proves real planning, real project skills or stock-home dispatch. `git diff --check` passed. Broader coverage intentionally not run: no `npm test`, full suite, `test:skill`, unrelated suite or pomoplan gate.
+
+All six acceptance criteria remain unchecked, including the checklist-run criterion: instructions now exist but SC-planning was **not run**. Ticket remains open, ready-for-human. No reviewers launched and no other implementation ticket begun. Only this ticket and the checklist are committed; the preexisting grill notes, ticket 07, CONTEXT and untracked security concern 01 are preserved outside the commit. Independent review and closure remain with the user.
