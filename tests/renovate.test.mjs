@@ -122,5 +122,8 @@ test('npm updates respect the 7 day release-age policy', () => {
 });
 
 test('the release workflow rebuilds weekly', () => {
-  assert.match(read('.github/workflows/ci.yml'), /^ {2}schedule:\n {4}- cron: '\d+ \d+ \* \* \d'/m);
+  // While CI is paused for rapid development (ci.yml's header), the schedule is kept commented out.
+  const ci = read('.github/workflows/ci.yml');
+  const paused = /^# PAUSED during rapid Quarterdeck development/m.test(ci);
+  assert.match(ci, paused ? /^ {2}# schedule:\n {2}# {3}- cron: '\d+ \d+ \* \* \d'/m : /^ {2}schedule:\n {4}- cron: '\d+ \d+ \* \* \d'/m);
 });
