@@ -52,6 +52,18 @@ mkdir -p "$root/quarterdeck/logs"
 node -e 'const fs=require("fs"); const [file,route,container,cwd,model]=process.argv.slice(1); fs.appendFileSync(file,JSON.stringify({route,container,cwd,model})+"\n")' "$root/quarterdeck/logs/launch.log" "$route" "$container" "$cwd" "$model"
 if [[ "$route" = publish ]]; then HERDR_AGENT=claude exec /usr/local/bin/claude "$@" --setting-sources user; fi
 if [[ "$route" = quarterdeck ]]; then exec /usr/local/bin/claude "$@"; fi
+# Claude checks folder trust on a worktree's main repository too. Trust it only when git data
+# names the home's own clone (<home>/projects/<project>); anything else gets the worktree only.
+clone=
+if [[ "$route" = project ]]; then
+  common=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=
+  common=$(realpath -e -- "$common" 2>/dev/null) || common=
+  if [[ -n "$common" && "${common##*/}" = .git && "$(dirname -- "$(dirname -- "$common")")" = "$home/projects" ]]; then
+    clone=${common%/.git}
+  else
+    node -e 'const fs=require("fs"); const [file,cwd,common]=process.argv.slice(1); fs.appendFileSync(file,JSON.stringify({route:"note",cwd,note:"repository root is not the home project clone; trusted the worktree only",common})+"\n")' "$root/quarterdeck/logs/launch.log" "$cwd" "$common"
+  fi
+fi
 # No forwarded env on this preparation exec: use the container's own CLAUDE_CONFIG_DIR.
 docker exec -u node "$container" node -e '
 const fs=require("fs"), path=require("path");
@@ -65,12 +77,11 @@ const config=text.trim() ? JSON.parse(text) : {hasCompletedOnboarding:true};
 if (!config || typeof config!=="object" || Array.isArray(config)) throw Error("invalid Claude config");
 config.projects ??= {};
 if (typeof config.projects!=="object" || Array.isArray(config.projects)) throw Error("invalid Claude projects");
-const cwd=process.argv[1];
-config.projects[cwd]={...config.projects[cwd],hasTrustDialogAccepted:true};
+for (const p of process.argv.slice(1)) if (p) config.projects[p]={...config.projects[p],hasTrustDialogAccepted:true};
 const tmp=file+".qd-"+process.pid;
 fs.writeFileSync(tmp,JSON.stringify(config),{mode:0o600});
 fs.renameSync(tmp,file);
-' "$cwd"
+' "$cwd" "$clone"
 args=(-u node -it -w "$cwd")
 # compgen lists exported names, not values (including multiline values).
 while IFS= read -r name; do

@@ -1,6 +1,6 @@
 # 25: The launcher also trusts the Project clone's root, so no trust dialog appears
 
-**Status:** ready-for-agent
+**Status:** closed
 **Model:** Sonnet
 **Design slice:** 4 (Crewmate in the project container)
 
@@ -18,12 +18,12 @@ Before each launch into the project container, the launcher writes trust for the
 
 ## Acceptance criteria
 
-- [ ] For a pool worktree of `<home>/projects/<project>`, the project container's `$CLAUDE_CONFIG_DIR/.claude.json` has `hasTrustDialogAccepted: true` for both the worktree path and `<home>/projects/<project>`. The existing file is merged, not replaced.
-- [ ] No other path gets trust: not the pool root, not `<home>`, not any parent folder. A trust entry that is already `true` for another path is left as it is.
-- [ ] The repository root is taken from the worktree's git data, and only when it is the clone of the home's own Project (`<home>/projects/<project>`, with the home taken from the launch). A worktree whose git data points anywhere else gets trust for the worktree only, plus one line in `launch.log` saying so. A Crewmate can redirect a worktree's `.git` file (ADR 0009), and this rule keeps that from earning trust for an arbitrary folder.
-- [ ] The existing launcher tests pass. The stub-Claude test is extended to check both entries.
-- [ ] `quarterdeck/CHECKLIST.md`'s SC-10 row for a Crewmate notes that a re-run of ticket 14 step 5 must show no trust dialog.
-- [ ] `npm run test:quarterdeck` passes, followed by `npm run test:cleanup` with no test containers left. The full suite is not run.
+- [x] For a pool worktree of `<home>/projects/<project>`, the project container's `$CLAUDE_CONFIG_DIR/.claude.json` has `hasTrustDialogAccepted: true` for both the worktree path and `<home>/projects/<project>`. The existing file is merged, not replaced.
+- [x] No other path gets trust: not the pool root, not `<home>`, not any parent folder. A trust entry that is already `true` for another path is left as it is.
+- [x] The repository root is taken from the worktree's git data, and only when it is the clone of the home's own Project (`<home>/projects/<project>`, with the home taken from the launch). A worktree whose git data points anywhere else gets trust for the worktree only, plus one line in `launch.log` saying so. A Crewmate can redirect a worktree's `.git` file (ADR 0009), and this rule keeps that from earning trust for an arbitrary folder.
+- [x] The existing launcher tests pass. The stub-Claude test is extended to check both entries.
+- [x] `quarterdeck/CHECKLIST.md`'s SC-10 row for a Crewmate notes that a re-run of ticket 14 step 5 must show no trust dialog.
+- [x] `npm run test:quarterdeck` passes, followed by `npm run test:cleanup` with no test containers left. The full suite is not run.
 
 ## Technical context
 
@@ -37,3 +37,5 @@ Before each launch into the project container, the launcher writes trust for the
 None.
 
 ## Comments
+
+Resolved (one commit). The launcher finds the repository with `git rev-parse --git-common-dir` and, only when it is `<home>/projects/<x>/.git` (home from the launch), trusts that folder along with the worktree; otherwise it trusts the worktree and appends a `note` record to `launch.log`. The test covers a pre-existing config and a redirected worktree. `npm run test:quarterdeck` 39/39, then `test:cleanup`. Review findings: ADR 0006 line updated (fixed); a sibling `<home>/projects/<other>` is accepted because the launch carries no project name (declined, noted for a later ticket); the logging helper duplication and the heavy `script` wrapper in the new test (declined, minor).

@@ -12,6 +12,6 @@ The First Mate and one Second Mate per Consuming Project run together in the Qua
 
 - Agent sessions end when the Quarterdeck restarts. A Spec Run is restarted by hand. Surviving a restart is listed as later work. A restart with a Crewmate running behind `docker exec` was not tested.
 - One project container serves one Second Mate's home, because its mounts name that home's scripts, signal folder and clone. Only that Second Mate starts the project's Crewmates; the First Mate must not.
-- The launcher carries three duties. It sets `HERDR_AGENT=claude` on the `docker exec` process, or Herdr sees no agent. It marks Claude's first-run setup complete in the project container. It registers folder trust for the exact worktree before each launch.
+- The launcher carries three duties. It sets `HERDR_AGENT=claude` on the `docker exec` process, or Herdr sees no agent. It marks Claude's first-run setup complete in the project container. It registers folder trust for the exact worktree before each launch, and (ticket 25) for the home's own Project clone root, which Claude checks for a worktree.
 - A Crewmate can see its home's whole signal folder, not only its own files. It could forge another ticket's signals. The worktree pool is also shared by every home.
 - Tested only against a stand-in project container and one project. Not tested: the hardened Node Variant, two projects at once, and Crewmates on the permission mode that skips prompts.

@@ -332,11 +332,12 @@ if (!fs.existsSync('launcher-commit')) {
   assert.equal(probe(`git -C ${wt} log -1 --format='%an <%ae>|%cn <%ce>'`).out.trim(), `Host Author <author@example.invalid>|${IDENTITY.name} <${IDENTITY.email}>`, 'set variables win; unset or empty ones come from the host .gitconfig');
   const config = () => JSON.parse(probe('cat "$CLAUDE_CONFIG_DIR/.claude.json"').out);
   assert.equal(config().hasCompletedOnboarding, true);
-  assert.deepEqual(config().projects, { [wt]: { hasTrustDialogAccepted: true } });
+  const clone = `${home}/projects/fixture`;
+  assert.deepEqual(config().projects, { [wt]: { hasTrustDialogAccepted: true }, [clone]: { hasTrustDialogAccepted: true } });
   assert.equal(probe(`node -e 'const fs=require("fs");fs.writeFileSync(process.env.CLAUDE_CONFIG_DIR+"/.claude.json",JSON.stringify({hasCompletedOnboarding:false,keep:42,projects:{"/previous":{keep:true}}}))'`).code, 0);
   r = launch();
   assert.equal(r.code, 0, r.out + r.err);
-  assert.deepEqual(config(), { hasCompletedOnboarding: false, keep: 42, projects: { '/previous': { keep: true }, [wt]: { hasTrustDialogAccepted: true } } });
+  assert.deepEqual(config(), { hasCompletedOnboarding: false, keep: 42, projects: { '/previous': { keep: true }, [wt]: { hasTrustDialogAccepted: true }, [clone]: { hasTrustDialogAccepted: true } } });
   assert.equal(okInside('cat "$CLAUDE_CONFIG_DIR/.claude.json"'), ownConfig);
   const records = okInside(`cat ${home}/docker-record`).trim().split('\n').map(JSON.parse);
   const executions = records.filter(v => v.args.includes('claude'));
@@ -362,7 +363,7 @@ if (!fs.existsSync('launcher-commit')) {
   assert.equal(probe(': > "$CLAUDE_CONFIG_DIR/.claude.json"').code, 0);
   assert.equal(launch().code, 0);
   assert.equal(config().hasCompletedOnboarding, true);
-  assert.deepEqual(Object.keys(config().projects), [wt]);
+  assert.deepEqual(Object.keys(config().projects).sort(), [wt, clone].sort());
   assert.notEqual(inside(`cd ${wt}; env -u FM_TASK_INBOX claude --version`).code, 0);
   for (const ids of ['', 'one\ntwo']) {
     const failed = inside(`cd ${wt}; PATH=${shim}:$PATH FM_TASK_INBOX=${home}/state/job.inbox QD_TEST_IDS='${ids}' claude --version`);
@@ -371,7 +372,16 @@ if (!fs.existsSync('launcher-commit')) {
   }
   const poolRoot = inside(`cd /home/node/.treehouse; FM_TASK_INBOX=${home}/state/job.inbox claude --version`);
   assert.notEqual(poolRoot.code, 0);
-  assert.deepEqual(Object.keys(config().projects), [wt], 'never trust the pool root');
+  assert.deepEqual(Object.keys(config().projects).sort(), [wt, clone].sort(), 'never trust the pool root');
+  // A worktree whose git data points outside the home's own clone is trusted alone, with a log line.
+  const other = `${home}/elsewhere`, owt = `${wt}-other`;
+  okInside(`git init -q -b main ${other}; git -C ${other} config user.name X; git -C ${other} config user.email x@example.invalid; git -C ${other} commit -q --allow-empty -m i; git -C ${other} worktree add -qb other ${owt}`);
+  inside(`cd ${owt}; PATH=${shim}:$PATH FM_TASK_INBOX=${home}/state/job.inbox timeout 30 script -qec 'claude --version' ${home}/terminal-record2`);
+  // The stub may fail afterwards: the project container does not mount the other repository.
+  assert.deepEqual(Object.keys(config().projects).sort(), [wt, clone, owt].sort(), 'only the worktree is trusted');
+  const note = okInside(`cat ${work}/quarterdeck/logs/launch.log`).trim().split('\n').map(JSON.parse).filter(v => v.route === 'note' && v.cwd === owt);
+  assert.equal(note.length, 1);
+  assert.match(note[0].note, /trusted the worktree only/);
   // Replace the local executable temporarily to observe exact argv and exit status without an agent.
   const swap = s => run('docker', ['exec', '-u', 'root', name, 'sh', '-c', s]);
   assert.equal(swap(`mv /usr/local/bin/claude /usr/local/bin/claude.saved; printf '#!/bin/sh\\nprintf "%%s\\\\n" "$@"\\nexit 23\\n' > /usr/local/bin/claude; chmod +x /usr/local/bin/claude`).code, 0);
