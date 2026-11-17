@@ -92,7 +92,12 @@ RUN cd /opt/qd && pnpm install --prod --frozen-lockfile --ignore-scripts
 COPY quarterdeck/bin/claude quarterdeck/bin/qd-entry quarterdeck/bin/qd-server quarterdeck/bin/qd-first-mate quarterdeck/bin/qd-publish quarterdeck/bin/qd-project-up /opt/qd/bin/
 COPY quarterdeck/fleet/ /opt/qd/fleet/
 COPY quarterdeck/skills/ /etc/claude-code/.claude/skills/
-RUN chmod -R u=rwX,go=rX /etc/claude-code/.claude/skills \
+COPY quarterdeck/shell-profile.sh /etc/quarterdeck-shell.sh
+# Interactive bash sources the profile last (after the user's ~/.bashrc, which may set its own history).
+RUN chmod 644 /etc/quarterdeck-shell.sh \
+ && echo '. /etc/quarterdeck-shell.sh' >> /etc/bash.bashrc \
+ && { [ ! -f /home/node/.bashrc ] || echo '. /etc/quarterdeck-shell.sh' >> /home/node/.bashrc; } \
+ && chmod -R u=rwX,go=rX /etc/claude-code/.claude/skills \
  && mkdir -p /opt/qd/empty/.devcontainer /home/node/.claude /home/node/.treehouse \
  && chown node:node /home/node/.claude /home/node/.treehouse \
  && chmod 755 /opt/qd/bin/claude /opt/qd/bin/qd-project-up /opt/qd/bin/qd-entry /opt/qd/bin/qd-server /opt/qd/bin/qd-first-mate /opt/qd/bin/qd-publish /usr/local/bin/claude-yolo /usr/local/bin/codex-yolo \

@@ -46,4 +46,7 @@ fi
 # Panes get the two names above, not a third copy under the file's own name.
 unset QUARTERDECK_GITHUB_TOKEN
 
+# Herdr starts each pane's shell from SHELL; unset, panes fall back to dash.
+export SHELL=/bin/bash
+
 cd /home/node && exec herdr --session default server

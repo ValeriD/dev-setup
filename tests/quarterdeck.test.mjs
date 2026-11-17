@@ -755,6 +755,53 @@ test('SC-19: a Herdr pane holds token variables; a plain docker exec shell inher
   assert.equal(inside('test -e /tmp/pwned-' + id).code, 1, 'the file was parsed, not sourced');
 });
 
+// Ticket 30: panes are comfortable bash shells. Two panes of one Herdr session share one history within a run.
+function newPane() {
+  const ws = run('docker', ['exec', '-u', 'node', name, 'herdr', 'workspace', 'create', '--no-focus', '--cwd', '/home/node']);
+  assert.equal(ws.code, 0, ws.err);
+  return JSON.parse(ws.out).result.root_pane.pane_id;
+}
+function paneRun(pane, cmd, doneFile) {
+  const r = run('docker', ['exec', '-u', 'node', name, 'herdr', 'pane', 'run', pane, cmd]);
+  assert.equal(r.code, 0, r.err);
+  if (!doneFile) return '';
+  for (let i = 0; i < 60; i++) {
+    const got = inside(`cat ${doneFile} 2>/dev/null`);
+    if (got.code === 0) return got.out;
+    run('sleep', ['0.5']);
+  }
+  assert.fail('the pane command did not finish');
+}
+
+test('ticket 30: a pane runs bash with PAGER and GIT_PAGER set to `less -FRX`; a non-interactive shell does not read the profile', () => {
+  const out = inPane('ps -o comm= -p $$; printenv PAGER; printenv GIT_PAGER; printenv SHELL; echo $HISTFILE').trim().split('\n');
+  assert.deepEqual(out, ['bash', 'less -FRX', 'less -FRX', '/bin/bash', '/home/node/.bash_history']);
+  assert.equal(inside("bash -c 'printenv PAGER | wc -c'").out.trim(), '0');
+  // `git log -1` in a clone prints and returns; a pager that waited would leave the done file missing.
+  const log = inPane('cd $(mktemp -d) && git init -q . && git -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m pager-check && git log -1 --oneline && echo returned');
+  assert.match(log, /pager-check[\s\S]*returned/);
+});
+
+test('ticket 30: panes share one history within a run, a leading space is not saved, and nothing lands in the work root or a volume', () => {
+  const a = newPane();
+  const b = newPane();
+  const tag = randomBytes(4).toString('hex');
+  const out = `/tmp/hist-${tag}`;
+  // Each command writes a file, so the test knows the shell had started and the command had run.
+  paneRun(a, `echo shared-${tag} >/dev/null; touch ${out}.a1`, `${out}.a1`);
+  paneRun(a, ` echo hidden-${tag} >/dev/null; touch ${out}.a2`, `${out}.a2`);
+  paneRun(b, `touch ${out}.b1`, `${out}.b1`); // a new prompt in pane B reads the lines pane A wrote
+  const hist = paneRun(b, `history > ${out}.tmp; mv ${out}.tmp ${out}`, out);
+  assert.match(hist, new RegExp(`echo shared-${tag}`), hist);
+  assert.doesNotMatch(hist, new RegExp(`hidden-${tag}`));
+  assert.equal(inside(`grep -q shared-${tag} /home/node/.bash_history`).code, 0, 'the line was written as soon as it ran');
+  assert.equal(inside(`grep -c hidden-${tag} /home/node/.bash_history; true`).out.trim(), '0');
+  assert.equal(inside('test -f /home/node/.bash_history').code, 0, 'the history file is under /home/node');
+  assert.equal(inside(`grep -rl shared-${tag} ${work} 2>/dev/null; true`).out.trim(), '', 'nothing under the work root');
+  const mounts = run('docker', ['inspect', name, '--format', '{{range .Mounts}}{{.Destination}}\n{{end}}']).out;
+  assert.doesNotMatch(mounts, /^\/home\/node\/?$|\.bash_history/m, 'the history is in the container, so it goes with `quarterdeck stop`');
+});
+
 test('SC-19: the entrypoint and everything above Herdr hold no value; docker inspect and history show none', () => {
   const root = run('docker', ['exec', '-u', 'root', name, 'sh', '-c', 'for p in $(ps -eo pid=,user= | awk \'$2=="root"{print $1}\'); do grep -a -c dummy- /proc/$p/environ 2>/dev/null; done | sort -u']);
   assert.equal(root.out.trim(), '0', 'no root process (the entrypoint, dnsmasq) holds a value');
