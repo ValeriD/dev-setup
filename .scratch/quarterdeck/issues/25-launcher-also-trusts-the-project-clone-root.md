@@ -1,6 +1,6 @@
 # 25: The launcher also trusts the Project clone's root, so no trust dialog appears
 
-**Status:** closed
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 4 (Crewmate in the project container)
 
@@ -39,3 +39,5 @@ None.
 ## Comments
 
 Resolved (one commit). The launcher finds the repository with `git rev-parse --git-common-dir` and, only when it is `<home>/projects/<x>/.git` (home from the launch), trusts that folder along with the worktree; otherwise it trusts the worktree and appends a `note` record to `launch.log`. The test covers a pre-existing config and a redirected worktree. `npm run test:quarterdeck` 39/39, then `test:cleanup`. Review findings: ADR 0006 line updated (fixed); a sibling `<home>/projects/<other>` is accepted because the launch carries no project name (declined, noted for a later ticket); the logging helper duplication and the heavy `script` wrapper in the new test (declined, minor).
+
+Parent check on the declined finding (2026-11-17): a Crewmate cannot create a sibling `<home>/projects/<other>`. The project container mounts only the pool, `<clone>/.git` (with `hooks` and `config` read-only), `<home>/bin` (read-only) and `<home>/state`. `<home>/projects/` itself is not mounted, and a folder created inside `<clone>/.git` is one level too deep to match `<home>/projects/<x>/.git`. No follow-up ticket is needed.
