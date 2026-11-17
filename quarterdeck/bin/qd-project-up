@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // qd-project-up <home> <project>: main-branch config -> devcontainer CLI -> socket proxy.
 // Features are trusted executable project input, not sandboxed by this renderer (security-review 01).
+// The Quarterdeck-added entries in project-layer.json (FirstMate's Crewmate busy hook) join the project's Extension
+// Layer in the export only: the
+// project's own files, Base, the Variant and a hand-opened container stay as they are (ticket 15).
 // QD_PROJECT_TEST_IMAGE permits exactly one local fixture image instead of the published digest, and only in a
 // Quarterdeck the test suite started (root-owned /run/quarterdeck-test-run, written by qd-entry from QD_RUN_LABEL).
 import { execFileSync } from 'node:child_process';
@@ -51,13 +54,26 @@ function main() {
   const owner = createHash('sha256').update(home).digest('hex').slice(0, 16);
   const exported = path.join(root, 'quarterdeck/config', project, owner, tree);
   fs.mkdirSync(path.join(exported, '.devcontainer'), { recursive: true });
+  let ownManifest = false;
   for (const entry of git('ls-tree', '-rz', tree).toString().split('\0').filter(Boolean)) {
     const [meta, filename] = entry.split('\t');
+    if (filename === 'extensions.json') ownManifest = true;
     if (!/^100(644|755) blob /.test(meta) || filename.split('/').some(p => p === '..') || path.isAbsolute(filename)) throw Error('export supports regular files only');
     const dest = path.join(exported, '.devcontainer', filename);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, git('show', `${tree}:${filename}`), { mode: meta.startsWith('100755') ? 0o755 : 0o644 });
   }
+  // The project's manifest as committed (or none), plus the Quarterdeck-added entries, written fresh every run.
+  // Only the shape needed to append is checked here; the start-up installer validates the whole manifest.
+  const manifestFile = path.join(exported, '.devcontainer/extensions.json');
+  const layer = JSON.parse(fs.readFileSync(new URL('../project-layer.json', import.meta.url), 'utf8'));
+  let manifest = { extensions: [] };
+  if (ownManifest) manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || !Array.isArray(manifest.extensions ?? [])) throw Error('invalid project extensions.json');
+  manifest.extensions = [...(manifest.extensions ?? []), ...layer.extensions];
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n', { mode: 0o644 });
+  // A container made before those entries changed is replaced, like one made from an older main config.
+  const layerDigest = createHash('sha256').update(JSON.stringify(layer.extensions)).digest('hex').slice(0, 16);
   const pool = path.join(root, 'pool');
   const hooks = path.join(gitdir, 'hooks');
   const bin = path.join(home, 'bin');
@@ -102,11 +118,11 @@ function main() {
     let current;
     for (const id of ids) {
       const [info] = JSON.parse(command('docker', ['inspect', id]));
-      if (info.Config.Labels['quarterdeck.config'] === tree && !current) current = id;
+      if (info.Config.Labels['quarterdeck.config'] === tree && info.Config.Labels['quarterdeck.layer'] === layerDigest && !current) current = id;
       else command('docker', ['rm', '-f', id]);
     }
     if (!current) {
-      const result = command('devcontainer', ['up', '--workspace-folder', exported, '--skip-post-create', ...Object.entries({ ...labels, 'quarterdeck.config': tree }).flatMap(([k, v]) => ['--id-label', `${k}=${v}`])]);
+      const result = command('devcontainer', ['up', '--workspace-folder', exported, '--skip-post-create', ...Object.entries({ ...labels, 'quarterdeck.config': tree, 'quarterdeck.layer': layerDigest }).flatMap(([k, v]) => ['--id-label', `${k}=${v}`])]);
       current = JSON.parse(result.trim().split('\n').pop()).containerId;
     } else command('docker', ['start', current]);
     command('docker', ['exec', '-u', 'node', current, 'sh', '/usr/local/share/egress/wait-ready.sh']);

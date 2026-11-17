@@ -140,3 +140,12 @@ Decision 97 replaces ticket 18's SC-12 stop: a question no longer ends the run. 
 | Scenario | Setup | Look at | Pass |
 |---|---|---|---|
 | Ticket 27 / decision 99 (not run) | Re-run task C with a rebuilt image (`quarterdeck/claude-policy.json` has `Read(//etc/claude-code/.claude/skills/**)`) | First Mate and Second Mate tabs while they read `qd-first-mate` and `qd-spec-run` files, including `references/brief.md` and `references/report.md` | No permission prompt for any read under `/etc/claude-code/.claude/skills`, whether by the Read tool or a read-only shell command such as `cat` or `ls`. Record any other prompt with its exact text |
+
+## Ticket 15 — Crewmate busy and turn-end signals under the hardened policy (not run)
+
+Needs the hook's commit (pinned in `quarterdeck/project-layer.json`) on GitHub, a rebuilt Quarterdeck image, and `qd-project-up` run again for the project: a container made before this layer has no `quarterdeck.layer` label and is replaced.
+
+| Scenario | Setup | Look at | Pass |
+|---|---|---|---|
+| Ticket 15 / hardened Crewmate hooks (not run) | Real Crewmate spawned through FirstMate into the recreated project container (for example a ticket of a Spec Run on pomoplan); policy unchanged | Inside the project container: `/etc/claude-code/managed-settings.json` still has `allowManagedHooksOnly`, `/etc/claude-code/managed-settings.d/50-project.json` lists the four events. In the Quarterdeck: `state/<id>.busy-state` and `state/<id>.turn-ended` with timestamps across a turn | `busy-state` advances past `source=fm-spawn` with `source=claude-hook event=user-prompt-submit` (busy) during a turn and `event=stop` (idle) at its end; `turn-ended` is touched at each turn end; `fm-crew-state.sh` reads the Crewmate as busy, then idle. A container opened by hand from the Template has no `50-project.json` hook entries |
+| Ticket 15 / Herdr status dot (not run; not fixed by this hook) | Same Crewmate during a long turn | Herdr's tab mark and `herdr agent get` / `agent explain` on the Crewmate pane | Record only. Herdr 0.7.4's bundled Claude manifest (2026.07.13.1) marks Claude working only from a braille-prefixed terminal title; Claude 2.1.310 shows `◑ Claude Code`, so Herdr reads `idle` (then done) for the whole turn, in or out of Docker. FirstMate's busy state does not feed Herdr's dot. A fix needs its own ticket |

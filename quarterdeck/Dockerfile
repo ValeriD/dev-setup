@@ -91,6 +91,7 @@ RUN mkdir -p /opt/dev-setup/mcp /etc/dev-setup \
 COPY skills/dev-container/scripts/package.json skills/dev-container/scripts/pnpm-lock.yaml /opt/qd/
 RUN cd /opt/qd && pnpm install --prod --frozen-lockfile --ignore-scripts
 COPY quarterdeck/bin/claude quarterdeck/bin/qd-entry quarterdeck/bin/qd-server quarterdeck/bin/qd-first-mate quarterdeck/bin/qd-publish quarterdeck/bin/qd-project-up /opt/qd/bin/
+COPY quarterdeck/project-layer.json /opt/qd/project-layer.json
 COPY quarterdeck/fleet/ /opt/qd/fleet/
 COPY quarterdeck/skills/ /etc/claude-code/.claude/skills/
 COPY quarterdeck/shell-profile.sh /etc/quarterdeck-shell.sh

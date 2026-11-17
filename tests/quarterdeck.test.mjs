@@ -118,6 +118,23 @@ const put = (p, content) => {
 let firstId;
 const crewImage = `dev-setup-quarterdeck:test-crew-${id}`;
 
+// Ticket 15: qd-project-up adds the Quarterdeck's project-layer entries, whose hook pins a commit of this repository. Project
+// fixtures fetch that commit from a copy in the pool (mounted in every project container), not from GitHub (only a
+// shallow checkout without the commit fetches it from there once).
+// Root fetches a node-owned copy, so its global config adds safe.directory (honoured only there) to the image's.
+let pinBase;
+function pinEnv() {
+  if (!pinBase) {
+    const { github, sha } = JSON.parse(readFileSync(join(REPO, 'quarterdeck/project-layer.json'), 'utf8')).extensions[0].source;
+    const source = `${work}/pin-source.git`;
+    // A shallow checkout may lack the pinned commit; then it comes from the pinned repository itself.
+    execSync(`git init -q --bare ${source} && { git -C ${source} fetch -q ${REPO} ${sha}:refs/heads/pin 2>/dev/null || git -C ${source} fetch -q https://github.com/${github}.git ${sha}:refs/heads/pin; }`);
+    pinBase = `/home/node/.treehouse/.qd-pin-${id}`;
+    okInside(`git init -q --bare ${pinBase}/${github}.git && git -c safe.directory='*' -C ${pinBase}/${github}.git fetch -q ${source} pin:refs/heads/pin && printf '[include]\\n\\tpath = /etc/dev-setup/gitconfig\\n[safe]\\n\\tdirectory = *\\n' > ${pinBase}/gitconfig`);
+  }
+  return { DEV_SETUP_GIT_BASE: pinBase, GIT_CONFIG_GLOBAL: `${pinBase}/gitconfig` };
+}
+
 // Test script plays the Second Mate (qd-spec-run steps 2–9 and its question path); no product checker.
 async function testTicketLoop(t, mode = 'success') {
   const failure = mode === 'failure';
@@ -138,7 +155,7 @@ async function testTicketLoop(t, mode = 'success') {
   const read = p => okInside(`cat ${p}`);
   const git = args => fm(`git -C ${clone} ${args}`).trim();
   okInside(`rm -rf ${parent}/projects/loop; mkdir -p ${parent}/data ${parent}/projects/loop/.devcontainer; git init -q --bare -b main ${origin}; git -C ${parent}/projects/loop init -q -b main`);
-  put(`${parent}/projects/loop/.devcontainer/devcontainer.json`, JSON.stringify({ image: crewImage, runArgs: ['--cap-drop=ALL'] }));
+  put(`${parent}/projects/loop/.devcontainer/devcontainer.json`, JSON.stringify({ image: crewImage, runArgs: ['--cap-drop=ALL'], containerEnv: pinEnv() }));
   put(`${parent}/projects/loop/.devcontainer/extensions.json`, readFileSync(join(REPO, 'templates/node/.devcontainer/extensions.json'), 'utf8'));
   put(`${parent}/projects/loop/.gitignore`, '.claude/\n');
   okInside(`cd ${parent}/projects/loop; git add .; git commit -qm initial; git remote add origin ${origin}; git push -q origin main`);
@@ -442,6 +459,81 @@ if (!fs.existsSync('launcher-commit')) {
   } finally { assert.equal(swap('mv /usr/local/bin/claude.saved /usr/local/bin/claude').code, 0); }
 }
 
+// Ticket 15: the Quarterdeck-added hook, installed by the start-up installer in a container qd-project-up made.
+// A stub plays Claude: it pipes hook input into the installed command, as Claude does.
+function testCrewmateHook({ home, cid, probe }) {
+  const layer = JSON.parse(readFileSync(join(REPO, 'quarterdeck/project-layer.json'), 'utf8'));
+  const read = (p) => { const r = probe(`cat ${p}`); assert.equal(r.code, 0, r.err); return r.out; };
+  // The hardened policy keeps every Base key, allowManagedHooksOnly included.
+  const policy = JSON.parse(read('/etc/claude-code/managed-settings.json'));
+  for (const [k, v] of Object.entries(JSON.parse(readFileSync(join(REPO, 'base/claude/managed-settings.json'), 'utf8')))) assert.deepEqual(policy[k], v, k);
+  // The project drop-in has one hook per layer event. Its content is this repository's script, so a stale pin fails here.
+  const hooks = JSON.parse(read('/etc/claude-code/managed-settings.d/50-project.json')).hooks;
+  assert.deepEqual(Object.keys(hooks).sort(), layer.extensions.map(e => e.event).sort());
+  const commands = Object.values(hooks).map(groups => { assert.equal(groups.length, 1); return groups[0].hooks[0].command; });
+  const script = createHash('sha256').update(readFileSync(join(REPO, 'quarterdeck/hooks/crewmate-busy.sh'))).digest('hex');
+  for (const c of commands) assert.equal(probe(`sha256sum < ${c}`).out.split(' ')[0], script, c);
+  // The export is the project's committed manifest plus the layer's entries.
+  const own = JSON.parse(okInside(`git -C ${home}/projects/fixture show origin/main:.devcontainer/extensions.json`));
+  assert.deepEqual(JSON.parse(read('/workspace/.devcontainer/extensions.json')).extensions, [...own.extensions, ...layer.extensions]);
+
+  const state = `${home}/state`;
+  const task = `qd15-${id}`;
+  const env = `FM_TASK_ID=${task} FM_TASK_INBOX=${state}/${task}.inbox`;
+  // The stub plays Claude: hook input on stdin, the installed command run by a shell.
+  const fire = (event, session, vars = env) => {
+    const r = probe(`printf '{"session_id":"%s","hook_event_name":"%s"}' ${session} ${event} | env -u FM_TASK_ID -u FM_TASK_INBOX ${vars} sh -c '${commands[0]}'`);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out + r.err, '', 'the hook prints nothing');
+  };
+  const record = () => okInside(`cat ${state}/${task}.busy-state`).trim();
+  const turnEnded = () => inside(`test -e ${state}/${task}.turn-ended`).code === 0;
+  // FirstMate arms the task in the Quarterdeck, as fm-spawn does.
+  const gen = okInside(`${home}/bin/fm-busy-event.sh arm ${state} ${task}`).trim();
+  assert.match(record(), new RegExp(`^v1 gen=${gen} seq=1 state=busy source=fm-spawn event=launch-brief `));
+  fire('Stop', 'one');
+  assert.match(record(), new RegExp(`^v1 gen=${gen} seq=2 state=idle source=claude-hook event=stop `));
+  assert.ok(turnEnded(), 'Stop wakes the watcher');
+  okInside(`rm ${state}/${task}.turn-ended`);
+  fire('UserPromptSubmit', 'one');
+  assert.match(record(), / seq=3 state=busy source=claude-hook event=user-prompt-submit /);
+  fire('StopFailure', 'one');
+  assert.match(record(), / seq=4 state=idle source=claude-hook event=stop-failure /);
+  assert.equal(turnEnded(), false, 'only Stop touches turn-ended');
+  // A relaunch arms a new generation. The old session's late events are refused, as FirstMate's own wiring refuses them.
+  const regen = okInside(`${home}/bin/fm-busy-event.sh arm ${state} ${task}`).trim();
+  fire('UserPromptSubmit', 'two');
+  assert.match(record(), new RegExp(`^v1 gen=${regen} seq=2 state=busy source=claude-hook event=user-prompt-submit `));
+  fire('SessionEnd', 'one');
+  fire('Stop', 'one');
+  assert.match(record(), / seq=2 state=busy /);
+  assert.equal(turnEnded(), false, 'a stale Stop does not wake the watcher');
+  fire('SessionEnd', 'two');
+  assert.match(record(), / seq=3 state=idle source=claude-hook event=session-end /);
+  // Without FirstMate's variables (a container used without the Quarterdeck), nothing is written.
+  const settled = record();
+  for (const vars of ['', `FM_TASK_INBOX=${state}/${task}.inbox`, `FM_TASK_ID=${task}`]) {
+    fire('UserPromptSubmit', 'three', vars);
+    fire('Stop', 'three', vars);
+  }
+  assert.equal(record(), settled);
+  assert.equal(turnEnded(), false);
+  // Crewmate-writable content is never executed: a shell-looking generation value, and a writer outside <home>/bin.
+  const pwned = `/tmp/qd15-pwned-${id}`;
+  okInside(`cp ${state}/${task}.busy-gen ${state}/gen.saved && printf '%s\\n' '$(touch ${pwned})' > ${state}/${task}.busy-gen`);
+  fire('UserPromptSubmit', 'four');
+  assert.equal(record(), settled);
+  okInside(`mv ${state}/gen.saved ${state}/${task}.busy-gen`);
+  const fake = `/home/node/.treehouse/qd15-fake-${id}`;
+  assert.equal(probe(`mkdir -p ${fake}/bin ${fake}/state && printf '#!/bin/sh\\ntouch ${pwned}\\n' > ${fake}/bin/fm-busy-event.sh && chmod 555 ${fake}/bin/fm-busy-event.sh ${fake}/bin && cp ${state}/${task}.busy-gen ${fake}/state/`).code, 0);
+  try {
+    fire('UserPromptSubmit', 'five', `FM_TASK_ID=${task} FM_TASK_INBOX=${fake}/state/${task}.inbox`);
+    fire('UserPromptSubmit', 'six', `FM_TASK_ID=${task} FM_TASK_INBOX=${fake}/../../../..${state}/${task}.inbox`);
+    assert.equal(probe(`test -e ${pwned}`).code, 1, 'no planted content ran');
+    assert.equal(record(), settled);
+  } finally { probe(`chmod -R u+w ${fake} && rm -rf ${fake}`); }
+}
+
 // Run this fixture independently with --test-name-pattern='qd-project-up fixture'.
 async function testProjectFixture(extensionsToken = '', t) {
   buildImage();
@@ -454,9 +546,13 @@ async function testProjectFixture(extensionsToken = '', t) {
   const wt = `/home/node/.treehouse/qd-${id}${suffix}`;
   const template = readFileSync(join(REPO, 'templates/node/.devcontainer/devcontainer.json'), 'utf8')
     .replace('${templateOption:image}', IMAGE).replaceAll('${templateOption:patEnvVar}', 'GH_TOKEN');
-  okInside(`mkdir -p ${clone}/.devcontainer ${home}/bin ${home}/state; git init -q --bare -b main ${origin}; git init -q -b main ${clone}; git -C ${clone} config user.name Fixture; git -C ${clone} config user.email fixture@example.invalid`);
+  const fixtureEnv = pinEnv();
+  okInside(`mkdir -p ${clone}/.devcontainer ${home}/bin ${home}/state; git init -q --bare -b main ${origin};`);
+  // FirstMate's real scripts in <home>/bin, as a provisioned Second Mate home has them.
+  okInside(`cp -a /opt/firstmate/bin/. ${home}/bin/`);
+  okInside(`git init -q -b main ${clone}; git -C ${clone} config user.name Fixture; git -C ${clone} config user.email fixture@example.invalid`);
   const configPath = `${clone}/.devcontainer/devcontainer.json`;
-  put(configPath, template.replace('"name": "node",', `"name": "node", "containerEnv": {"DEV_SETUP_GITHUB_PAT":"dummy-only", "GH_TOKEN":"dummy-only", "SAFE":"kept"},`)
+  put(configPath, template.replace('"name": "node",', `"name": "node", "containerEnv": {"DEV_SETUP_GITHUB_PAT":"dummy-only", "GH_TOKEN":"dummy-only", "SAFE":"kept", ${JSON.stringify(fixtureEnv).slice(1, -1)}},`)
     .replace('test -d .git || git init -q; mkdir -p .git/hooks .vscode .devcontainer; touch .git/config', `touch ${home}/HOST-COMMAND-RAN`));
   put(`${clone}/.devcontainer/extensions.json`, readFileSync(join(REPO, 'templates/node/.devcontainer/extensions.json')));
   okInside(`git -C ${clone} add .; git -C ${clone} commit -qm initial; git -C ${clone} remote add origin ${origin}; git -C ${clone} push -q origin main; git -C ${clone} worktree add -qb fixture ${wt}`);
@@ -519,6 +615,7 @@ async function testProjectFixture(extensionsToken = '', t) {
     assert.equal(probe(`touch ${clone}/.git/hooks/forbidden`).code === 0, false);
     assert.equal(probe(`echo forbidden >> ${clone}/.git/config`).code === 0, false);
     if (!extensionsToken) testLauncherFixture({ home, wt, cid, put, probe });
+    if (!extensionsToken) testCrewmateHook({ home, cid, probe });
     const beforeCommit = okInside(`git -C ${wt} rev-parse HEAD`).trim();
     const commit = probe(`set -e; cd ${wt}; echo committed > proof; git add proof; git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm proof; git rev-parse HEAD`);
     assert.equal(commit.code, 0, commit.err);
@@ -556,7 +653,7 @@ async function testProjectFixture(extensionsToken = '', t) {
     assert.equal(run('docker', ['inspect', foreign]).code, 0, 'matching home/project without the creator label is not ours');
     // Retained local Features must actually build through the proxy, not just survive rendering.
     okInside(`mkdir -p ${clone}/.devcontainer/features/proof; printf '%s' '{"id":"proof","version":"1.0.0","name":"proof"}' > ${clone}/.devcontainer/features/proof/devcontainer-feature.json; printf '#!/bin/sh\\necho installed > /feature-proof\\n' > ${clone}/.devcontainer/features/proof/install.sh`);
-    put(configPath, template.replace('"image":', '"features": {"./features/proof": {}}, "image":'));
+    put(configPath, template.replace('"image":', `"features": {"./features/proof": {}}, "containerEnv": ${JSON.stringify(fixtureEnv)}, "image":`));
     okInside(`git -C ${clone} add .; git -C ${clone} commit -qm feature; git -C ${clone} push -q origin main`);
     const featured = up();
     assert.equal(featured.code, 0, featured.err);

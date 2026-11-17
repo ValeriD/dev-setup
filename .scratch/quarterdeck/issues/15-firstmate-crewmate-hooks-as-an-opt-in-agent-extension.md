@@ -1,6 +1,6 @@
 # 15: FirstMate's Crewmate hooks reach a Quarterdeck-created container as an opt-in Agent Extension
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 **Model:** Opus (the ticket is about an agent hook)
 **Design slice:** 3 (Hardened project container), design open question 3
 
@@ -18,12 +18,12 @@ First step: read ticket 14's recorded result. If the hooks did fire under the ha
 
 ## Acceptance criteria
 
-- [ ] The hook does nothing unless FirstMate's variables (`FM_TASK_ID`, `FM_TASK_INBOX`) are set, so the same extension, if present, is harmless in a container used without the Quarterdeck.
-- [ ] A container made by `qd-project-up` has the hook installed in the way the installer installs hooks, and the hardened policy still has `allowManagedHooksOnly` and the rest of Base's keys.
+- [x] The hook does nothing unless FirstMate's variables (`FM_TASK_ID`, `FM_TASK_INBOX`) are set, so the same extension, if present, is harmless in a container used without the Quarterdeck.
+- [x] A container made by `qd-project-up` has the hook installed in the way the installer installs hooks, and the hardened policy still has `allowManagedHooksOnly` and the rest of Base's keys.
 - [ ] A container opened by hand from a Template, or made by `qd-project-up` from a project, differs only by that entry: `git diff` shows no change under `base/`, `variants/` or `templates/`, a hand-opened container's managed settings and hook list are byte-identical to before, and the existing acceptance suite passes.
-- [ ] The script never executes content read from `state/` or from the worktree (both are Crewmate-writable); it reads the generation value as data and runs only `fm-busy-event.sh` from the read-only `<home>/bin`.
-- [ ] Token-free test: with a stub invoking the installed hook command, FirstMate's busy-state and turn-ended files in `<home>/state` change as FirstMate expects, and with `FM_TASK_ID` unset nothing is written.
-- [ ] `quarterdeck/CHECKLIST.md` gets a row for a human with a real Claude: under the hardened policy a Crewmate's turn end and busy state reach FirstMate through this hook.
+- [x] The script never executes content read from `state/` or from the worktree (both are Crewmate-writable); it reads the generation value as data and runs only `fm-busy-event.sh` from the read-only `<home>/bin`.
+- [x] Token-free test: with a stub invoking the installed hook command, FirstMate's busy-state and turn-ended files in `<home>/state` change as FirstMate expects, and with `FM_TASK_ID` unset nothing is written.
+- [x] `quarterdeck/CHECKLIST.md` gets a row for a human with a real Claude: under the hardened policy a Crewmate's turn end and busy state reach FirstMate through this hook.
 
 ## Technical context
 
@@ -80,3 +80,27 @@ Ticket 15 remains open: actual ticket 14 hook results are still missing, so its 
 
 - **Ticket 14 (task B):** the busy and turn-end hooks did not fire in the project container. `state/qd14-gate.busy-state` holds only the spawn line, `seq=1 source=fm-spawn`, and there is no `.turn-ended` file. Mates in the Quarterdeck do fire them (`sm-pomoplan.busy-state`: `source=claude-hook event=stop`). By this ticket's first step, the hook is needed: build it.
 - **Ticket 16 (task C):** the user saw Herdr show project Crewmates as done (a tick) while they were still working. This is likely the same missing busy signal. The user's re-run after this ticket checks it.
+
+### Resolution — 2026-11-18
+
+**Built.** Two commits, because the entry must pin a commit that already holds the script: `df7ccd6` adds `quarterdeck/hooks/crewmate-busy.sh`; the ticket commit adds `quarterdeck/project-layer.json` (one `hook` entry per event, `UserPromptSubmit`, `Stop`, `StopFailure`, `SessionEnd`, pinned to `ValeriD/dev-setup@df7ccd6`), has `qd-project-up` append those entries to the exported `.devcontainer/extensions.json` only, and copies the file into the image. The start-up installer installs them as managed hooks (drop-in `50-project.json`); the policy keeps `allowManagedHooksOnly`. A container made before the entries changed has no matching `quarterdeck.layer` label and is replaced, so pomoplan's container is recreated on the next `qd-project-up`. The script is inert without `FM_TASK_ID` and `FM_TASK_INBOX`, runs only `<home>/bin/fm-busy-event.sh` when `<home>/bin` is exactly a read-only mount, binds each Claude session to the generation armed when it first fires (a session that outlives a relaunch is refused, as FirstMate's own wiring refuses it), and uses the writer's `--turn-ended` on Stop.
+
+**Verified (token-free).** `npm run test:quarterdeck`: the project fixture checks the Base policy keys, the four installed hooks (content equals this repository's script, so a stale pin fails), the export = committed manifest + entries, and drives the installed command with a stub against FirstMate's real `fm-busy-event.sh`: busy/idle records with `source=claude-hook`, `turn-ended` only on Stop, a stale session refused after a re-arm, nothing written without either variable, and no planted generation value or writer executed. Fixtures fetch the pinned commit from a local copy (`DEV_SETUP_GIT_BASE`), not GitHub.
+
+**Not verified here.** Criterion 3 stays unticked: `git diff` shows nothing under `base/`, `variants/`, `templates/` or `extensions/`, so a hand-opened container's managed settings and hook list cannot change, but the existing acceptance suite was not run (user's rule); `tests/plugins.test.mjs`, `tests/project-layer.test.mjs` and `tests/acceptance.test.mjs` cover the hand-opened policy and hooks. The real run (CHECKLIST "Ticket 15") needs the hook's commit pushed, a rebuilt image, and a real Crewmate.
+
+**Herdr shows a working Crewmate as done: not this hook.** Herdr 0.7.4 (bundled Claude manifest 2026.07.13.1) marks Claude working only when the terminal title starts with a braille spinner; Claude 2.1.310 shows `◑ Claude Code` while working (`✳ Claude Code` when idle), and its prompt box is always visible, so Herdr reads `idle` for the whole turn. Seen token-free: real Claude 2.1.310 in the hardened Variant image, in a Herdr pane with no Docker, against a fake Messages endpoint, `agent get` read `idle` for every second of a 15-second Bash tool call, and `agent explain` showed the title `◑ Claude Code` failing the `osc_title_working` rule. FirstMate's busy state does not feed Herdr's dot, and `docker exec` is not the cause. The mates in the Quarterdeck run the same Claude pin, so they should show the same thing. This needs a new ticket (for example a Quarterdeck-owned Herdr manifest override, or a newer Herdr through FirstMate's pin); SC-02's "real state" for Herdr stays open.
+
+**Review** (Standards, Design, Spec; fresh agents):
+- Design/Spec: the hook re-read `busy-gen` on every event, losing FirstMate's stale-generation refusal; the turn-ended touch ignored refusal. **Fixed**: per-session generation binding, `--turn-ended`.
+- Standards: "Quarterdeck layer" is not a glossary term. **Fixed**: worded as Quarterdeck-added entries of the Consuming Project's Extension Layer.
+- Standards: hook script missing from the index; index row held detail. **Fixed**.
+- Standards: test comment said "never from GitHub" despite the shallow-checkout fallback. **Fixed**.
+- Standards: tests duplicated installer protection (root owner, immutability, path name) and restated the fixture's manifest. **Fixed** (removed); kept the content hash (catches a stale pin) and the event set.
+- Standards: fixed `fake` name and cleanup outside `finally`. **Fixed**.
+- Standards: manifest shape check duplicates the installer's validator. **Declined**: only the append needs it; the installer validates the whole manifest at start, and reusing it would make the creator depend on the installer module.
+- Standards: digest ignores key order. **Declined**: the file is ours and fixed in the image.
+- Design/Spec: no test that a hand-opened container is unchanged. **Declined** here: no diff under those folders; existing files above cover it, the user runs them.
+- Spec: `quarterdeck.layer` replacement and the Herdr row were not asked for. **Declined**: replacement is needed for the hook to reach existing containers; the Herdr row records this ticket's investigation.
+- Spec: hook silently does nothing if `<home>/bin` is not exactly a mount point. **Declined**: that is the read-only guarantee the criterion asks for; `qd-project-up` always mounts it so.
+
