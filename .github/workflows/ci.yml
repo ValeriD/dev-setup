@@ -4,15 +4,18 @@ name: ci
 # only when needed. PRs: pin check + acceptance suite. Push to main with image
 # changes: also publish, sign, attest and publish the Template. A templates/-only
 # push publishes just the Template. Nothing is pushed unless acceptance passes.
+# PAUSED during rapid Quarterdeck development (2026-11-17, user's decision): tests run
+# locally with the targeted npm scripts. Only a manual run (workflow_dispatch) starts CI.
+# To resume, restore the triggers below.
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
-  # Weekly rebuild (as a push to main: test, publish, sign) so OS security
-  # patches reach the image without a code change.
-  schedule:
-    - cron: '17 4 * * 1'
+  # pull_request:
+  # push:
+  #   branches: [main]
+  # # Weekly rebuild (as a push to main: test, publish, sign) so OS security
+  # # patches reach the image without a code change.
+  # schedule:
+  #   - cron: '17 4 * * 1'
 
 permissions:
   contents: read
