@@ -720,6 +720,56 @@ test("Claude's policy keeps Base's keys except allowManagedHooksOnly", () => {
   for (const k of ['disableSkillShellExecution', 'disableSideloadFlags', 'disableCommandPluginSources']) assert.equal(rendered[k], true);
 });
 
+// Real Claude Code against a fake Messages endpoint (no login, no model): the fake asks for one tool call
+// and records the tool result Claude sends back, so this is Claude's own permission decision. In `-p`,
+// a call that would ask is refused with "requested permissions"; auto mode's classifier is unreachable here,
+// so in auto mode anything the rules do not allow is refused as well.
+const mockApi = readFileSync(join(REPO, 'tests/fixtures/claude-mock-server.mjs'), 'utf8');
+const claudeTool = (tool, input, ...flags) => {
+  const r = run('docker', ['exec', '-i', '-u', 'node', name, 'bash', '-c', `
+    d=$(mktemp -d) && cd "$d" && mkdir home && cat > mock.mjs || exit 1
+    port=$((20000 + RANDOM % 20000))
+    node mock.mjs "$port" "$d/result" "$1" "$2" "$d/ready" 2>"$d/mock-err" & server=$!
+    for _ in $(seq 50); do [ -e "$d/ready" ] && break; sleep 0.1; done
+    cd home && env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_AUTH_TOKEN CLAUDE_CONFIG_DIR="$d/config" ANTHROPIC_API_KEY=dummy \\
+      ANTHROPIC_BASE_URL="http://127.0.0.1:$port" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \\
+      timeout 120 /usr/local/bin/claude -p go "\${@:3}" </dev/null >/dev/null 2>"$d/err"
+    kill "$server"
+    if [ -s "$d/result" ]; then cat "$d/result"; code=0; else cat "$d/err" "$d/mock-err" >&2; code=1; fi
+    rm -rf "$d"; exit "$code"`, 'bash', tool, JSON.stringify(input), ...flags], { input: mockApi });
+  assert.equal(r.code, 0, `${tool} ${JSON.stringify(input)}\n${r.out}\n${r.err}`);
+  const result = JSON.parse(r.out.trim());
+  return { ok: result.is_error !== true, text: JSON.stringify(result.content) };
+};
+
+test("the mates read the Quarterdeck's managed skills without a prompt, and gain nothing else (decision 99)", () => {
+  // The only rule the policy adds: no other allow rule, no extra directory, no default mode (bypassPermissions or other).
+  const rendered = JSON.parse(okInside('cat /etc/claude-code/managed-settings.json'));
+  assert.deepEqual(rendered.permissions, { allow: ['Read(//etc/claude-code/.claude/skills/**)'] });
+  const skills = '/etc/claude-code/.claude/skills';
+  const brief = `${skills}/qd-spec-run/references/brief.md`;
+  const read = claudeTool('Read', { file_path: brief });
+  assert.ok(read.ok && read.text.includes("Captain's intent"), read.text);
+  // The mates run in auto mode; read-only shell commands on the folder are allowed by the rule before any classifier.
+  const cat = claudeTool('Bash', { command: `cat ${brief}` }, '--permission-mode', 'auto');
+  assert.ok(cat.ok && cat.text.includes("Captain's intent"), cat.text);
+  const list = claudeTool('Bash', { command: `ls ${skills}` }, '--permission-mode', 'auto');
+  assert.ok(list.ok && list.text.includes('qd-spec-run'), list.text);
+  // Still asked: reads outside the folder, and any write into it.
+  for (const [tool, input] of [
+    ['Read', { file_path: '/opt/qd/fleet/charter.md' }],
+    ['Write', { file_path: `${skills}/qd-spec-run/probe.md`, content: 'x' }],
+    ['Bash', { command: `touch ${skills}/qd-spec-run/probe.md` }],
+  ]) {
+    const r = claudeTool(tool, input);
+    assert.ok(!r.ok && /requested permissions/.test(r.text), `${tool} ${r.text}`);
+  }
+  // In auto mode the rule does not let a write through either.
+  const autoWrite = claudeTool('Write', { file_path: `${skills}/qd-spec-run/probe.md`, content: 'x' }, '--permission-mode', 'auto');
+  assert.ok(!autoWrite.ok, autoWrite.text);
+  okInside(`test ! -e ${skills}/qd-spec-run/probe.md`);
+});
+
 test('git ignores project hooks and fsmonitor: GIT_CONFIG_COUNT entries beat repository config', () => {
   const out = okInside(
     'd=$(mktemp -d) && git init -q "$d" && git -C "$d" config core.hooksPath hooks && git -C "$d" config core.fsmonitor true' +

@@ -53,7 +53,8 @@ RUN git init -q /opt/firstmate \
  && herdr --version && treehouse --version
 
 # Base material, copied as in variants/node/Dockerfile. The Claude policy is the Quarterdeck's own
-# (Base's without allowManagedHooksOnly: the mates' hooks must run).
+# (Base's without allowManagedHooksOnly: the mates' hooks must run; plus one Read allow rule so
+# the mates read the managed skills folder without a prompt, decision 99).
 COPY base/bin/ /usr/local/bin/
 COPY quarterdeck/claude-policy.json /opt/dev-setup/claude-policy.json
 COPY base/codex/config.toml /etc/codex/config.toml
