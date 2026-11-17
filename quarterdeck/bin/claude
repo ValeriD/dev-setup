@@ -2,7 +2,7 @@
 # FirstMate calls Claude unchanged. Only pool launches cross into the project container.
 set -euo pipefail
 cwd=$(pwd -P)
-root=${QD_WORK_ROOT:-/home/valeri/work}
+root=${QD_WORK_ROOT:?QD_WORK_ROOT is not set}
 route=quarterdeck
 container=
 model=

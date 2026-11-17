@@ -40,7 +40,7 @@ Record `$WT` from FirstMate's spawn result and the branch's starting commit. Bef
 
 ## 5. Dispatch the next numbered ticket
 
-Read each ticket in `$WT` in number order. Apply `$S/config/crew-dispatch.json`: a ticket about skills, prompts or agent tools uses Claude Opus; all other tickets use Claude Sonnet. Planning and publish use Sonnet. Keep shared-quota mode and typed resolution off; do not change the rules.
+Read each ticket in `$WT` in number order. Apply `$S/config/crew-dispatch.json`: a ticket about skills, prompts or agent tools uses Claude Opus; all other tickets use Claude Sonnet. Planning and publish use Sonnet. Keep shared-quota mode on (`"shared_quota": true`, so no quota calls) and typed resolution off; do not change the rules.
 
 Record the current HEAD as `$start` before each ticket; set `$NN`, `$ticket` and `$model` from that ticket and rule. Launch exactly one fresh session for it:
 

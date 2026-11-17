@@ -1,6 +1,6 @@
 # 29: Fixes from the branch review: committer identity, quota wording, stale docs, test image switch
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Opus
 **Design slice:** cross-cutting
 
@@ -22,12 +22,12 @@ The review of `main...feat/quarterdeck` (2026-11-16, recorded in PR #1's body) f
 
 ## Acceptance criteria
 
-- [ ] With the identity variables unset on the host and an identity in a test `HOME`'s `.gitconfig`, a stub commit in the project container carries that identity. With the variables set, they win. With neither, start warns by name and still starts.
-- [ ] `qd-spec-run`'s shared-quota sentence agrees with `crew-dispatch.json`, and a test checks that the two agree.
-- [ ] `docs/architecture/quarterdeck.md` no longer calls settled items open. It links ticket 21 for them.
-- [ ] Setting `QD_PROJECT_TEST_IMAGE` from a Herdr pane in a normally started Quarterdeck does not let `qd-project-up` accept an unpinned image. The existing fixture tests still pass.
-- [ ] `.scratch/quarterdeck/your-tasks.md` step 0.1 (identity in `~/.bashrc`) is marked optional.
-- [ ] `npm run test:quarterdeck` passes, followed by `npm run test:cleanup` with no test containers left. The full suite is not run.
+- [x] With the identity variables unset on the host and an identity in a test `HOME`'s `.gitconfig`, a stub commit in the project container carries that identity. With the variables set, they win. With neither, start warns by name and still starts.
+- [x] `qd-spec-run`'s shared-quota sentence agrees with `crew-dispatch.json`, and a test checks that the two agree.
+- [x] `docs/architecture/quarterdeck.md` no longer calls settled items open. It links ticket 21 for them.
+- [x] Setting `QD_PROJECT_TEST_IMAGE` from a Herdr pane in a normally started Quarterdeck does not let `qd-project-up` accept an unpinned image. The existing fixture tests still pass.
+- [x] `.scratch/quarterdeck/your-tasks.md` step 0.1 (identity in `~/.bashrc`) is marked optional.
+- [x] `npm run test:quarterdeck` passes, followed by `npm run test:cleanup` with no test containers left. The full suite is not run.
 
 ## Technical context
 
@@ -43,3 +43,33 @@ The review of `main...feat/quarterdeck` (2026-11-16, recorded in PR #1's body) f
 None.
 
 ## Comments
+
+### Resolution — done (2026-11-17)
+
+Fixed point `59c21e9`. One commit (this one) holds the implementation, review fixes and closing edits.
+
+Built:
+- `quarterdeck/bin/quarterdeck` `fill_identity_args`: each `GIT_AUTHOR_*`/`GIT_COMMITTER_*` that is unset or empty on the host is filled from `git -C / config --get user.name`/`user.email` (only those two values; system and global files, not a repository's). Host variables win. Anything still missing is warned about by name with the `git config --global` fix; start goes on. Values go in as `-e NAME=value`; a missing one is not passed at all.
+- Test-image switch: `qd-entry` (root) writes `/run/quarterdeck-test-run` only when the host command set `QD_RUN_LABEL` (that is, `QUARTERDECK_RUN_LABEL`), and removes it on every start. `qd-project-up` honours `QD_PROJECT_TEST_IMAGE` only while that file is a root-owned regular file. A pane setting both variables in a normally started Quarterdeck still gets "image must be a digest-pinned published Variant". The variable stays the test seam that Errands relies on.
+- `qd-spec-run` now says shared-quota mode stays **on** (no quota calls), matching `crew-dispatch.json`; the config is unchanged. `docs/architecture/quarterdeck.md` links ticket 21 for the settled items (SC-19 narrowing, `/etc/environment` acceptance, decisions 3-5) and no longer calls them TODO or unmet. `PROJECT-CONTAINERS.md`, the design's committer-identity row and `your-tasks.md` step 0.1 (now optional) are updated.
+- Optional nits done: no `/home/valeri/work` fallback in `bin/claude` and `qd-project-up` (they require `QD_WORK_ROOT`, which the host always sets); `qd-publish` reads the title line with `sed -n 1p` (not `head` under pipefail). The launcher's marker removal before `exec` is not changed.
+
+Tests (`tests/quarterdeck.test.mjs`): the shared `quarterdeck()` helper now runs with a test `HOME` whose `.gitconfig` differs from the variables. Author variables are set, committer name is empty and committer email unset. The existing launcher stub commit, made inside the project container, must carry `Host Author <author@…>|Config Identity <config@…>`, so variables win and empty and unset ones are filled. The manual-start test runs with no identity anywhere: it asserts the named warning, a successful start and no `GIT_*` in the container env. A new static test checks that the skill's shared-quota sentence agrees with the config. A new test proves the marker is root-owned and that `node` cannot create it. With the marker, the test image passes the image check (the run is then refused on `runArgs`, so no container is made). With the marker moved aside, the same pane command is refused as unpinned.
+
+Validation: `npm run test:quarterdeck` passed twice, 37/37 (before and after review fixes), each followed by `npm run test:cleanup` with 0 test containers left. The full suite was not run.
+
+Not checked / risk: "normally started" is simulated by moving the root-owned marker aside in a labelled test container. Starting an unlabelled container would break the label-only teardown rule. That a host start without `QUARTERDECK_RUN_LABEL` writes no marker rests on `qd-entry`'s one-line condition and the host passing `QD_RUN_LABEL=` empty, not on a test. In a test-started Quarterdeck any pane can still select a test image (test only, by design).
+
+Review (fresh Standards, Design, Spec reviewers):
+- Standards: `identity()` hides that it fills a global. **Fixed**: renamed `fill_identity_args`.
+- Standards: the marker path is repeated in bash, Node and the test. **Declined**: the copies are in two languages and a test; a shared constant would cost more than the duplicate.
+- Standards: the quota test's off-branch is dead and too weak. **Fixed**: it now asserts the config is `true` and the sentence says "on" and "no quota calls".
+- Standards: the warning regex pins the message's order. **Fixed**: it now checks each name and command separately.
+- Standards: the positive path is coupled to `qd-project-up`'s check order. **Declined**: this is commented, and it avoids creating a container.
+- Standards: an assert in `finally` could hide the original failure. **Fixed**: the restore result is asserted after the `try`.
+- Design: the design row for committer identity was stale. **Fixed** (design table row updated).
+- Design: the helper's `HOME` change reaches every test. **Declined**: it is intended, `DOCKER_CONFIG` is kept, and both runs passed.
+- Spec: the test-run evidence was missing. **Fixed**: it is recorded here.
+- Spec: "normally started" is simulated. **Declined**: an unlabelled container would break the teardown rule; see the risk above.
+- Spec: whether the stub commit runs in the project container was unconfirmed. **Declined** as a non-issue: the stub is installed into the project container (`cid`) and the launcher execs there.
+

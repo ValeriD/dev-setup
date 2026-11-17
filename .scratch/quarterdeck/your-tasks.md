@@ -12,7 +12,7 @@ Paths: the work root is `~/work`, which is `/home/valeri/work` both on the host 
 
 ## 0. Once, before anything else
 
-1. **Set your committer identity in the environment.** The Quarterdeck takes it from environment variables only, not from `~/.gitconfig` (this is an open review finding). Add the following to `~/.bashrc` and open a new terminal:
+1. **Optional: set your committer identity in the environment.** Since ticket 29 the Quarterdeck fills any unset identity variable from your host `git config user.name` and `user.email`, so you can skip this step when those are set in `~/.gitconfig`; `quarterdeck` warns by name at start when neither source has them. Set the variables only to use a different identity in the Quarterdeck. Add the following to `~/.bashrc` and open a new terminal:
    ```sh
    export GIT_AUTHOR_NAME="ValeriD" GIT_AUTHOR_EMAIL="<your email>"
    export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"

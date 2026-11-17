@@ -32,10 +32,25 @@ const arg = (n) => dockerfile.match(new RegExp(`^ARG ${n}=(\\S+)`, 'm'))[1];
 const CLAUDE = `dummy-claude-${id}`;
 const GITHUB = `dummy-github-${id}$(touch /tmp/pwned-${id})\`x\`$HOME`;
 const sha = (v) => createHash('sha256').update(`${v}\n`).digest('hex');
+// Commit identity (ticket 29): the host command fills an unset or empty identity variable from the host's git config.
+// The tests give the command a HOME whose .gitconfig differs from the variables they set, and a HOME with neither.
+const IDENTITY = { name: 'Config Identity', email: 'config@example.invalid' };
+let identityHome;
+let emptyHome;
+const hostEnv = (home, identity) => {
+  const env = { ...process.env, ...identity, HOME: home, GIT_CONFIG_NOSYSTEM: '1', DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? join(process.env.HOME, '.docker') };
+  for (const k of ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'XDG_CONFIG_HOME', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']) {
+    if (!(k in identity)) delete env[k];
+  }
+  return env;
+};
 let work;
 let secretsFile;
 before(() => {
   work = projectDir('qd-work-');
+  identityHome = projectDir('qd-identity-');
+  writeFileSync(join(identityHome, '.gitconfig'), `[user]\n\tname = ${IDENTITY.name}\n\temail = ${IDENTITY.email}\n`);
+  emptyHome = projectDir('qd-no-identity-');
   secretsFile = join(projectDir('qd-secrets-'), 'secrets.env');
   writeFileSync(secretsFile, `# dummy\r\nCLAUDE_CODE_OAUTH_TOKEN=${CLAUDE}\nQUARTERDECK_GITHUB_TOKEN="${GITHUB}"\nNOT_DECLARED=dummy-other-${id}\nexport JUNK\n`, { mode: 0o600 });
   // The container user is uid 1000: on another host uid it cannot read a 0600 file. The command warns about the mode and still mounts it.
@@ -69,15 +84,15 @@ after(() => {
   run('docker', ['rmi', image]);
   rmSync(work, { recursive: true, force: true });
   rmSync(join(secretsFile, '..'), { recursive: true, force: true });
+  for (const d of [identityHome, emptyHome]) rmSync(d, { recursive: true, force: true });
 });
 
 // The host command with the test's name, image, work root and run label. Attach runs a probe instead of the TUI (no terminal here).
 const quarterdeck = (...args) =>
   run(COMMAND, args, {
     env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'Host Author', GIT_AUTHOR_EMAIL: 'author@example.invalid',
-      GIT_COMMITTER_NAME: 'Host Committer', GIT_COMMITTER_EMAIL: 'committer@example.invalid',
+      // Author variables set (they win over the .gitconfig); committer name empty and email unset (filled from it).
+      ...hostEnv(identityHome, { GIT_AUTHOR_NAME: 'Host Author', GIT_AUTHOR_EMAIL: 'author@example.invalid', GIT_COMMITTER_NAME: '' }),
       QUARTERDECK_NAME: name,
       QUARTERDECK_IMAGE: image,
       QUARTERDECK_WORK_ROOT: work,
@@ -314,7 +329,7 @@ if (!fs.existsSync('launcher-commit')) {
   assert.equal(result.env.COMPACT_ADVISER_DISABLE, '1');
   assert.equal(result.env.TRACEPARENT, 'trace');
   for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'DEV_SETUP_GITHUB_PAT']) assert.equal(result.env[key], undefined);
-  assert.equal(probe(`git -C ${wt} log -1 --format='%an <%ae>|%cn <%ce>'`).out.trim(), 'Host Author <author@example.invalid>|Host Committer <committer@example.invalid>');
+  assert.equal(probe(`git -C ${wt} log -1 --format='%an <%ae>|%cn <%ce>'`).out.trim(), `Host Author <author@example.invalid>|${IDENTITY.name} <${IDENTITY.email}>`, 'set variables win; unset or empty ones come from the host .gitconfig');
   const config = () => JSON.parse(probe('cat "$CLAUDE_CONFIG_DIR/.claude.json"').out);
   assert.equal(config().hasCompletedOnboarding, true);
   assert.deepEqual(config().projects, { [wt]: { hasTrustDialogAccepted: true } });
@@ -860,8 +875,9 @@ test('First Mate: manual start seeds without an agent or attachment, then normal
     mkdirSync(d, { recursive: true });
     if (process.getuid?.() !== 1000) chmodSync(d, 0o777);
   }
+  // No identity anywhere on the host: start warns by name and still starts (ticket 29).
   const command = (...args) => run(COMMAND, args, { env: {
-    ...process.env, QUARTERDECK_NAME: manualName, QUARTERDECK_IMAGE: stubImage,
+    ...hostEnv(emptyHome, {}), QUARTERDECK_NAME: manualName, QUARTERDECK_IMAGE: stubImage,
     QUARTERDECK_WORK_ROOT: manualWork, QUARTERDECK_RUN_LABEL: runLabel,
     QUARTERDECK_SECRETS: secretsFile,
     QUARTERDECK_ATTACH_CMD: 'touch /tmp/unexpected-attach',
@@ -872,7 +888,12 @@ test('First Mate: manual start seeds without an agent or attachment, then normal
   const cid = () => run('docker', ['inspect', '--format', '{{.Id}}', manualName]).out.trim();
   const started = (...args) => { const r = command(...args); assert.equal(r.code, 0, r.out + r.err); };
   try {
-    started('start', '--no-first-mate');
+    const fresh = command('start', '--no-first-mate');
+    assert.equal(fresh.code, 0, fresh.out + fresh.err);
+    const warning = fresh.err.split('\n').find(l => l.includes('WARNING: no commit identity'));
+    assert.ok(warning, fresh.err);
+    for (const v of ['GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL', 'git config --global user.name', 'git config --global user.email']) assert.ok(warning.includes(v), `${v} named: ${warning}`);
+    assert.equal(JSON.parse(run('docker', ['inspect', manualName]).out)[0].Config.Env.some(v => /^GIT_(AUTHOR|COMMITTER)_/.test(v)), false);
     const first = cid();
     assert.equal(count(), 0);
     good('test ! -e /tmp/stub-claude.out && test ! -e /tmp/unexpected-attach');
@@ -982,6 +1003,16 @@ if qd-first-mate --seed-only; then echo 'invalid trust config accepted' >&2; exi
 NODE
 `]);
   assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+});
+
+test('qd-spec-run keeps shared-quota mode as the shipped crew-dispatch.json sets it (no quota calls)', () => {
+  const dispatch = JSON.parse(readFileSync(join(REPO, 'quarterdeck/fleet/config/crew-dispatch.json'), 'utf8'));
+  const skill = readFileSync(join(REPO, 'quarterdeck/skills/qd-spec-run/SKILL.md'), 'utf8');
+  const sentences = skill.split(/(?<=\.)\s+/).filter(v => /shared-quota/.test(v));
+  assert.equal(sentences.length, 1, 'one sentence states the shared-quota mode');
+  assert.equal(dispatch.shared_quota, true, 'the shipped config keeps shared-quota mode on');
+  assert.match(sentences[0], /shared-quota mode on\b/, sentences[0]);
+  assert.match(sentences[0], /no quota calls/, sentences[0]);
 });
 
 test('First Mate: the shipped configuration is in the home and no dispatch variable is in .env (SC-06)', () => {
@@ -1154,3 +1185,33 @@ test('ticket loop failure: preserve one attempt, retry once, stop without push (
 
 test('qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)', () => testProjectFixture());
 test('qd-project-up extensions fixture: creation-only read token, helper and persistence checks (SC-16, SC-19)', t => testProjectFixture(`dummy-extensions-${id}`, t));
+
+// Ticket 29: the test-image switch needs the root-owned marker qd-entry writes only for a host start with a run label.
+// Without it (a normally started Quarterdeck), a pane setting QD_PROJECT_TEST_IMAGE still gets the pinned-image refusal.
+test('QD_PROJECT_TEST_IMAGE set from a Herdr pane is ignored unless the Quarterdeck was started by the tests', () => {
+  const started = quarterdeck();
+  assert.equal(started.code, 0, started.err);
+  const home = `${work}/fleet/unpinned`;
+  const clone = `${home}/projects/unpinned`;
+  const origin = `${work}/unpinned-origin.git`;
+  okInside(`rm -rf ${home} ${origin}; mkdir -p ${clone}/.devcontainer; git init -q --bare -b main ${origin}; git init -q -b main ${clone}`);
+  // Unsupported runArgs: passing the image check fails on the next one, so no container is ever created.
+  put(`${clone}/.devcontainer/devcontainer.json`, JSON.stringify({ image: IMAGE, runArgs: ['--privileged'] }));
+  okInside(`cd ${clone}; git add .; git -c user.name=t -c user.email=t@t commit -qm init; git remote add origin ${origin}; git push -q origin main`);
+  const marker = '/run/quarterdeck-test-run';
+  assert.equal(okInside(`stat -c %u ${marker}`).trim(), '0', 'the test-started marker is root-owned');
+  const up = () => inPane(`cd ${home}; QD_PROJECT_TEST_IMAGE=${IMAGE} QD_RUN_LABEL=${runLabel} qd-project-up ${home} unpinned; echo exit=$?`);
+  assert.match(up(), /unsupported runArgs[\s\S]*exit=1/, 'test-started: the test image passes the image check');
+  const root = (s) => run('docker', ['exec', '-u', 'root', name, 'sh', '-c', s]);
+  assert.equal(root(`mv ${marker} ${marker}.saved`).code, 0);
+  let restored;
+  try {
+    assert.notEqual(inside(`touch ${marker}`).code, 0, 'node cannot create the marker');
+    const out = up();
+    assert.match(out, /image must be a digest-pinned published Variant[\s\S]*exit=1/, out);
+  } finally {
+    restored = root(`mv ${marker}.saved ${marker}`); // asserted below, so a restore failure never hides the first one
+  }
+  assert.equal(restored.code, 0, restored.err);
+  assert.equal(run('docker', ['ps', '-aq', '--filter', 'label=quarterdeck.project=unpinned']).out.trim(), '');
+});

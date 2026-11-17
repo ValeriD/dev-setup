@@ -14,6 +14,12 @@ export DEV_SETUP_WORKSPACE=${DEV_SETUP_WORKSPACE:-/opt/qd/empty}
 sh /usr/local/share/egress/start.sh
 [ -e /run/egress/ready ] || { echo "qd-entry: egress not ready, stopping" >&2; exit 1; }
 
+# Test-started marker: only the host command sets QD_RUN_LABEL (from QUARTERDECK_RUN_LABEL). qd-project-up
+# honours its test-image switch only while this root-owned file exists, never from a variable alone, so a
+# process in a normally started Quarterdeck cannot select an unpinned image.
+rm -f /run/quarterdeck-test-run
+[ -z "${QD_RUN_LABEL:-}" ] || touch /run/quarterdeck-test-run
+
 drop() { setpriv --reuid node --regid node --init-groups env HOME=/home/node USER=node LOGNAME=node "$@"; }
 
 rm -f /run/quarterdeck-ready

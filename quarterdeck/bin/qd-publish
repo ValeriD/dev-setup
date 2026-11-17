@@ -39,7 +39,7 @@ git rev-parse --verify --quiet "$ref^{commit}" >/dev/null || { echo "qd-publish:
 issues=.scratch/$slug/issues
 body=
 while IFS= read -r path; do
-  title=$(git show "$ref:$path" | head -n 1)
+  title=$(git show "$ref:$path" | sed -n 1p) # sed reads it all: head would SIGPIPE git under pipefail
   title=${title#\# }
   body+="- $title"$'\n'
 done < <(git ls-tree --name-only "$ref" -- "$issues/" | grep -E '/[0-9]+[^/]*\.md$' | LC_ALL=C sort -V)

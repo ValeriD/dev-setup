@@ -18,6 +18,10 @@
 # Overrides (the tests use them): QUARTERDECK_NAME, QUARTERDECK_IMAGE, QUARTERDECK_WORK_ROOT,
 # QUARTERDECK_RUN_LABEL (key=value added to everything created), QUARTERDECK_ATTACH_CMD (default: herdr),
 # QUARTERDECK_DOCKER_SOCKET (the host socket the proxy mounts read-only, default /var/run/docker.sock).
+# QUARTERDECK_RUN_LABEL also marks the container as test-started: only then does qd-project-up honour its
+# test-image switch (QD_PROJECT_TEST_IMAGE).
+# Commit identity: GIT_AUTHOR_* and GIT_COMMITTER_* from the host, each unset or empty one filled from the
+# host's git config user.name / user.email; still missing is warned about by name at start.
 # --no-first-mate refuses a running container with a firstmate workspace; it never stops existing sessions.
 # Docker: the Quarterdeck never sees the host socket. A socket proxy (quarterdeck/docker-proxy.conf: pin and
 # allowed list) mounts it read-only and listens on a Unix socket in the volume <name>-docker, which the
@@ -87,6 +91,23 @@ proxy_up() {
     -allowGET "$ALLOW_GET" -allowPOST "$ALLOW_POST" -allowDELETE "$ALLOW_DELETE" >/dev/null
 }
 
+# Commit identity for the container, as -e NAME=value. A host variable that is set and not empty wins; an
+# unset or empty one is filled from the host's `git config user.name` / `user.email` (only those two values
+# are read, from the system and global files, not a repository's). Whatever is still missing is warned
+# about by name; start goes on, and commits in the Quarterdeck and project containers fail until it is set.
+fill_identity_args() {
+  local git_name git_email var value missing=()
+  git_name=$(git -C / config --get user.name 2>/dev/null || true)
+  git_email=$(git -C / config --get user.email 2>/dev/null || true)
+  identity_args=()
+  for var in GIT_AUTHOR_NAME GIT_COMMITTER_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL; do
+    value=${!var:-}
+    if [ -z "$value" ]; then case $var in *_NAME) value=$git_name ;; *) value=$git_email ;; esac; fi
+    if [ -n "$value" ]; then identity_args+=(-e "$var=$value"); else missing+=("$var"); fi
+  done
+  [ "${#missing[@]}" -eq 0 ] || echo "quarterdeck: WARNING: no commit identity for ${missing[*]}: neither the variable nor git config user.name/user.email is set on the host. Set them with \`git config --global user.name \"Your Name\"\` and \`git config --global user.email you@example.com\` (or export the variables), then \`quarterdeck stop\` and \`quarterdeck\`. Starting without it; commits will fail." >&2
+}
+
 # Warnings the container printed at start (missing secret names), shown to the user; never values.
 warnings() { docker logs "$name" 2>&1 | grep '^dev-setup: WARNING' >&2 || true; }
 
@@ -119,6 +140,7 @@ start() {
   else
     echo "quarterdeck: WARNING: no token file at $secrets (set QUARTERDECK_SECRETS); starting without tokens" >&2
   fi
+  fill_identity_args
   # Remove an exited container of ours so the name is free; never touches an unlabelled one.
   mine | xargs -r docker rm -f >/dev/null
   proxy_up
@@ -133,7 +155,7 @@ start() {
     -e "QD_FIRST_MATE=$first_mate" \
     -v "$work/quarterdeck/claude:/home/node/.claude" \
     -v "$work/pool:/home/node/.treehouse" \
-    -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL \
+    "${identity_args[@]+"${identity_args[@]}"}" \
     ${mount[@]+"${mount[@]}"} \
     "$image" >/dev/null
   wait_ready

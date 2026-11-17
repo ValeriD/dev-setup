@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // qd-project-up <home> <project>: main-branch config -> devcontainer CLI -> socket proxy.
 // Features are trusted executable project input, not sandboxed by this renderer (security-review 01).
-// QD_PROJECT_TEST_IMAGE permits exactly one local fixture image instead of the published digest.
+// QD_PROJECT_TEST_IMAGE permits exactly one local fixture image instead of the published digest, and only in a
+// Quarterdeck the test suite started (root-owned /run/quarterdeck-test-run, written by qd-entry from QD_RUN_LABEL).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,11 +10,20 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { parse } from 'jsonc-parser';
 
+const TEST_RUN = '/run/quarterdeck-test-run';
+function testImage() {
+  const wanted = process.env.QD_PROJECT_TEST_IMAGE;
+  if (!wanted) return undefined;
+  const marker = fs.lstatSync(TEST_RUN, { throwIfNoEntry: false });
+  return marker?.isFile() && marker.uid === 0 ? wanted : undefined;
+}
+
 function main() {
   const [homeArg, project, ...rest] = process.argv.slice(2);
   if (!homeArg || !project || rest.length || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(project)) throw Error('usage: qd-project-up <home> <project> (plain project name)');
   const home = fs.realpathSync(homeArg);
-  const root = fs.realpathSync(process.env.QD_WORK_ROOT || '/home/valeri/work');
+  if (!process.env.QD_WORK_ROOT) throw Error('QD_WORK_ROOT is not set');
+  const root = fs.realpathSync(process.env.QD_WORK_ROOT);
   if (!home.startsWith(root + '/')) throw Error('home must be under QD_WORK_ROOT');
   for (const p of [home, root]) if (/[,$\n\r]/.test(p)) throw Error('unsupported mount path');
   const clone = path.join(home, 'projects', project);
@@ -28,7 +38,7 @@ function main() {
   const errors = [];
   const source = parse(git('show', `${tree}:devcontainer.json`).toString(), errors, { allowTrailingComma: true });
   if (errors.length || !source || typeof source !== 'object' || Array.isArray(source)) throw Error('invalid devcontainer JSONC');
-  if (typeof source.image !== 'string' || (!/^ghcr\.io\/valerid\/dev-setup\/[a-z0-9-]+@sha256:[a-f0-9]{64}$/.test(source.image) && source.image !== process.env.QD_PROJECT_TEST_IMAGE)) throw Error('image must be a digest-pinned published Variant');
+  if (typeof source.image !== 'string' || (!/^ghcr\.io\/valerid\/dev-setup\/[a-z0-9-]+@sha256:[a-f0-9]{64}$/.test(source.image) && source.image !== testImage())) throw Error('image must be a digest-pinned published Variant');
   const runArgs = source.runArgs ?? [];
   if (!Array.isArray(runArgs) || runArgs.some(v => typeof v !== 'string' || !/^(--cap-drop=ALL|--memory=[1-9][0-9]*[kmg]?|--pids-limit=[1-9][0-9]*)$/.test(v))) throw Error('unsupported runArgs; only Template capability-drop, memory and PID limits are allowed');
   const containerEnv = {};
