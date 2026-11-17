@@ -330,3 +330,12 @@ Decided by the user during tasks B and C of `your-tasks.md`.
 97. **A Crewmate's question is answered to that Crewmate.** This amends decision 43 for questions only. After the user answers, the Second Mate sends the answer to the Crewmate that asked, if it is still running. If it has exited, the same record is relaunched in the same worktree and branch with the answer as its note. The answer never starts a new Spec Run. A failed ticket still ends the run after its one retry. Ticket 28.
 98. **Planning stays with a Crewmate** in the project container (decision 39 confirmed). The mates never write a project's files, and the project's planning skills exist only in its container.
 99. **Mates read the Quarterdeck's own skill files without a permission prompt.** Ticket 27.
+
+## Round 14: working in Herdr panes (2026-11-17)
+
+Found first: Herdr panes in the Quarterdeck run `/bin/sh`, which is dash, because `SHELL` is unset. The user's host terminal is GNOME Terminal, which ignores OSC 52, so Herdr's copy never reaches the clipboard.
+
+100. **Herdr panes run bash**, so they have history, line editing and completion. Ticket 30.
+101. **Shell history is not persistent.** It lives in the container and goes when the Quarterdeck stops. Within one run, every pane shares it, with commands written as soon as they run, duplicates removed, and commands starting with a space not saved. Ticket 30.
+102. **Pager in panes is `less -FRX`**: short output is printed without a pager and stays on screen, and `q` quits long output. If the user gets stuck again, switch to `cat`. Ticket 30.
+103. **Copying is the host terminal's job.** The Quarterdeck gets no access to the host clipboard. Herdr's copy needs a terminal with OSC 52, which GNOME Terminal is not (kitty is). Until then, Shift + mouse drag works. This is the user's choice of laptop app, and no ticket follows from it.
