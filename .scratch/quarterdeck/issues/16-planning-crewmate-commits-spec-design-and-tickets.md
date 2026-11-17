@@ -21,8 +21,8 @@ The Second Mate is steered by hand with one handoff (grilling decisions verbatim
 ## Acceptance criteria
 
 - [ ] After one handoff to pomoplan's Second Mate, the Second Mate's clone has `<prefix><slug>` with exactly one commit on top of `origin/main`, containing `.scratch/<slug>/spec.md`, `design.md` and `issues/NN-*.md`; the status line `plan committed <sha>; <N> tickets` is present; nothing was pushed.
-- [ ] `launch.log` shows the planning session on Sonnet, launched through the container route.
-- [ ] A handoff that leaves a needed decision open produces a `needs-decision` line and no commit, and the Second Mate stops without choosing for the user (SC-12 precursor).
+- [x] `launch.log` shows the planning session on Sonnet, launched through the container route.
+- [x] A handoff that leaves a needed decision open produces a `needs-decision` line and no commit, and the Second Mate stops without choosing for the user (SC-12 precursor).
 - [ ] The Second Mate wrote the Brief from `references/brief.md` and the plan session did exactly the one job named by the Brief (plan), nothing else.
 - [ ] The `qd-first-mate` and `qd-spec-run` text (ticket 10) is corrected where this run showed it wrong; each correction is listed in a comment on this file.
 - [ ] The SC-planning row in `quarterdeck/CHECKLIST.md` is run and noted.
@@ -108,3 +108,19 @@ Recorded runtime/security blockers and missing authorized inputs remain open, as
 **Summary:** 0 new spec findings; ticket 16’s six acceptance criteria remain open.
 
 **Disposition:** no findings to fix or decline. The acknowledged acceptance gap remains blocked, not waived. Ticket stays `ready-for-human`, with every criterion unchecked. Only planning-validation documentation was built; no runtime/skill correction was justified without the real run. Validation: Quarterdeck suite only (31 pass, 1 known failing TODO, exit 0); broader regression coverage intentionally not run. Remaining blockers and human validation instructions are recorded above and in `quarterdeck/CHECKLIST.md`. No other implementation ticket was started.
+
+### Human run, task C — 2026-11-17
+
+Run by the user with the real First Mate. Supervision host errors are ticket 26.
+
+- **Case 1 was not fully decided, so the completed handoff is still unobserved.** The request came from a suggestion by the assistant. It targeted the header in `src/components/TasksView.tsx`, which no route mounts: pomoplan's `ARCHITECTURE.md` calls it legacy, and its "today" is UTC, not local. The planning Crewmate (worktree 2, Sonnet, project route) correctly wrote `needs-decision` with options A/B/C and stopped, with no commit.
+- **Case 1's follow-up:** after the user answered, the Second Mate started a new Spec Run, `tasks-today-count-backlog` (worktree 3, branch `feat/tasks-today-count-backlog` at `c22995a`). That Crewmate again stopped with `needs-decision`, asking four questions about the live `/backlog` (what "tasks today" means, completed, pomodoro count, Europe/Sofia versus browser date). No commit. The report has `Question:` lines. **SC-12 precursor: pass, twice.** No guess was made, and nothing was pushed.
+- `launch.log`: both planning sessions ran on Sonnet through the project route.
+- The user's observations:
+  1. The Second Mate needed permission to read outside its working folder: `qd-spec-run/references/`. A prompt means the run was not unattended. This needs a new ticket.
+  2. Herdr showed agents as done (a tick) while they were still working. This is probably the same cause as ticket 14's finding that the busy and turn-end hooks do not fire (ticket 15).
+  3. After the question, the Second Mate routed it to the First Mate, and then started a new Crewmate instead of giving the answer to the one that asked. The cause is `qd-spec-run` step 10 ("a `needs-decision` ... no further relaunch"), which overrides FirstMate's own rule that the parent replies to a waiting worker. This needs a user decision (it touches D43).
+  4. The plans were written by Crewmates, not by the mates. This is as designed (D39, this ticket; FirstMate's rule that a mate never writes to a project). Recorded because the user raised it.
+- Not yet run: case 1 with a really decided request (one commit with spec, design and issues; `plan committed` status), and the case 2 weekly-goal request.
+
+Ticked from this run: the `launch.log` criterion and the SC-12 precursor criterion.

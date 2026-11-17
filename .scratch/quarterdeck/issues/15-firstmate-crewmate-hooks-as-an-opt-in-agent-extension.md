@@ -1,6 +1,6 @@
 # 15: FirstMate's Crewmate hooks reach a Quarterdeck-created container as an opt-in Agent Extension
 
-**Status:** needs-info
+**Status:** ready-for-agent
 **Model:** Opus (the ticket is about an agent hook)
 **Design slice:** 3 (Hardened project container), design open question 3
 
@@ -75,3 +75,8 @@ No new distinct security concern was identified; existing concerns are not dupli
 Commit `9689907` records the blocker and validation handoff only. Three fresh independent `openai-codex/gpt-6-astra` agents with thinking `low` reviewed `952cbd8bf25bd224d232fbbd026aaac5ef6a4574...9689907`, one each for Standards, Design and Spec. All received the Quarterdeck-only test restriction. Standards: 0 findings; Design: 0 findings; Spec: 0 findings. No findings require fixing or declining. Reviewers ran no tests. Broader regression coverage was intentionally not run.
 
 Ticket 15 remains open: actual ticket 14 hook results are still missing, so its mandatory implementation condition cannot be evaluated. No runtime implementation or acceptance completion is claimed. Resume using the validation instructions above once those observations exist.
+
+### Evidence from the manual runs — 2026-11-17
+
+- **Ticket 14 (task B):** the busy and turn-end hooks did not fire in the project container. `state/qd14-gate.busy-state` holds only the spawn line, `seq=1 source=fm-spawn`, and there is no `.turn-ended` file. Mates in the Quarterdeck do fire them (`sm-pomoplan.busy-state`: `source=claude-hook event=stop`). By this ticket's first step, the hook is needed: build it.
+- **Ticket 16 (task C):** the user saw Herdr show project Crewmates as done (a tick) while they were still working. This is likely the same missing busy signal. The user's re-run after this ticket checks it.

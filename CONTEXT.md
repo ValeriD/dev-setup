@@ -97,3 +97,11 @@ _Avoid_: Researcher, explorer
 **Idea**:
 Something you thought of for a project that has had no grilling yet. It is kept on hold with the First Mate and is never started until you grill it.
 _Avoid_: Backlog item, todo, ticket
+
+**Project**:
+One area of your work with its own folder and its own container, with or without code: a client, an audit, the shop, a course. It becomes a Consuming Project when its container comes from a Variant.
+_Avoid_: Workspace, area, repo
+
+**Errand**:
+One piece of work the First Mate hands to a Crewmate in a Project without a Spec, ending in changed files and a short report that you accept or send back.
+_Avoid_: Task, job, chore

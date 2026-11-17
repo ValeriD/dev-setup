@@ -186,3 +186,147 @@ These override the design where they differ.
 Added to Later:
 
 - **Protect the worktree's link file** from being redirected by a Crewmate (decision 49).
+
+## Round 8: after the MVP (2026-11-14)
+
+This round plans what follows the MVP. Nothing here changes the MVP's tickets.
+
+Decided:
+
+51. **Hardening first.** The custom socket proxy and the worktree link fix (decision 49) are the first feature after the MVP, ahead of new capability.
+52. **Git gate covers git and the GitHub API**, with a per-repo allow list, so no agent container holds a GitHub token. It also carries the skills token and MCP server tokens, which ends the compromise in ticket 20. Second feature.
+53. **No cap on projects running at once.** You manage the load yourself. Two specs in parallel on one project stays later.
+54. **Restart, pause and resume are one mechanism**: continue from the first ticket without a commit. Comes right after several projects.
+55. **Pi is not deferred until a quota problem.** You run more than one subscription and want Pi in from the start. Replaces the Later entry's timing. Exact place in the order: open.
+56. **A project does not have to use Spec Runs.** A project is a container with the skills you picked for it. You choose per piece of work between three ways of using it: a Spec Run through the mates; connecting to the container directly with no Quarterdeck involved (decision 45); or a Herdr session on it where you manage the agents yourself. Non-coding work (school materials, content) is such a project in a light container.
+57. **Skill library in the Quarterdeck.** You pick skills, your own or downloaded, and attach them per project so each project gets only what it needs. How this relates to Presets and Agent Extensions: open.
+58. **Backup** is planned later. **Rootless Docker** is last, together with the uid-1000 limit.
+59. **Pi comes after the MVP is done**, as the next feature. It is for Codex (ChatGPT subscription) agents for now, and it is not limited to Crewmates: any role may run on it.
+60. **The skill library is a folder in the work root**, reachable from inside the Quarterdeck. It is not the same thing as the Presets in this repo. Layout, how skills are attached, and who may write to it: open.
+61. **One clone per project.** Crewmates work in worktrees of it and the main folder stays free for you. Merges are resolved when they come up. This rejects the two-clone proposal.
+62. **A project without Spec Runs has no Second Mate.** Creating a project is a folder, a container and its skills. A Second Mate appears on the first Spec Run. To be adjusted as we learn.
+
+Facts read from the FirstMate source at `427056c` for decision 61:
+
+- `bin/fm-home-seed.sh` `clone_project` accepts a folder that already exists at `<home>/projects/<name>` when it is a git repo whose origin matches. So one clone is possible without editing the fork.
+- `bin/fm-fleet-sync.sh` acts on that clone's main folder: it fetches, fast-forwards the default branch, deletes local branches that are already merged, and can check out the default branch when the folder is clean and its branch is merged. It checks for uncommitted changes first.
+- FirstMate lists `codex`, `pi` and `omp` among its harness adapters, and passes Pi a Codex effort setting.
+63. **One Herdr, one container per project.** A command (working name `qd-open <project>`) opens a Herdr workspace in the Quarterdeck whose panes run inside that project's container. No Herdr in project containers. The same container serves Spec Runs, your own Herdr session and a direct connection. `/workspace` is your main folder and Spec Run worktrees are mounted beside it. This closes decision 46.
+64. **Pi login storage is not decided.** You want more research first.
+65. **The library is not a folder of checkouts.** You do not want to download every skill, track it and pull its updates. What a library entry is: open.
+
+Still unanswered from this round: whether FirstMate's sync may act on your main folder; whether the library is skills only; who may write to the library.
+66. **The skill library is withdrawn** (decisions 57, 60 and 65). You will work the idea out before it comes back. Its open questions are dropped with it.
+67. **Direction for the Quarterdeck: like Rex from the first video, with the First Mate as the main orchestrator.** What that adds beyond the MVP: open.
+
+## After the MVP: features taken from `helm-architecture.html` (Draft 2), 2026-11-14
+
+Each item is in the architecture page and not in the MVP. "Helm" on the page is the Quarterdeck.
+
+Security
+- A1 **Git gate.** Its own container. Holds the GitHub token, allows listed repos and never `main`, adds the token to outgoing git traffic. After it, no agent can read the GitHub token (MVP: Quarterdeck panes hold it).
+- A2 **MCP server tokens through the gate** for HTTP servers; by name otherwise.
+- A3 **Socket proxy rules.** Only labelled containers and only mounts under the work root (MVP: an endpoint allow list only).
+- A4 **Rootless Docker**, with the page's six steps and five checks. Last.
+
+Agents and scale
+- A5 **Pi as an agent** in project containers, with its provider on the Egress Allowlist. Next after the MVP (decision 59).
+- A6 **OMP as an agent**, same shape.
+- A7 **Pi and OMP logins**: one login volume per container; open whether a new container is seeded from the Quarterdeck's login. Needs research (decision 64).
+- A8 **Several projects at once**, one Second Mate each, each with its own home and its own egress list. No cap (decision 53).
+- A9 **Two specs at once on one project**, each in its own worktree, possibly on different agents.
+- A10 **Restart.** Sessions end when the Quarterdeck restarts and are resumed from the mates' state on disk (decision 54 joins this with pause and resume).
+
+The Quarterdeck as your own workplace
+- A11 **The Quarterdeck's own folder** in the work root (`helm/` on the page): school, writing, other work. It reads and writes inside the work root and uses skills for non-project work. No yolo.
+- A12 **All your skills in the Quarterdeck** (MVP: its extension list is empty).
+- A13 **Agent memory and session history kept in the work root**, one folder per container (`memory/<container>/`), so it is backed up.
+
+Workflow
+- A14 **Review gate.** Open on the page: a code review after each ticket, or once per spec before the PR (MVP: the ticket's own Crewmate reviews; passing checks open the PR).
+- A15 **GitHub Issues as the tracker.** The mate fetches the issue in the Quarterdeck, so project containers still need no token.
+- A16 **Backup** of the work root: tool, target, what it skips. Planned later (decision 58).
+
+Added by the grilling, not on the page
+- B1 Worktree link fix (decision 49). B2 Pause and resume (43, 54). B3 Using a project without the mates: a direct connection, or your own Herdr session through `qd-open` (56, 63). B4 Ideas held in the First Mate's backlog (27). B5 Notifications when a report waits. B6 Quota-aware model rules. B7 Moving existing projects into the work root. B8 The uid-1000 limit. B9 Skill library (withdrawn, decision 66).
+
+## Round 9: what the workplace is for (2026-11-14)
+
+Context you gave: you are a security researcher (manual and AI audits), a freelance developer, you run a shop selling physical products, and you teach. Around these you do marketing, research, SEO, content and sales. Pains, in your order: babysitting agents is what kills your capacity; keeping track of everything across areas is second. You also work in the workplace yourself, and nothing should be installed on the host.
+
+Decided:
+
+68. **Every area of work is a project with its own container**: each client, each audit, the shop, teaching, marketing. Full isolation between them. This makes decision 56 the centre of the design, not a side feature.
+69. **The Quarterdeck is the control room only.** Non-code work is not done inside it. This replaces architecture item A11 (the Quarterdeck's own folder for school and writing) and round-1 questions about a `desk/` folder and own-work tabs.
+70. **Agents do not act in outside systems for now.** They prepare work and you publish it. When you allow one, its tool and credential go into that project's container only, never the Quarterdeck.
+
+Open: how the First Mate hands non-code work to a project (FirstMate's unit is a branch in a git repo, and a Second Mate refuses a project with no remote); how tracking across areas works; where this sits in the order relative to Pi.
+71. **What babysitting is:** mostly quality (the agent says done and you have to check and send it back) and questions (it stops because it is unsure what you meant). The answer is the Spec Run's pattern everywhere: decide up front, then a fixed check the agent must pass before it reports.
+72. **Project is widened** to one area of work with its own folder and container, with or without code or a GitHub repo. In `CONTEXT.md`.
+73. **A non-code Project is a git repo with no remote.** The First Mate manages it directly, with no Second Mate. Each piece of handed-off work is a branch you read, then accept or send back. No change to FirstMate.
+74. **Errand** is the name for handed-off work without a Spec. In `CONTEXT.md`. Every Project has two ways to delegate: a Spec Run for development, an Errand for everything else.
+75. **Organising is one list** across all Projects in the First Mate's backlog: Ideas, work in progress, work waiting for your decision, plus a summary when you ask. Deadlines, lessons and orders stay in the tools you already use.
+76. **Order after the MVP:** Errands with a light container; then Pi; then the hardening pair; then the Git gate. This replaces the order in decisions 51, 52 and 59.
+
+## Round 10: Errands (2026-11-14)
+
+77. **No agent reviews an Errand.** You check most results yourself. Any verification step is defined per Project, because each has its own rules for what good means; a Project may have none. This rejects the proposed built-in review by a second agent.
+78. **Questions come before the work.** An Errand starts with a short grilling by the First Mate so the Brief is complete. A Crewmate that meets something undecided stops and puts the question on your list; it never guesses.
+79. **Accept or send back through the First Mate.** Accept merges the Errand's branch into the Project's main folder. Send back, with your comment, continues on the same branch with a fresh Crewmate. You run no git for non-code work.
+80. **Images are chosen per Project.** The first light image holds Markdown tooling only and exists to test Errands. When a Project needs more, you build its image and ask the First Mate to set the Project up on it.
+81. **You create a Project by asking the First Mate**, which runs the existing `/dev-container` onboarding from the Quarterdeck.
+82. **Every Project image is a Variant in this repo**, the Markdown one included, so each keeps Base's Egress Allowlist and hardening.
+83. **An Errand on a Project with a GitHub repo ends in a pull request**, opened from the Quarterdeck. You merge it yourself. On a Project with no remote, accept is a local merge. The First Mate never merges into a GitHub `main`.
+84. **Several Errands may run at once in one Project**, each on its own branch and working folder, with no limit.
+
+The Errands feature has no open branch left. Not yet grilled from the post-MVP list: Pi (login storage needs research, decision 64), the hardening pair, the Git gate, several Projects with restart and resume, project containers' memory in the work root, skills in the Quarterdeck, the review gate for Spec Runs, GitHub Issues, backup, rootless Docker.
+
+## Round 11: Pi (2026-11-14)
+
+Facts read from the Pi docs and source (pi-mono checkout of 2026-11-13) and the FirstMate source at `427056c`:
+
+- Pi does not ask for approval before tool calls and has no built-in sandbox (`docs/security.md`). Its docs tell you to isolate it in a container.
+- Pi keeps everything in one agent folder, `~/.pi/agent` by default, moved with `PI_CODING_AGENT_DIR`: `auth.json` (API keys and subscription logins), settings, extensions and sessions. Its docs warn that mounting that folder exposes all of them.
+- A subscription login is made with `/login`; on a machine without a browser you paste the redirect URL back. Only API keys can come from environment variables. `auth.json` is written under a file lock (`src/core/auth-storage.ts`).
+- FirstMate lists `pi` as verified for Crewmate and Second Mate launches, and supervises it through an extension, not screen reading.
+- Your host already runs Pi 1.5.2 with a login in `~/.pi/agent/auth.json` (not read).
+
+More facts, from the OMP docs (oh-my-pi checkout `5de4b03`, 2026-11-13):
+
+- OMP is a fork of Pi with far more built in (31 tools, language-server and debugger support, memory, hooks, a Rust core). It installs as a prebuilt binary from the vendor's build server, or from npm with bun.
+- It has approval modes: `always-ask`, `always-ask-cached`, `write` (asks only before running commands), and `yolo` (the default).
+- `omp auth-broker serve` holds the logins and does the refreshes; clients get access tokens and never the refresh token. `omp auth-gateway serve` is a forward proxy that adds the credential itself, so a client holds no provider login. Both need a bearer token and a network path.
+- FirstMate lists `omp` as verified for Crewmate and Second Mate launches.
+- Not verified: whether a ChatGPT subscription works through the gateway.
+
+Decided:
+
+85. **OMP, not Pi.** Pi is too raw for you. This replaces decision 59 and every "Pi" in the order. The Pi questions of this round are dropped and re-asked for OMP.
+86. **OMP is not next after the MVP.** Other features come before it. Its exact place: open.
+87. **OMP is deferred as a whole.** Nothing about it is settled beyond decision 85. One leaning recorded, not a decision: you would allow OMP's yolo mode for now. Open when it returns: its place in the order, the login behind the gateway, which roles use it, the default agent per Project, whether it goes in Base, and removing Pi from the host.
+
+## Round 12: what blocks the MVP (2026-11-14)
+
+State read from the branch: tickets 01 to 06, 10 and 19 are done. 07 to 09 and 11 to 18 have code but are open. Seven review tickets sit in `.scratch/quarterdeck-security-review/issues/`. Decisions are recorded for implementers in ticket 21; the code is tickets 22 and 23.
+
+88. **FirstMate ships with its full history** in the image, at the pinned commit. The shallow fetch made FirstMate's lineage guard refuse every dispatch. Ticket 22.
+89. **`quarterdeck start` gets an option that launches no agent.** Ticket 13 needs it. Ticket 23.
+90. **The skills token in the project container's `/etc/environment` is accepted until the Git gate.** The "no file" requirement is narrowed to files outside that container.
+91. **SC-19 is narrowed**: an outside `docker exec` shell gets no token variables. That it can read the mounted secrets file is accepted.
+92. **Devcontainer Features are accepted for the MVP**, on the rule that the Quarterdeck only starts Projects whose `main` you control. Other repositories wait for the custom socket proxy.
+93. **Credentials in a clone's git configuration**: accepted for the MVP; a refusing check joins the hardening feature.
+94. **The publish session reading Crewmate-written files, and worktree git redirection**: accepted for the MVP, limited by a GitHub token scoped to one repository; fixed by the hardening pair and the Git gate.
+
+2026-11-14: the Errands summary was confirmed with the corrected order (MVP, Errands, hardening pair, Git gate; OMP unplaced). The Errands spec draft is `.scratch/errands/spec.md`. It covers Claude Code only and includes a Markdown test Project you can try by hand.
+
+2026-11-14: the Errands spec and design (`.scratch/errands/spec.md`, `.scratch/errands/design.md`) are approved. Design choices you confirmed: the Markdown Variant is built locally and not published; a Project with no remote gets its container from a recorded configuration, not from its `main`; the shared signal folder across the First Mate's Projects is an accepted risk.
+
+## Round 13: findings from the manual runs (2026-11-17)
+
+Decided by the user during tasks B and C of `your-tasks.md`.
+
+95. **A repository's default branch may be `main` or `master`.** Wherever the spec, the design and decision 92 say "`main`", read "the repository's default branch, as origin reports it". The trust rule is unchanged. Ticket 24.
+96. **The launcher also trusts the Project clone's root** (`<home>/projects/<project>`), besides the exact worktree, because Claude checks trust on a worktree's main repository. This widens ticket 09's rule by that one path. Ticket 25.
+97. **A Crewmate's question is answered to that Crewmate.** This amends decision 43 for questions only. After the user answers, the Second Mate sends the answer to the Crewmate that asked, if it is still running. If it has exited, the same record is relaunched in the same worktree and branch with the answer as its note. The answer never starts a new Spec Run. A failed ticket still ends the run after its one retry. Ticket 28.
+98. **Planning stays with a Crewmate** in the project container (decision 39 confirmed). The mates never write a project's files, and the project's planning skills exist only in its container.
+99. **Mates read the Quarterdeck's own skill files without a permission prompt.** Ticket 27.

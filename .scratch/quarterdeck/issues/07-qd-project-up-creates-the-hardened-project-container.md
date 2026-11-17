@@ -1,6 +1,6 @@
 # 07: `qd-project-up` creates the project container from the project's main branch
 
-**Status:** ready-for-human
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), the fixture half
 
@@ -19,7 +19,7 @@
 
 - [x] `qd-project-up` on a fixture project (a Template-shaped `.devcontainer/` rendered from `templates/node`, with a local bare origin) leaves a running container whose bind mounts are exactly: the pool read-write at `/home/node/.treehouse`; `<clone>/.git` read-write with `hooks` and `config` read-only; `<home>/bin` read-only; `<home>/state` read-write; the export read-only at `/workspace`; plus the image's own Claude and Codex volumes (SC-15, SC-16).
 - [x] A write to `.git/hooks` or `.git/config` from inside the container fails read-only; a commit on a worktree in the pool succeeds and is visible in the Quarterdeck at once (SC-15).
-- [ ] Even when the fixture's main-branch config declares `DEV_SETUP_GITHUB_PAT` in `containerEnv` and `remoteEnv`, the container has no GitHub variable and no GitHub file from that config (the project's own credential is never passed on; ticket 08 alone may add the read-only extensions token), and `initializeCommand` and every other host-side lifecycle command did not run (SC-16).
+- [x] Even when the fixture's main-branch config declares `DEV_SETUP_GITHUB_PAT` in `containerEnv` and `remoteEnv`, the container has no GitHub variable and no GitHub file from that config (the project's own credential is never passed on; ticket 08 alone may add the read-only extensions token), and `initializeCommand` and every other host-side lifecycle command did not run (SC-16).
 - [x] The container's egress is ready (`wait-ready`) and the Egress Allowlist applies (SC-17).
 - [x] A change to `.devcontainer/` on a branch other than `main` changes nothing; a change on `main` recreates the container; an unchanged main leaves the same container running (the hash of `origin/main:.devcontainer/` decides) (SC-16).
 - [x] The container is labelled with the project, the home and the test run id, and `qd-project-up` removes only containers it labelled.
@@ -47,6 +47,10 @@
 - 04: The Quarterdeck reaches Docker only through a filtering socket proxy
 
 ## Comments
+
+### User direction: continue and defer security review
+
+The user directs agents to record security concerns as separate human-review tickets and continue implementation against the existing design, rather than stop repeatedly for security decisions. The Feature-trust blocker and environment-substitution concerns are tracked in `.scratch/quarterdeck-security-review/issues/01-project-config-trust-boundary.md`. Retain the approved restriction on unsupported `runArgs`. Do not claim unresolved isolation properties are proven; record limitations honestly and never expose real credentials during validation. Missing human validation or operational prerequisites remain open, but should not prevent work on independent implementation slices.
 
 ### User decision: restrict `runArgs`
 
@@ -129,3 +133,7 @@ Fresh independent reviews used three parallel `pi -p --model openai-codex/gpt-6-
 **Resolution: remains ready-for-human**, with the credential criterion unticked and prior satisfied checkboxes retained. Exact blockers are a human-approved Feature/configuration trust policy (security-review 01) and credential-free shared Git-store provisioning/preflight policy (security-review 03), or an explicit narrowing of the corresponding guarantee. Pomoplan, real-agent and private-fetch checks are later-ticket/manual evidence, not missing fixture implementation. No new concern was discovered requiring a duplicate security ticket.
 
 Preservation: initial copies of `grill-notes.md`, `CONTEXT.md`, and untracked security-review 01 remain byte-identical. The target ticket retains its complete initial content plus this append. Only this append is staged through an index blob based on HEAD; none of the preexisting edits or untracked concern 01 is committed. The parent's saved patch and snapshots are untouched.
+
+### Resolution — 2026-11-17
+
+The user accepted that ticket 21's decisions 3 and 4 settle the last criterion (SC-16 credential). Features and retained configuration are trusted for Projects whose default branch the user controls (decisions 92 and 95). Credentials stored in a clone's git config are an accepted MVP risk (decision 93). The project's own GitHub variables are still dropped, and ticket 08's read-only skills token is the only GitHub credential in the container (confirmed in task B). Closed.

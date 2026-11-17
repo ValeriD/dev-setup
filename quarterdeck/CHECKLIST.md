@@ -4,9 +4,13 @@ Rows the token-free tests cannot prove because they need a real Claude session, 
 
 Every row has the same columns: scenario, setup, what to look at, what a pass is.
 
+**To run these rows, follow `.scratch/quarterdeck/your-tasks.md`:** the steps in order, with the exact commands. Its steps replace the blocker and prerequisite notes below, which date from before tickets 21, 22 and 23 (security decisions, full FirstMate history, `quarterdeck start --no-first-mate`).
+
 Ticket 21 supersedes historical security blockers: reviews 01/02/03/05/06/07 are resolved by explicit MVP acceptance, not isolation fixes. Start only Projects whose `main` you control; retained Features/configuration are trusted and unsupported `runArgs` stay rejected. Clone-stored credentials, redirected worktree Git and publish-session instruction influence remain accepted risks pending post-MVP hardening/Git gate. Extensions-token persistence inside the project container is accepted; rendered config, exports, logs and image layers must remain value-free. Review 04's real permission/startup evidence is still pending; no such evidence is recorded here.
 
-## Ticket 13 — real GitHub, no agents (not run)
+## Ticket 13 — real GitHub, no agents (run 2026-11-17: pass, see ticket 13)
+
+**Result:** all six criteria passed in the user's attended run of `.scratch/quarterdeck/your-tasks.md` task A. PR https://github.com/ValeriD/qd-throwaway/pull/1. The rows below are the original procedure.
 
 Static handoff at `acb9336fc52075a45f3de63431a7537442a0f309`. No real repository, token, clone, seed, push, PR or credential visibility was observed. All six ticket criteria remain unchecked. Prerequisites 03/05/06 supply the parser/helper, home startup and publisher; their dummy/local-origin evidence is not real-GitHub evidence.
 

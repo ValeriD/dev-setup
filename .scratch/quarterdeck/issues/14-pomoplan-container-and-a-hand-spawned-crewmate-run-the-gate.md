@@ -136,3 +136,17 @@ Reviewed committed diff `43c12bb...HEAD` (`bc56722`) directly. No edits, tests o
 
 **Summary: 1 Spec finding; ticket 14 remains incomplete, explicitly acknowledged.**
 ```
+
+### Human run, task B — 2026-11-17
+
+Run by the user following `.scratch/quarterdeck/your-tasks.md` task B. pomoplan's default branch was renamed from `master` to `main` first (ticket 24 covers `master`). Project container `9ca5b4480b67`, Crewmate `qd14-gate`, Sonnet, project route (`launch.log`).
+
+- **Container (criterion 1): pass.** Running from the pinned image, egress ready, labels `pomoplan` and `/home/valeri/work/fleet/sm-pomoplan`. Variables: `DEV_SETUP_GITHUB_PAT` present; `GH_TOKEN`, `GITHUB_TOKEN` and `QUARTERDECK_GITHUB_TOKEN` absent. All 14 skills from `ValeriD/skills` are installed, in the managed folder `/etc/claude-code/.claude/skills` and in `/etc/codex/skills`; the installer log is empty.
+- **Spawn (criterion 2): fail.** Claude showed the folder-trust dialog, and the user had to answer it. The launcher wrote trust for the exact worktree (`/home/node/.treehouse/pomoplan-748f0a/1/pomoplan`), but Claude also created an untrusted entry for the clone's root, `/home/valeri/work/fleet/sm-pomoplan/projects/pomoplan`. Claude appears to key trust by the main repository of a worktree. The launcher's exact-worktree rule (ticket 09) does not cover this. It needs a new ticket. Herdr showed the Crewmate's state correctly.
+- **Gate (criterion 3): fail.** `pnpm install --frozen-lockfile` exit 0; `pnpm run build` exit 1 (`next/font` cannot fetch Google Fonts); lint and test were not run, by the Brief's stop rule. Status: `failed [at=1794930324]: install exit 0; build exit 1 ...; no files changed, no push/PR`.
+- **Egress (criterion 4):** `next build` needs Google Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`), which are not in Base or pomoplan's layer. That addition belongs to pomoplan's own layer. `/implement` was not exercised.
+- **Hooks (criterion 5): did not fire.** `state/qd14-gate.busy-state` holds only `seq=1 state=busy source=fm-spawn`, written at spawn. There was no later busy event and no `.turn-ended` file. The Crewmate wrote its status line itself. Ticket 15 is therefore needed.
+- **Proxy (criterion 6):** the only refusals were `HEAD /_ping` (405). The Docker CLI falls back to `GET`, so this is harmless. The `playwright-deps` Feature built with the existing list, so the proxy list needs no change.
+- **Checklist rows (criterion 7):** the ticket 08 token-scope row is in ticket 08's comment. The SC-02 and SC-07 rows did not pass, for the reasons above.
+
+No criterion is ticked. Still to do: re-run after the trust fix and pomoplan's font egress.

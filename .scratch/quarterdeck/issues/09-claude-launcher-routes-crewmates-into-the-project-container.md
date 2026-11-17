@@ -1,6 +1,6 @@
 # 09: The `claude` launcher runs a Crewmate in the project container with the right environment
 
-**Status:** ready-for-human
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), launcher
 
@@ -11,7 +11,7 @@ A launcher named `claude`, first on the Quarterdeck's path, that FirstMate's spa
 ## Acceptance criteria
 
 - [x] With the working directory under `/home/node/.treehouse`, the launcher runs `docker exec -u node -it <project container> claude <same argv>`; elsewhere it execs the real Claude with the same argv (SC-02).
-- [ ] The `docker` process carries `HERDR_AGENT=claude` (asserted through a recording `docker` shim in the test); real Herdr state through the project container is a manual checklist row (SC-02).
+- [x] The `docker` process carries `HERDR_AGENT=claude` (asserted through a recording `docker` shim in the test); real Herdr state through the project container is a manual checklist row (SC-02).
 - [x] Forwarded by name only: `FM_*`, `GIT_CONFIG_*`, `CLAUDE_CODE_*`, `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `COMPACT_ADVISER_DISABLE`, `TRACEPARENT`. With `GH_TOKEN`, `GITHUB_TOKEN` and `DEV_SETUP_GITHUB_PAT` set in the launcher's environment, none reaches the project container through the launcher. The one GitHub credential a project container may hold, the read-only single-repository extensions token, is delivered at creation by ticket 08, never by the launcher (SC-16, SC-19).
 - [x] `CLAUDE_CODE_OAUTH_TOKEN` reaches the exec by name from the launcher's own environment (the test sets a dummy; how a pane gets it is ticket 03's decision), and `docker inspect` of the project container shows no token (SC-19, project-container half).
 - [x] Before each launch the launcher writes into the project container's `$CLAUDE_CONFIG_DIR/.claude.json`, as user `node` and with `node -e` (the hardened image has no `jq`): `hasCompletedOnboarding: true` if the file is empty or missing, and `projects[$PWD].hasTrustDialogAccepted: true` for the exact worktree path; an existing valid file is merged, not replaced; a trust entry for a parent folder is not relied on.
@@ -78,3 +78,15 @@ The reports ran no tests. All findings are dispositioned (none); no follow-up im
 **Open / ready-for-human:** before real-token validation, a human must resolve or explicitly accept those recorded security-policy blockers; this resolution does not accept them. Then follow the ticket 09 row in `quarterdeck/CHECKLIST.md`: create the project container with `qd-project-up`, spawn a Crewmate through FirstMate from its owning Second Mate in a fresh pool worktree, observe Herdr's tab and `agent get` during working/blocked/done, and verify the first screen has no onboarding, trust, or login prompt. Repeat in a second fresh worktree to verify exact-folder trust. Record observed states and prompt outcomes only, never tokens or raw credential-bearing output. Append that evidence here; only then check the remaining combined Herdr criterion and close the ticket if all outcomes pass. A failed observation must be recorded rather than checked off. Ticket, design and spec remain open; no remaining launcher implementation defect is identified by these reviews.
 
 Unrelated edits to `grill-notes.md`, ticket 07 and `CONTEXT.md`, and the preexisting untracked security ticket 01 are preserved and excluded from this bookkeeping commit.
+
+### Human run, task B — 2026-11-17
+
+- Herdr showed the Crewmate's real state through the project container (criterion 2's manual row): **pass**.
+- **First screen: fail.** The folder-trust dialog appeared. The launcher's entry for the exact worktree was present, but Claude also checks the clone's root path (`<home>/projects/<project>`), which was untrusted. See ticket 14's comment.
+
+### Resolution — 2026-11-17
+
+- Criterion 2: the recording `docker` shim asserts `HERDR_AGENT=claude` (`tests/quarterdeck.test.mjs`, the `docker-record` hint). The user observed real Herdr state through the project container in task B.
+- The trust dialog seen in task B comes from Claude checking the clone's root, which this ticket's exact-worktree rule did not cover. Decision 96 widens that rule, in ticket 25.
+
+All criteria are met. Closed.

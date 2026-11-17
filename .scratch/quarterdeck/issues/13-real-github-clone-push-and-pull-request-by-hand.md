@@ -1,6 +1,6 @@
 # 13: Prove real GitHub clone, push and pull request by hand
 
-**Status:** ready-for-human
+**Status:** done
 **Model:** not an agent ticket (needs real credentials and a real GitHub repository)
 **Design slice:** 2 (Real GitHub, no agents), the real half
 
@@ -12,12 +12,12 @@ Why a human: it needs a real GitHub repository and real tokens, and the implemen
 
 ## Acceptance criteria
 
-- [ ] The throwaway private repository has a tiny project and a default branch; the token in `~/.config/quarterdeck/secrets.env` is scoped to that repository only.
-- [ ] In the First Mate's home the repository is registered as a `direct-PR` project with yolo off and cloned from GitHub into `projects/` through the Base credential helper (no `gh auth setup-git`, no token on disk) (SC-08, grill decision 37).
-- [ ] `fm-home-seed.sh sm-<project> <explicit path> <project>` makes a Second Mate home with a fresh clone from GitHub (decision 37).
-- [ ] A hand-made branch with one commit in that clone is pushed with `qd-publish` and a pull request is opened against the default branch; its body lists the tickets present under `.scratch/<slug>/issues/` (SC-08).
-- [ ] `git config --show-origin -l` in the Quarterdeck and `docker inspect` of the Quarterdeck show no token value; a `docker exec` shell cannot read the token (SC-19).
-- [ ] The result of each step (pass, fail, what was seen) is recorded in `quarterdeck/CHECKLIST.md` and in a comment here.
+- [x] The throwaway private repository has a tiny project and a default branch; the token in `~/.config/quarterdeck/secrets.env` is scoped to that repository only.
+- [x] In the First Mate's home the repository is registered as a `direct-PR` project with yolo off and cloned from GitHub into `projects/` through the Base credential helper (no `gh auth setup-git`, no token on disk) (SC-08, grill decision 37).
+- [x] `fm-home-seed.sh sm-<project> <explicit path> <project>` makes a Second Mate home with a fresh clone from GitHub (decision 37).
+- [x] A hand-made branch with one commit in that clone is pushed with `qd-publish` and a pull request is opened against the default branch; its body lists the tickets present under `.scratch/<slug>/issues/` (SC-08).
+- [x] `git config --show-origin -l` in the Quarterdeck and `docker inspect` of the Quarterdeck show no token value; a `docker exec` shell cannot read the token (SC-19).
+- [x] The result of each step (pass, fail, what was seen) is recorded in `quarterdeck/CHECKLIST.md` and in a comment here.
 
 ## Technical context
 
@@ -105,3 +105,19 @@ The checklist preserves these limitations and does not substitute local/stub cov
 No tests run, GitHub contact, credential access, edits, or commits. Broader regression intentionally not run.
 
 **Summary: Spec — 0 new findings; real-GitHub acceptance remains open.**
+
+### Human run, task A — 2026-11-17
+
+Run by the user, attended, with no agent: `quarterdeck start --no-first-mate`, and a Herdr pane opened by `docker exec … herdr`. The checks were confirmed by the assistant from the machine's state.
+
+- **Repository and token:** a throwaway private repository `ValeriD/qd-throwaway` with a `main` branch. `QUARTERDECK_GITHUB_TOKEN` was scoped to it only for this run. It was widened to `ValeriD/pomoplan` afterwards, for task B.
+- **First Mate registration:** `projects/qd-throwaway` was cloned from GitHub through Base's helper. The registry line `[direct-PR]` resolves to `direct-PR off`. The clone's config has no token-like line (count 0).
+- **Second Mate seed:** `fm-home-seed.sh sm-qd-throwaway <explicit path> qd-throwaway` made a fresh GitHub clone. It needs `FM_SECONDMATE_CHARTER` (task list corrected).
+- **Publish:** `qd-publish` pushed `chore/qd13` (`9196d5c`) and opened https://github.com/ValeriD/qd-throwaway/pull/1 against `main`. The body is "Tickets implemented in this Spec Run: - 01: Say hello".
+- **SC-19, as narrowed by decision 91:** a plain `docker exec` shell has none of the five token variables. `docker inspect` lists no token name. Both clones' git config have no token-like line. The mounted file being readable is accepted (decision 91).
+- **Problems met, none of them product failures:**
+  - Long commands wrapped in the user's terminal, so the registry line was never written and seeding asked for `no-mistakes`.
+  - `git` opened a pager that Herdr's key handling made hard to leave.
+  - The commit failed with no git identity, because the identity comes from environment variables only (review finding; ticket 29).
+
+All criteria are met. Closed.
