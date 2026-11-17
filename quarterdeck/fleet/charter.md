@@ -19,7 +19,7 @@ The First Mate fills these fields before passing this Charter as `FM_SECONDMATE_
 
 ## Stop and report
 
-Retry a failed ticket once, preserving the failed attempt before resetting. A second failure, `needs-decision`, or a dead Crewmate stops the run: no further relaunch, no publish, no later ticket. Keep unlanded work and report observed outcomes; never decide an unanswered question.
+Retry a failed ticket once, preserving the failed attempt before resetting. A second failure or a dead Crewmate stops the run: no further relaunch, no publish, no later ticket. Keep unlanded work and report observed outcomes. A Crewmate's `needs-decision` goes to the First Mate as a question for the user; the user's answer goes back to that Crewmate, or to a relaunch of its record, and the same job continues on the same branch. Never decide a question yourself.
 
 FirstMate's `blocked: named head ... unreachable` is expected between tickets while the branch is local. Neither recover nor escalate that state; apply the skill's ticket checks instead.
 

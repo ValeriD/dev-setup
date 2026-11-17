@@ -118,8 +118,10 @@ const put = (p, content) => {
 let firstId;
 const crewImage = `dev-setup-quarterdeck:test-crew-${id}`;
 
-// Test script plays the Second Mate (qd-spec-run steps 2–9); no product checker.
-async function testTicketLoop(t, failure = false) {
+// Test script plays the Second Mate (qd-spec-run steps 2–9 and its question path); no product checker.
+async function testTicketLoop(t, mode = 'success') {
+  const failure = mode === 'failure';
+  const question = mode === 'question';
   buildImage();
   const built = run('docker', ['build', '--build-arg', `NODE_IMAGE=${IMAGE}`, '--label', runLabel,
     '-t', crewImage, join(REPO, 'tests/fixtures/quarterdeck-crewmate')]);
@@ -127,11 +129,11 @@ async function testTicketLoop(t, failure = false) {
   const started = quarterdeck();
   assert.equal(started.code, 0, started.err);
   const parent = `${work}/fleet/firstmate`;
-  const mate = failure ? 'sm-loop-failure' : 'sm-loop';
+  const mate = { success: 'sm-loop', failure: 'sm-loop-failure', question: 'sm-loop-question' }[mode];
   const home = `${work}/fleet/${mate}`;
   const origin = `${work}/${mate}-origin.git`;
   const clone = `${home}/projects/loop`;
-  const slug = failure ? 'loop-failure' : 'loop-success';
+  const slug = { success: 'loop-success', failure: 'loop-failure', question: 'loop-question' }[mode];
   const fm = command => okInside(`cd ${home}; FM_HOME=${home} ${command}`);
   const read = p => okInside(`cat ${p}`);
   const git = args => fm(`git -C ${clone} ${args}`).trim();
@@ -155,7 +157,7 @@ async function testTicketLoop(t, failure = false) {
   const branch = generated.match(/^Ship branch:.*$/m)?.[0];
   assert.ok(contract && branch);
   put(briefPath, generated.replace('{TASK}', `Spec Run: ${slug}\nProject: loop\nBranch prefix: feat/`)
-    .replace('{FIRSTMATE_SPEC}', `Each session does exactly one job named by the latest ## Progress note. No note: plan.\nFixture failure: ${failure}\nGate: build, lint, test. One commit per job.`)
+    .replace('{FIRSTMATE_SPEC}', `Each session does exactly one job named by the latest ## Progress note. No note: plan.\nFixture failure: ${failure}\nFixture question: ${question}\nGate: build, lint, test. One commit per job.`)
     .replace(/This task ships \*\*direct-PR\*\*:[\s\S]*?(?=Do NOT run \/no-mistakes\.)/, 'Commit and report; do not push or open a PR.\n'));
   assert.ok(read(briefPath).includes(contract) && read(briefPath).includes(branch));
   fm(`bin/fm-dispatch-resolve.sh ${briefPath}`);
@@ -208,6 +210,27 @@ async function testTicketLoop(t, failure = false) {
     const start = wg('rev-parse HEAD');
     relaunch(model, `Ticket ${nn}: ${ticket}. Start commit ${start}.`);
     await wait(++count);
+    if (question) {
+      // qd-spec-run's question path: the same record continues with the answer, no new Spec Run.
+      assert.match(lastStatus(), new RegExp(`^needs-decision \\[at=\\d+\\]: ticket ${nn}: `));
+      assert.equal(wg('rev-parse HEAD'), start, 'no commit before the answer');
+      const answer = `word-${nn}`;
+      // Ticket 01's Crewmate waits at its prompt; ticket 02's has exited (FirstMate's own exit verb).
+      if (nn === '02') fm(`bin/fm-control.sh ${slug} exit`);
+      t.diagnostic(`ticket ${nn} question: ${fm(`bin/fm-crew-state.sh ${slug}`).trim()}`);
+      // fm-send's liveness check is the signal: it names an exited agent instead of ringing it.
+      const sent = inside(`cd ${home}; FM_HOME=${home} bin/fm-send.sh ${slug} 'Answer: ${answer}' 2>&1`);
+      assert.equal(sent.code, 0, sent.out + sent.err);
+      const exited = /doorbell not typed because the agent in \S+ has exited/;
+      if (nn === '01') assert.doesNotMatch(sent.out, exited);
+      else {
+        assert.match(sent.out, exited);
+        assert.equal(wg('status --porcelain'), `?? ticket-${nn}`, 'the worktree keeps the unfinished work');
+        relaunch(model, `Ticket ${nn}: ${ticket}. Start commit ${start}. Answer: ${answer}`);
+      }
+      await wait(++count);
+      assert.equal(read(`${wt}/ticket-${nn}`), `implemented: ${answer}\n`);
+    }
     if (lastStatus().startsWith('failed ')) {
       const failed = wg('rev-parse HEAD');
       relaunch(model, `Retry of ticket ${nn}. Save the failed attempt as refs/quarterdeck/failed/${nn}-1, then reset to ${start}.`);
@@ -228,13 +251,21 @@ async function testTicketLoop(t, failure = false) {
   assert.equal(okInside(`git --git-dir=${origin} show-ref`), originRefs, 'no push');
   assert.equal(wg('status --porcelain'), '');
   const observed = sessions();
-  assert.equal(observed.length, 3, 'plan and two sessions only');
-  assert.equal(new Set(observed.map(s => s.session)).size, 3);
+  assert.equal(observed.length, question ? 5 : 3, question ? 'plan, two tickets and two answered questions' : 'plan and two sessions only');
+  assert.equal(new Set(observed.map(s => s.session)).size, question ? 4 : 3);
   assert.ok(observed.every(s => s.cwd === wt && !s.argv.some(a => /^(--resume|--continue|-r|-c)(=|$)/.test(a))));
   const logs = read(`${work}/quarterdeck/logs/launch.log`).trim().split('\n').map(JSON.parse).filter(s => s.cwd === wt);
-  assert.deepEqual(logs.map(s => s.model), failure ? ['sonnet', 'opus', 'opus'] : ['sonnet', 'opus', 'sonnet']);
+  assert.deepEqual(logs.map(s => s.model), { success: ['sonnet', 'opus', 'sonnet'], failure: ['sonnet', 'opus', 'opus'], question: ['sonnet', 'opus', 'sonnet', 'sonnet'] }[mode]);
   assert.ok(logs.every(s => s.route === 'project'));
-  if (!failure) {
+  if (question) {
+    assert.deepEqual(wg(`log --reverse --format=%s ${base}..HEAD`).split('\n'), ['plan', 'ticket 01', 'ticket 02']);
+    // Ticket 01: one session asks and then finishes with the answer it was sent.
+    assert.equal(observed[1].session, observed[2].session);
+    assert.deepEqual([observed[1].asked, observed[2].answer], [true, 'word-01']);
+    // Ticket 02: its session exits after asking; the relaunch of the same record finishes it.
+    assert.notEqual(observed[3].session, observed[4].session);
+    assert.deepEqual([observed[3].asked, observed[4].answer, observed[4].start], [true, 'word-02', observed[3].start]);
+  } else if (!failure) {
     assert.deepEqual(wg(`log --reverse --format=%s ${base}..HEAD`).split('\n'), ['plan', 'ticket 01', 'ticket 02']);
     assert.equal(observed[2].start, observed[1].head, 'ticket 2 sees ticket 1 commit');
   } else {
@@ -242,7 +273,7 @@ async function testTicketLoop(t, failure = false) {
     assert.match(observed[2].note, /Retry of ticket 01/);
     assert.equal(inside(`test -e ${wt}/ticket-02`).code, 1);
   }
-  if (!failure) {
+  if (mode === 'success') {
     // Swap only this throwaway Quarterdeck's Claude/gh; no real model or forge call.
     const ghStub = `#!/usr/bin/env node
 const fs = require('fs');
@@ -705,10 +736,10 @@ test('mate procedures: managed skills, Charter and Brief contract are installed 
   assert.ok(commands.length >= 5);
   for (const command of commands) okInside(`test -x /opt/firstmate/bin/${command}`);
   for (const line of ["## Captain's intent", '## Firstmate spec', '## Progress note', '# Setup', '# Rules', '# Definition of done', 'Delivery contract: mode=direct-PR', 'Ship branch:', 'done: ticket NN committed <sha>', 'pnpm install --frozen-lockfile', 'refs/quarterdeck/failed/NN-1', 'Retry of ticket NN', 'Publish.']) assert.ok(brief.includes(line), line);
-  for (const line of ['Spec Run: <slug>', 'Branch prefix: <prefix>', 'Project: <project>', 'FM_SECONDMATE_CHARTER', 'project-management', 'verbatim']) assert.ok(first.includes(line), line);
-  for (const line of ['--mode direct-PR --branch-prefix', '--harness claude --model sonnet', 'refs/quarterdeck/failed/$NN-1', 'git status --porcelain', 'build ok, lint ok, test ok', 'needs-decision', 'qd-route', 'done [key=<slug>]', 'FM_HOME="$S"']) assert.ok(spec.includes(line), line);
+  for (const line of ['Spec Run: <slug>', 'Branch prefix: <prefix>', 'Project: <project>', 'FM_SECONDMATE_CHARTER', 'project-management', 'verbatim', '--resolve-key', 'Answer to Spec Run <slug>']) assert.ok(first.includes(line), line);
+  for (const line of ['--mode direct-PR --branch-prefix', '--harness claude --model sonnet', 'refs/quarterdeck/failed/$NN-1', 'git status --porcelain', 'build ok, lint ok, test ok', 'needs-decision', 'qd-route', 'done [key=<slug>]', 'needs-decision [key=<slug>]', 'Answer to Spec Run <slug>', 'FM_HOME="$S"']) assert.ok(spec.includes(line), line);
   for (const line of ['<project>', '<build command>', '<lint command>', '<test command>', 'qd-spec-run']) assert.ok(charter.includes(line), line);
-  for (const line of ['PR opened', 'stopped at ticket NN', 'stopped: question', 'local only', 'failed twice:', 'Question:']) assert.ok(report.includes(line), line);
+  for (const line of ['PR opened', 'stopped at ticket NN', 'Answered:', 'local only', 'failed twice:', 'Question:']) assert.ok(report.includes(line), line);
 });
 
 test("Claude's policy keeps Base's keys except allowManagedHooksOnly", () => {
@@ -1288,7 +1319,8 @@ test('a missing branch, a failing push and a failing gh all exit non-zero and pr
 });
 
 test('ticket loop: plan and ordered fresh Crewmates then publish (SC-03–06,08,13–14)', t => testTicketLoop(t));
-test('ticket loop failure: preserve one attempt, retry once, stop without push (SC-11,13)', t => testTicketLoop(t, true));
+test('ticket loop failure: preserve one attempt, retry once, stop without push (SC-11,13)', t => testTicketLoop(t, 'failure'));
+test('ticket loop question: the answer reaches the Crewmate that asked, or a relaunch of its record; same worktree and branch to done (SC-12, decision 97)', t => testTicketLoop(t, 'question'));
 
 test('qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)', () => testProjectFixture());
 test('qd-project-up extensions fixture: creation-only read token, helper and persistence checks (SC-16, SC-19)', t => testProjectFixture(`dummy-extensions-${id}`, t));
