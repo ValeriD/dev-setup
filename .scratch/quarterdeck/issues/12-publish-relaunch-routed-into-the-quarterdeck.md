@@ -1,6 +1,6 @@
 # 12: The publish relaunch runs in the Quarterdeck and FirstMate accepts the pull request
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 6 (Publish relaunch), the token-free half
 
@@ -141,3 +141,7 @@ Tests not rerun. No edits or commits; working-tree changes preserved.
 
 **Summary: Spec — 0 findings.**
 ```
+
+### Close-out — status done
+
+Every criterion was ticked in the step 7 resolution. The one reason it stayed open (dependency 11's shallow FirstMate home) is gone: ticket 22 (done) ships the full history, and `testTicketLoop` in `tests/quarterdeck.test.mjs` no longer fetches history itself. The ticked criteria are covered by these tests: `ticket loop: plan and ordered fresh Crewmates then publish (SC-03–06,08,13–14)` (marker consumed and `data/` route, `--setting-sources user` argv, `route: publish` log line, same record relaunched with `Publish.`, origin holds exactly plan, ticket 01, ticket 02, one stub `gh` call with the ticket list, `fm-crew-state.sh` no longer blocked, done line `PR <url>`); `ticket loop failure: preserve one attempt, retry once, stop without push (SC-11,13)` (no publication after the failing ticket, origin refs unchanged); the launcher fixture inside `qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)` (state/worktree markers ignored, project container cannot write `data/`, hooks and fsmonitor overrides effective after conflicting earlier entries); the checklist row is committed evidence in `quarterdeck/CHECKLIST.md` (not run). Real-Claude settings loading, real GitHub publication and watcher registration stay with the CHECKLIST rows and ticket 13.

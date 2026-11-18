@@ -19,10 +19,10 @@ The user supplies the token value; that is a human step needed only for the real
 ## Acceptance criteria
 
 - [x] With `QUARTERDECK_EXTENSIONS_TOKEN` set to a dummy in `qd-project-up`'s environment, the created container has `DEV_SETUP_GITHUB_PAT` equal to it (compared by hash) at container level, and `git credential fill` for `github.com` inside the container answers with it (Base's helper), and for any other host answers nothing.
-- [ ] The value appears in no file: not in the rendered `devcontainer.json`, not in the export under `/home/valeri/work/quarterdeck/config/`, not in logs, not in an image layer.
-- [ ] The container never has `GH_TOKEN`, `GITHUB_TOKEN`, `QUARTERDECK_GITHUB_TOKEN` or the project repository's token, and nothing from the project's own config's GitHub variables (SC-16, restated).
+- [x] The value appears in no file: not in the rendered `devcontainer.json`, not in the export under `/home/valeri/work/quarterdeck/config/`, not in logs, not in an image layer.
+- [x] The container never has `GH_TOKEN`, `GITHUB_TOKEN`, `QUARTERDECK_GITHUB_TOKEN` or the project repository's token, and nothing from the project's own config's GitHub variables (SC-16, restated).
 - [ ] With the variable unset, `qd-project-up` still creates the container, prints a warning naming `QUARTERDECK_EXTENSIONS_TOKEN`, and a Project layer with a private source then fails with the installer's existing message.
-- [ ] The Claude token path of the launcher (ticket 09) is unchanged and still never forwards any GitHub variable; this ticket's token is delivered only at creation.
+- [x] The Claude token path of the launcher (ticket 09) is unchanged and still never forwards any GitHub variable; this ticket's token is delivered only at creation.
 - [x] A container opened by hand from a Template is unchanged: `git diff` shows no change under `base/`, `variants/` or `templates/`, and the existing acceptance suite passes.
 - [x] A new ADR records the narrowing and the reason (read-only, one repository, fetching Agent Extensions only), and `quarterdeck/CHECKLIST.md` gets a row for the human with the real token: in the container `git ls-remote` of `ValeriD/skills` works, another private repository is not readable, and a push to `ValeriD/skills` is refused.
 
@@ -98,3 +98,13 @@ Preexisting edits in `grill-notes.md`, ticket 07 and `CONTEXT.md`, plus untracke
 - **Not yet proven:** the push refusal. The dry-run push never ran, because the throwaway commit failed with no git identity in the container. It needs repeating with `git -c user.name=x -c user.email=x@x commit`.
 - No GitHub variable other than `DEV_SETUP_GITHUB_PAT` is in the container.
 - Push re-run with an identity, 2026-11-17: `git push --dry-run` to `ValeriD/skills` was refused for lack of write access ("unable to write, no access", as reported by the user). The token is read-only: **pass**. Still open for an agent: the unticked criteria that tests can cover (the value appears in no file; no other GitHub variable; a warning when the token is missing).
+
+### Close-out — criteria proved by tests (agent, 2026-11-18)
+
+Ticked, each asserted by the dummy-token fixture `qd-project-up extensions fixture: creation-only read token, helper and persistence checks (SC-16, SC-19)` (`testProjectFixture`, `tests/quarterdeck.test.mjs`) unless named otherwise:
+
+- Criterion 2 (no file), as narrowed by ticket 21 decision 1 and ADR 0010 (`/etc/environment` inside the project container is accepted; the requirement is no value in the rendered config, work-root export, logs or image): the nested test `extensions token absent from rendered config, exports, logs and image` greps `<work>/quarterdeck/config` and `logs`, scans `docker logs`, `docker history --no-trunc`, and streams `docker image save` for the token bytes, for the ordinary Template and for a benign local Feature. Creator output is also checked for the value.
+- Criterion 3: in the same fixture the container has no `GH_TOKEN`, `GITHUB_TOKEN`, `QUARTERDECK_GITHUB_TOKEN` or `QUARTERDECK_EXTENSIONS_TOKEN` (`env | grep` exits 1), and `Config.Env` lacks the dummy project token, although the parent environment and the project's own `containerEnv` set `GH_TOKEN`/`DEV_SETUP_GITHUB_PAT`. The container-level hash equals the supplied value only for `DEV_SETUP_GITHUB_PAT`. The no-token fixture (`qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)`) asserts no github variable at all.
+- Criterion 5: `testLauncherFixture` runs the launcher with `GH_TOKEN`, `GITHUB_TOKEN`, `DEV_SETUP_GITHUB_PAT` set and asserts none reaches the container's Claude; the extensions fixture shows `QUARTERDECK_EXTENSIONS_TOKEN` is not in the container environment, so the token has only the creation path.
+
+Criterion 4 stays unticked. Its first half already has a test and needed no new one: the no-token fixture runs `qd-project-up` with `QUARTERDECK_EXTENSIONS_TOKEN` unset, asserts exit 0, a running labelled container, and `first.err` matching `/warning.*QUARTERDECK_EXTENSIONS_TOKEN/`. The second half (a Project layer with a private source then fails with the installer's existing `cannot fetch ...` message) needs a private repository or a network fixture that refuses anonymous fetches; it is left to the user's absent-token run on the private-source project (CHECKLIST). No code or test was changed for this ticket. Status stays `ready-for-human`: criterion 4's second half is the only open item.

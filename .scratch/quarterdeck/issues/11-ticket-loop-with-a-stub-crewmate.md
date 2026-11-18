@@ -1,6 +1,6 @@
 # 11: The ticket loop runs plan, ticket 1, ticket 2 with a stub Crewmate
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 5 (Ticket loop)
 
@@ -11,12 +11,12 @@ A token-free run of the real FirstMate loop in the Quarterdeck, with a stub stan
 ## Acceptance criteria
 
 - [x] A test image derived from the node image replaces `claude` with a script that reads the latest `## Progress note` in the Brief, makes the planned commit or the ticket commit (or fails on a marked ticket), and appends the status line (`done [at=...]: ...` or `failed [at=...]: ...`).
-- [ ] The run on a fixture project with a local bare origin goes plan -> ticket 1 -> ticket 2 using FirstMate's own `fm-brief.sh`, `fm-spawn.sh`, `fm-control.sh relaunch` with `FM_HOME` set, and no FirstMate file edited. The branch is `<prefix><slug>`; it has one plan commit and then exactly one commit per ticket in ticket order, on top of `origin/main`; no other branches; no push happened (SC-03, SC-04, SC-13).
-- [ ] Each session is a new one in the same worktree (same path in `launch.log`, no resume argument), and ticket 2 sees ticket 1's commit (SC-05).
-- [ ] `launch.log` shows the model of each session: the dispatch rule's Opus for a ticket marked as about skills, prompts or agent tools, Sonnet for another (SC-06, launch half).
-- [ ] The ticket check of step 7 is applied by the test script: a `done` naming build, lint and test, one new commit since the start commit, clean `git status --porcelain`; a `done` missing a gate result fails the check.
-- [ ] Between tickets `fm-crew-state.sh` reports "blocked: named head ... unreachable"; the test records it and the run continues (SC-14).
-- [ ] A ticket marked to fail gets exactly one relaunch with the `Retry of ticket NN` note; the stub saves the failed attempt as `refs/quarterdeck/failed/NN-1` and resets to the start sha; after a second failure no further relaunch happens and nothing is pushed (SC-11, SC-13, token-free half).
+- [x] The run on a fixture project with a local bare origin goes plan -> ticket 1 -> ticket 2 using FirstMate's own `fm-brief.sh`, `fm-spawn.sh`, `fm-control.sh relaunch` with `FM_HOME` set, and no FirstMate file edited. The branch is `<prefix><slug>`; it has one plan commit and then exactly one commit per ticket in ticket order, on top of `origin/main`; no other branches; no push happened (SC-03, SC-04, SC-13).
+- [x] Each session is a new one in the same worktree (same path in `launch.log`, no resume argument), and ticket 2 sees ticket 1's commit (SC-05).
+- [x] `launch.log` shows the model of each session: the dispatch rule's Opus for a ticket marked as about skills, prompts or agent tools, Sonnet for another (SC-06, launch half).
+- [x] The ticket check of step 7 is applied by the test script: a `done` naming build, lint and test, one new commit since the start commit, clean `git status --porcelain`; a `done` missing a gate result fails the check.
+- [x] Between tickets `fm-crew-state.sh` reports "blocked: named head ... unreachable"; the test records it and the run continues (SC-14).
+- [x] A ticket marked to fail gets exactly one relaunch with the `Retry of ticket NN` note; the stub saves the failed attempt as `refs/quarterdeck/failed/NN-1` and resets to the start sha; after a second failure no further relaunch happens and nothing is pushed (SC-11, SC-13, token-free half).
 - [x] `quarterdeck/CHECKLIST.md` gains rows for the real-agent half of this slice: whether FirstMate's own machinery (not the model) escalates the interim blocked state to the First Mate, and what `working [key=<slug>]` for interim tickets does. No FirstMate patch is made here (ADR 0008); a needed patch is reported to the user instead.
 
 ## Technical context
@@ -203,3 +203,16 @@ Reviewed `git diff be01472...HEAD` directly: commits `3fcef3d` and `32d76f8`.
 The newly checked criteria concern the existing stub image and checklist entries—not full scenario completion. Publication remains explicitly excluded by ticket 11; its absence is not scope loss.
 
 Read-only review. No tests or secret probes run; broader regression intentionally not run.
+
+### Close-out — status done
+
+The blocker that kept criteria 2-7 unticked (stock shallow FirstMate home refused by the lineage guard) was fixed by ticket 22 (done): the image ships full history and `testTicketLoop` no longer unshallows anything. The loop now starts from a home seeded by `fm-home-seed.sh` and the shipped config. Each criterion is asserted by `testTicketLoop` in `tests/quarterdeck.test.mjs`:
+
+- 2: `ticket loop: plan and ordered fresh Crewmates then publish (SC-03–06,08,13–14)` runs `fm-brief.sh`, `fm-spawn.sh`, `fm-control.sh relaunch` with `FM_HOME`; asserts branch `feat/<slug>`, commit subjects `plan`, `ticket 01`, `ticket 02` on top of `origin/main`, only `feat/<slug>` and `main` locally, and origin refs unchanged before publish.
+- 3: same test: every session has the same `cwd` and no resume/continue argument, distinct session ids, and ticket 2's start equals ticket 1's head.
+- 4: same test: `launch.log` models `sonnet, opus, sonnet`, derived from the shipped `crew-dispatch.json` rule.
+- 5: same test: `checkTicket` (build, lint, test named; one commit since start; clean status) and the negative case with lint removed throws.
+- 6: same test: `fm-crew-state.sh` matches `blocked ... named head ... unreachable` after each ticket and the run continues.
+- 7: `ticket loop failure: preserve one attempt, retry once, stop without push (SC-11,13)`: one `Retry of ticket 01` relaunch, `refs/quarterdeck/failed/01-1` saved, reset to the start sha, models `sonnet, opus, opus`, no ticket 02, origin refs unchanged.
+
+All criteria are ticked. The real-agent halves (automatic escalation of the interim blocked state, `working [key=...]`, prompt-free lifecycle) stay as the CHECKLIST rows from criterion 8 and are not part of this ticket's closure. Ticket 11's tests were last run in the close-out `npm run test:quarterdeck`: 43 of 43 pass.
