@@ -459,6 +459,25 @@ if (!fs.existsSync('launcher-commit')) {
   } finally { assert.equal(swap('mv /usr/local/bin/claude.saved /usr/local/bin/claude').code, 0); }
 }
 
+// Ticket 31: the same through the launcher. A stub plays Claude in the project container and sets Claude's own
+// titles (the half-circle spinner every quarter second, then an idle star); Herdr watches the pane in the Quarterdeck, not the container.
+function testLauncherHerdrStatus({ home, wt, cid }) {
+  const stub = `#!/usr/bin/env node
+const title = t => process.stdout.write('\\x1b]0;' + t + '\\x07');
+const wait = s => new Promise(r => setTimeout(r, s * 1000));
+const spin = ['\\u25d0', '\\u25d3', '\\u25d1', '\\u25d2'];
+(async () => { for (let i = 0; i < 40; i++) { title(spin[i % 4] + ' Claude Code'); await wait(0.25); } title('\\u2733 Claude Code'); await wait(25); })();
+`;
+  assert.equal(run('docker', ['exec', '-i', '-u', 'root', cid, 'sh', '-c', 'rm -f /usr/local/bin/claude; cat > /usr/local/bin/claude; chmod 755 /usr/local/bin/claude'], { input: stub }).code, 0);
+  const pane = newPane();
+  paneRun(pane, `cd ${wt} && FM_TASK_INBOX=${home}/state/job.inbox claude`);
+  const during = waitStatus(pane, ['working'], 20);
+  assert.equal(during.at(-1), 'working', `mid-turn status through the launcher: ${during}\n${run('docker', ['exec', '-u', 'node', name, 'herdr', 'agent', 'explain', pane, '--verbose']).out.slice(0, 1500)}\n${run('docker', ['exec', '-u', 'node', name, 'herdr', 'pane', 'read', pane, '--lines', '10']).out}`);
+  const after = waitStatus(pane, ['idle', 'done'], 30);
+  assert.ok(['idle', 'done'].includes(after.at(-1)), `after the turn through the launcher: ${after}`);
+  run('docker', ['exec', '-u', 'node', name, 'herdr', 'pane', 'close', pane]);
+}
+
 // Ticket 15: the Quarterdeck-added hook, installed by the start-up installer in a container qd-project-up made.
 // A stub plays Claude: it pipes hook input into the installed command, as Claude does.
 function testCrewmateHook({ home, cid, probe }) {
@@ -616,6 +635,7 @@ async function testProjectFixture(extensionsToken = '', t) {
     assert.equal(probe(`echo forbidden >> ${clone}/.git/config`).code === 0, false);
     if (!extensionsToken) testLauncherFixture({ home, wt, cid, put, probe });
     if (!extensionsToken) testCrewmateHook({ home, cid, probe });
+    if (!extensionsToken) testLauncherHerdrStatus({ home, wt, cid });
     const beforeCommit = okInside(`git -C ${wt} rev-parse HEAD`).trim();
     const commit = probe(`set -e; cd ${wt}; echo committed > proof; git add proof; git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm proof; git rev-parse HEAD`);
     assert.equal(commit.code, 0, commit.err);
@@ -988,6 +1008,63 @@ test('ticket 30: panes share one history within a run, a leading space is not sa
   assert.equal(inside(`grep -rl shared-${tag} ${work} 2>/dev/null; true`).out.trim(), '', 'nothing under the work root');
   const mounts = run('docker', ['inspect', name, '--format', '{{range .Mounts}}{{.Destination}}\n{{end}}']).out;
   assert.doesNotMatch(mounts, /^\/home\/node\/?$|\.bash_history/m, 'the history is in the container, so it goes with `quarterdeck stop`');
+});
+
+// Ticket 31: Herdr shows a working agent as working. Herdr's bundled Claude manifest (0.7.4) wants a braille
+// spinner in the terminal title; Claude Code 2.1.310 titles a busy turn `◑ Claude Code`. The image ships Herdr's
+// own local override (quarterdeck/herdr/claude.toml) that also accepts the half-circle.
+const agentStatus = (pane) => {
+  const r = run('docker', ['exec', '-u', 'node', name, 'herdr', 'agent', 'get', pane]);
+  try { return JSON.parse(r.out).result.agent.agent_status; } catch { return `none:${r.out.trim().slice(0, 80)}`; }
+};
+// Polls until the status is one of `wanted` and returns every status seen on the way.
+const waitStatus = (pane, wanted, seconds) => {
+  const seen = [];
+  for (let i = 0; i < seconds * 2; i++) {
+    const s = agentStatus(pane);
+    if (seen.at(-1) !== s) seen.push(s);
+    if (wanted.includes(s)) return seen;
+    run('sleep', ['0.5']);
+  }
+  return seen;
+};
+
+test('ticket 31: the image ships the Claude detection override, unchanged from the pinned upstream manifest', () => {
+  const shipped = readFileSync(join(REPO, 'quarterdeck/herdr/claude.toml'));
+  const digest = createHash('sha256').update(shipped).digest('hex');
+  assert.match(dockerfile, new RegExp(`${digest}  /home/node/.config/herdr/agent-detection/claude.toml`));
+  const inImage = okInside('sha256sum /home/node/.config/herdr/agent-detection/claude.toml').split(' ')[0];
+  assert.equal(inImage, digest);
+  assert.equal(inside('touch /home/node/.config/herdr/agent-detection/claude.toml').code === 0, false, 'a pane cannot rewrite it');
+});
+
+test('ticket 31: a real Claude Code turn in a Herdr pane reads working mid-turn and idle after (fake Messages endpoint, no login)', () => {
+  const tag = randomBytes(4).toString('hex');
+  const dir = `/tmp/herdr-status-${tag}`;
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  okInside(`mkdir -p ${dir}/config ${dir}/proj && printf '%s' '${JSON.stringify({ hasCompletedOnboarding: true, customApiKeyResponses: { approved: ['dummy'], rejected: [] }, projects: { [`${dir}/proj`]: { hasTrustDialogAccepted: true } } })}' > ${dir}/config/.claude.json`);
+  put(`${dir}/mock.mjs`, mockApi);
+  // A 12-second tool call keeps the turn open long enough to look at it.
+  assert.equal(run('docker', ['exec', '-d', '-u', 'node', name, 'node', `${dir}/mock.mjs`, String(port), `${dir}/result`, 'Bash', '{"command":"sleep 12"}', `${dir}/ready`]).code, 0);
+  for (let i = 0; i < 50 && inside(`test -e ${dir}/ready`).code !== 0; i++) run('sleep', ['0.2']);
+  const ws = run('docker', ['exec', '-u', 'node', name, 'herdr', 'workspace', 'create', '--no-focus', '--cwd', `${dir}/proj`]);
+  assert.equal(ws.code, 0, ws.err);
+  const pane = JSON.parse(ws.out).result.root_pane.pane_id;
+  const settings = JSON.stringify({ permissions: { allow: ['Bash(sleep:*)'] } });
+  paneRun(pane, `env -u CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CONFIG_DIR=${dir}/config ANTHROPIC_API_KEY=dummy ANTHROPIC_BASE_URL=http://127.0.0.1:${port} CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 /usr/local/bin/claude --settings '${settings}'`);
+  const started = waitStatus(pane, ['idle'], 60);
+  assert.equal(started.at(-1), 'idle', `Claude did not reach its prompt: ${started}`);
+  // Let the prompt settle, then start the turn.
+  run('sleep', ['2']);
+  paneRun(pane, 'go');
+  const during = waitStatus(pane, ['working'], 15);
+  assert.equal(during.at(-1), 'working', `mid-turn status: ${during}`);
+  const after = waitStatus(pane, ['idle', 'done'], 40);
+  assert.ok(['idle', 'done'].includes(after.at(-1)), `after the turn: ${after}`);
+  assert.equal(inside(`test -s ${dir}/result`).code, 0, 'the fake endpoint saw the tool result, so the turn really ran');
+  const explain = okInside(`herdr agent explain ${pane}`);
+  assert.match(explain, /manifest: \/home\/node\/\.config\/herdr\/agent-detection\/claude\.toml /, explain);
+  run('docker', ['exec', '-u', 'node', name, 'herdr', 'pane', 'close', pane]);
 });
 
 test('SC-19: the entrypoint and everything above Herdr hold no value; docker inspect and history show none', () => {

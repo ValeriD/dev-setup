@@ -39,6 +39,7 @@ Quarterdeck depends on Base material and the extension installer; nothing in `ba
 | Image | `quarterdeck/Dockerfile`, `quarterdeck/extensions.json`, `quarterdeck/claude-policy.json` | Base plus mate tools and full-history pinned FirstMate; not a Variant or Template. |
 | Host command | `quarterdeck/bin/quarterdeck`, `quarterdeck/docker-proxy.conf` | Build, start with optional agent-free mode, attach and labelled cleanup; Docker access through an endpoint-filtering Unix-socket proxy. |
 | Entrypoint | `quarterdeck/bin/qd-entry`, `quarterdeck/bin/qd-server` | Root egress setup, then non-root token parsing and Herdr server. |
+| Herdr detection override | `quarterdeck/herdr/claude.toml`, `quarterdeck/Dockerfile` | Herdr's own local agent-detection manifest for Claude (upstream 2026.10.11.1, SHA-256 checked) so a busy half-circle title reads as working. |
 | FirstMate configuration | `quarterdeck/bin/qd-first-mate`, `quarterdeck/fleet/config/` | Seed the home, repair shallow history locally, preserve existing configuration, optionally open the First Mate workspace. |
 | Claude launcher | `quarterdeck/bin/claude` | Route FirstMate launches into the owning project container or the Quarterdeck publish session. |
 | Project-container creator | `quarterdeck/bin/qd-project-up`, `quarterdeck/project-layer.json`, `quarterdeck/hooks/crewmate-busy.sh` | Render configuration fetched from the repository's default branch, add the Quarterdeck's project-layer entries to the export, and manage the home's container through the devcontainer CLI. |

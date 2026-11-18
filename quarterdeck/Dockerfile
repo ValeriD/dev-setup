@@ -52,6 +52,17 @@ RUN git init -q /opt/firstmate \
  && chown -R root:root /opt/firstmate && chmod -R go-w,a+rX /opt/firstmate \
  && herdr --version && treehouse --version
 
+# Herdr's agent-detection manifest for Claude, as an own local override (ticket 31). The manifest bundled in
+# Herdr 0.7.4 marks a turn as working only from a braille-spinner terminal title; Claude Code 2.1.310 titles a
+# busy turn with a half-circle (U+25D0-25D3), so every Claude pane read idle. Herdr's override folder wins
+# over bundled and cached remote manifests. The file is the upstream manifest 2026.10.11.1, byte for byte
+# (https://herdr.dev/agent-detection/claude.toml); the build checks its SHA-256. Renovate cannot track it (a
+# floating URL, not a versioned release): revisit it when Herdr or Claude Code changes the title or the format.
+COPY quarterdeck/herdr/claude.toml /home/node/.config/herdr/agent-detection/claude.toml
+RUN echo "e8b816a70edc1b5f91479acc9977f1f132a55b0c93845682611e91bdf8aa1920  /home/node/.config/herdr/agent-detection/claude.toml" | sha256sum -c - \
+ && chown node:node /home/node/.config /home/node/.config/herdr \
+ && chown -R root:root /home/node/.config/herdr/agent-detection && chmod -R go-w,a+rX /home/node/.config
+
 # Base material, copied as in variants/node/Dockerfile. The Claude policy is the Quarterdeck's own
 # (Base's without allowManagedHooksOnly: the mates' hooks must run; plus one Read allow rule so
 # the mates read the managed skills folder without a prompt, decision 99).
