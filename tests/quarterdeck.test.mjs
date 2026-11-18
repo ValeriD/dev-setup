@@ -1443,6 +1443,56 @@ test('ticket loop: plan and ordered fresh Crewmates then publish (SC-03–06,08,
 test('ticket loop failure: preserve one attempt, retry once, stop without push (SC-11,13)', t => testTicketLoop(t, 'failure'));
 test('ticket loop question: the answer reaches the Crewmate that asked, or a relaunch of its record; same worktree and branch to done (SC-12, decision 97)', t => testTicketLoop(t, 'question'));
 
+// Ticket 24: the default branch is whatever origin's HEAD names. Origin HEAD -> master; a main branch is ignored.
+test('qd-project-up uses the origin default branch, master here, and refuses when origin reports none (ticket 24)', () => {
+  buildImage();
+  const started = quarterdeck();
+  assert.equal(started.code, 0, started.err);
+  const home = `${work}/fleet/defbranch`;
+  const clone = `${home}/projects/defbranch`;
+  const origin = `${work}/defbranch-origin.git`;
+  const template = readFileSync(join(REPO, 'templates/node/.devcontainer/devcontainer.json'), 'utf8')
+    .replace('${templateOption:image}', IMAGE).replaceAll('${templateOption:patEnvVar}', 'GH_TOKEN');
+  const cfg = `${clone}/.devcontainer/devcontainer.json`;
+  okInside(`rm -rf ${home} ${origin}; mkdir -p ${clone}/.devcontainer ${home}/bin ${home}/state; git init -q --bare -b master ${origin}; git init -q -b master ${clone}; git -C ${clone} config user.name Fixture; git -C ${clone} config user.email fixture@example.invalid`);
+  okInside(`cp -a /opt/firstmate/bin/. ${home}/bin/`);
+  put(cfg, template.replace('"name": "node",', `"name": "node", "containerEnv": {${JSON.stringify(pinEnv()).slice(1, -1)}},`));
+  put(`${clone}/.devcontainer/extensions.json`, readFileSync(join(REPO, 'templates/node/.devcontainer/extensions.json')));
+  okInside(`git -C ${clone} add .; git -C ${clone} commit -qm initial; git -C ${clone} remote add origin ${origin}`);
+  const up = () => inside(`env -u QUARTERDECK_EXTENSIONS_TOKEN QD_PROJECT_TEST_IMAGE=${IMAGE} QD_RUN_LABEL=${runLabel} qd-project-up ${home} defbranch`);
+  const containers = () => run('docker', ['ps', '-aq', '--filter', 'label=quarterdeck.project=defbranch', '--filter', `label=${runLabel}`]).out.split('\n').filter(Boolean);
+  const volumes = new Set();
+  const images = new Set();
+  try {
+    // Origin has no commits: its HEAD (master) is unborn, so it reports no default branch.
+    okInside(`git -C ${clone} push -q origin master:main`);
+    const none = up();
+    assert.notEqual(none.code, 0);
+    assert.match(none.err, /no default branch/);
+    assert.deepEqual(containers(), [], 'nothing created without a default branch');
+    okInside(`git -C ${clone} push -q origin master`);
+    const first = up();
+    assert.equal(first.code, 0, first.err);
+    const cid = first.out.trim().split('\n').pop();
+    const [c] = JSON.parse(run('docker', ['inspect', cid]).out);
+    for (const m of c.Mounts.filter(m => m.Type === 'volume')) volumes.add(m.Name);
+    if (c.Config.Image !== IMAGE) images.add(c.Config.Image);
+    assert.equal(c.Config.Labels['quarterdeck.project'], 'defbranch');
+    assert.equal(c.State.Running, true);
+    // A change on main, which is not the default here, changes nothing.
+    okInside(`echo ' ' >> ${cfg}; git -C ${clone} add .; git -C ${clone} commit -qm other; git -C ${clone} push -q origin master:main`);
+    assert.equal(up().out.trim(), cid, 'a change on a non-default branch recreates nothing');
+    okInside(`git -C ${clone} push -q origin master`);
+    const changed = up();
+    assert.equal(changed.code, 0, changed.err);
+    assert.notEqual(changed.out.trim(), cid, 'a change on the default branch recreates the container');
+  } finally {
+    for (const c of containers()) run('docker', ['rm', '-fv', c]);
+    for (const v of volumes) run('docker', ['volume', 'rm', v]);
+    for (const img of images) run('docker', ['rmi', img]);
+  }
+});
+
 test('qd-project-up fixture: main-only config, exact mounts, commits and egress (SC-15–17)', () => testProjectFixture());
 test('qd-project-up extensions fixture: creation-only read token, helper and persistence checks (SC-16, SC-19)', t => testProjectFixture(`dummy-extensions-${id}`, t));
 

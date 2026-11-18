@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// qd-project-up <home> <project>: main-branch config -> devcontainer CLI -> socket proxy.
+// qd-project-up <home> <project>: default-branch config -> devcontainer CLI -> socket proxy.
 // Features are trusted executable project input, not sandboxed by this renderer (security-review 01).
 // The Quarterdeck-added entries in project-layer.json (FirstMate's Crewmate busy hook) join the project's Extension
 // Layer in the export only: the
@@ -36,8 +36,11 @@ function main() {
   // Keep the image-owned credential helper for fetch, never a caller-selected global config.
   Object.assign(gitEnv, { GIT_CONFIG_GLOBAL: '/etc/dev-setup/gitconfig', GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null', GIT_CONFIG_KEY_1: 'core.fsmonitor', GIT_CONFIG_VALUE_1: 'false' });
   const git = (...args) => execFileSync('git', ['--git-dir', gitdir, ...args], { cwd: '/', env: gitEnv, maxBuffer: 64 << 20 });
-  git('fetch', '--quiet', 'origin', '+refs/heads/main:refs/remotes/origin/main');
-  const tree = git('rev-parse', 'refs/remotes/origin/main:.devcontainer').toString().trim();
+  // The default branch is whatever origin's HEAD names (same query as qd-publish); never a guess.
+  const base = git('ls-remote', '--symref', 'origin', 'HEAD').toString().split('\n').map(l => /^ref: refs\/heads\/(\S+)\s+HEAD$/.exec(l)?.[1]).find(Boolean);
+  if (!base) throw Error('origin reports no default branch (its HEAD names no branch); refusing to guess main');
+  git('fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`);
+  const tree = git('rev-parse', `refs/remotes/origin/${base}:.devcontainer`).toString().trim();
   const errors = [];
   const source = parse(git('show', `${tree}:devcontainer.json`).toString(), errors, { allowTrailingComma: true });
   if (errors.length || !source || typeof source !== 'object' || Array.isArray(source)) throw Error('invalid devcontainer JSONC');
@@ -72,7 +75,7 @@ function main() {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || !Array.isArray(manifest.extensions ?? [])) throw Error('invalid project extensions.json');
   manifest.extensions = [...(manifest.extensions ?? []), ...layer.extensions];
   fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n', { mode: 0o644 });
-  // A container made before those entries changed is replaced, like one made from an older main config.
+  // A container made before those entries changed is replaced, like one made from an older default-branch config.
   const layerDigest = createHash('sha256').update(JSON.stringify(layer.extensions)).digest('hex').slice(0, 16);
   const pool = path.join(root, 'pool');
   const hooks = path.join(gitdir, 'hooks');

@@ -41,7 +41,7 @@ Quarterdeck depends on Base material and the extension installer; nothing in `ba
 | Entrypoint | `quarterdeck/bin/qd-entry`, `quarterdeck/bin/qd-server` | Root egress setup, then non-root token parsing and Herdr server. |
 | FirstMate configuration | `quarterdeck/bin/qd-first-mate`, `quarterdeck/fleet/config/` | Seed the home, repair shallow history locally, preserve existing configuration, optionally open the First Mate workspace. |
 | Claude launcher | `quarterdeck/bin/claude` | Route FirstMate launches into the owning project container or the Quarterdeck publish session. |
-| Project-container creator | `quarterdeck/bin/qd-project-up`, `quarterdeck/project-layer.json`, `quarterdeck/hooks/crewmate-busy.sh` | Render fetched main-branch configuration, add the Quarterdeck's project-layer entries to the export, and manage the home's container through the devcontainer CLI. |
+| Project-container creator | `quarterdeck/bin/qd-project-up`, `quarterdeck/project-layer.json`, `quarterdeck/hooks/crewmate-busy.sh` | Render configuration fetched from the repository's default branch, add the Quarterdeck's project-layer entries to the export, and manage the home's container through the devcontainer CLI. |
 | Publisher | `quarterdeck/bin/qd-publish` | Push from the clone's Git directory with hooks/fsmonitor disabled; open a PR listing committed tickets. |
 | Mate skills | `quarterdeck/skills/qd-first-mate/`, `quarterdeck/skills/qd-spec-run/`, `quarterdeck/fleet/charter.md` | First Mate handoff; Second Mate planning, ordered tickets, one retry, stop/publish and report procedures through FirstMate commands. |
 

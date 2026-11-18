@@ -1,6 +1,6 @@
 # 24: The project container uses the repository's default branch, `main` or `master`
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 3 (Project container)
 
@@ -18,13 +18,13 @@ The user decided on 2026-11-17 that the Quarterdeck supports a repository whose 
 
 ## Acceptance criteria
 
-- [ ] With a fixture origin whose `HEAD` points at `master`, `qd-project-up` creates the container from `master`'s `.devcontainer/`, with the same mounts, labels and checks as a `main` origin (SC-16).
-- [ ] A change to `.devcontainer/` on the default branch recreates the container. A change on any other branch, `main` included when the default is `master`, changes nothing.
-- [ ] When origin reports no default branch, `qd-project-up` fails before creating anything, with a message naming the problem. It does not guess `main`.
-- [ ] Every existing `qd-project-up` case with a `main` origin passes unchanged.
-- [ ] The branch is read through the same git environment `qd-project-up` already uses: hooks and fsmonitor off, the image's credential helper, no caller-chosen global config.
-- [ ] `quarterdeck/PROJECT-CONTAINERS.md`, the `qd-project-up` header and `docs/architecture/quarterdeck.md` say "default branch" where they now say "main".
-- [ ] `npm run test:quarterdeck` passes, followed by `npm run test:cleanup` with no test containers left. The full suite is not run.
+- [x] With a fixture origin whose `HEAD` points at `master`, `qd-project-up` creates the container from `master`'s `.devcontainer/`, with the same mounts, labels and checks as a `main` origin (SC-16).
+- [x] A change to `.devcontainer/` on the default branch recreates the container. A change on any other branch, `main` included when the default is `master`, changes nothing.
+- [x] When origin reports no default branch, `qd-project-up` fails before creating anything, with a message naming the problem. It does not guess `main`.
+- [x] Every existing `qd-project-up` case with a `main` origin passes unchanged.
+- [x] The branch is read through the same git environment `qd-project-up` already uses: hooks and fsmonitor off, the image's credential helper, no caller-chosen global config.
+- [x] `quarterdeck/PROJECT-CONTAINERS.md`, the `qd-project-up` header and `docs/architecture/quarterdeck.md` say "default branch" where they now say "main".
+- [x] `npm run test:quarterdeck` passes, followed by `npm run test:cleanup` with no test containers left. The full suite is not run.
 
 ## Technical context
 
@@ -38,3 +38,7 @@ The user decided on 2026-11-17 that the Quarterdeck supports a repository whose 
 None.
 
 ## Comments
+
+### Resolution (ticket agent)
+
+`qd-project-up` reads origin's default branch with `git ls-remote --symref origin HEAD` through its existing hardened git environment, fetches and exports that branch, and fails before creating anything when origin reports none (no `main` fallback). New acceptance test covers `master`, no default branch, non-default-branch change (no recreate) and default-branch change (recreate). Docs updated (PROJECT-CONTAINERS.md, header, docs/architecture/quarterdeck.md, ARCHITECTURE.md, CHECKLIST.md wording). `npm run test:quarterdeck`: 43/43; cleanup clean. Review: no blockers; CHECKLIST wording fixed; the quoted security-review ticket left unedited (immutable).
