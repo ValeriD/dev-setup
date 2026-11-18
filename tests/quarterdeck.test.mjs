@@ -1250,6 +1250,30 @@ test('qd-spec-run keeps shared-quota mode as the shipped crew-dispatch.json sets
   assert.match(sentences[0], /no quota calls/, sentences[0]);
 });
 
+test('ticket 26: the shipped supervision-host-off opts the First Mate home out and FirstMate carries it into a Second Mate home (no FirstMate patch, no token)', () => {
+  assert.equal(readFileSync(join(REPO, 'quarterdeck/fleet/config/supervision-host-off'), 'utf8'), '');
+  const r = run('docker', ['run', '--rm', '--label', runLabel, '--network', 'none', '--entrypoint', 'bash', image, '-ceu', String.raw`
+mkdir -p /tmp/t26/fm/config /tmp/t26/sm/config
+cp /opt/qd/fleet/config/* /tmp/t26/fm/config/
+chown -R node:node /tmp/t26
+setpriv --reuid=1000 --regid=1000 --init-groups env HOME=/home/node bash -se <<'NODE'
+set -euo pipefail
+cd /opt/firstmate/bin
+. ./fm-supervision-engine-lib.sh
+. ./fm-config-inherit-lib.sh
+# The Stop hook's own gate: fm_supervision_host_enabled "$CONFIG" claude (bin/fm-claude-stop-autoarm.sh).
+if fm_supervision_host_enabled /tmp/t26/fm/config claude; then echo 'First Mate home still runs the host' >&2; exit 1; fi
+# Without the file a Claude primary runs the host, so the gate is the file.
+if ! fm_supervision_host_enabled /tmp/t26/sm/config claude; then echo 'gate is off without the file' >&2; exit 1; fi
+# fm-home-seed.sh does not copy config; FirstMate's convergence at spawn (fm-spawn.sh --secondmate) does.
+propagate_secondmate_inheritance /tmp/t26/fm /tmp/t26/sm
+test -e /tmp/t26/sm/config/supervision-host-off
+if fm_supervision_host_enabled /tmp/t26/sm/config claude; then echo 'Second Mate home still runs the host' >&2; exit 1; fi
+NODE
+`]);
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+});
+
 test('First Mate: the shipped configuration is in the home and no dispatch variable is in .env (SC-06)', () => {
   const c = (f) => readFileSync(join(home(), 'config', f), 'utf8');
   assert.equal(c('backend').trim(), 'herdr');

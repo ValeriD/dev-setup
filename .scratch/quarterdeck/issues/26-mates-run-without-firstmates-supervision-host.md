@@ -1,6 +1,6 @@
 # 26: The mates run without FirstMate's supervision host, which cannot log in
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 1 (Quarterdeck up)
 
@@ -22,12 +22,12 @@ The Quarterdeck ships `config/supervision-host-off` for the First Mate's home, a
 
 ## Acceptance criteria
 
-- [ ] `quarterdeck/fleet/config/supervision-host-off` exists and is copied into the First Mate's home `config/` on start, only if absent, like the other shipped config files.
-- [ ] A Second Mate home seeded by the First Mate (`fm-home-seed.sh`) has `config/supervision-host-off`. Use FirstMate's config inheritance if it covers this file; otherwise, add a seeding step to `qd-first-mate`'s step 0. Either way, FirstMate itself is not edited (ADR 0008).
-- [ ] With the file present, `fm_supervision_host_enabled` reports the host as off for that home. A stub-Claude test shows no `fm-supervision-host.sh` process after a Stop hook runs.
-- [ ] Token delivery is unchanged: the Claude token reaches Herdr panes only.
-- [ ] `quarterdeck/CHECKLIST.md`'s ticket 17 SC-14 row notes that away supervision runs through the Stop-hook auto-arm, not the supervision host.
-- [ ] `npm run test:quarterdeck` passes, followed by `npm run test:cleanup` with no test containers left. The full suite is not run.
+- [x] `quarterdeck/fleet/config/supervision-host-off` exists and is copied into the First Mate's home `config/` on start, only if absent, like the other shipped config files.
+- [x] A Second Mate home seeded by the First Mate (`fm-home-seed.sh`) has `config/supervision-host-off`. Use FirstMate's config inheritance if it covers this file; otherwise, add a seeding step to `qd-first-mate`'s step 0. Either way, FirstMate itself is not edited (ADR 0008).
+- [x] With the file present, `fm_supervision_host_enabled` reports the host as off for that home. A stub-Claude test shows no `fm-supervision-host.sh` process after a Stop hook runs.
+- [x] Token delivery is unchanged: the Claude token reaches Herdr panes only.
+- [x] `quarterdeck/CHECKLIST.md`'s ticket 17 SC-14 row notes that away supervision runs through the Stop-hook auto-arm, not the supervision host.
+- [x] `npm run test:quarterdeck` passes, followed by `npm run test:cleanup` with no test containers left. The full suite is not run.
 
 ## Technical context
 
@@ -40,3 +40,13 @@ The Quarterdeck ships `config/supervision-host-off` for the First Mate's home, a
 None.
 
 ## Comments
+
+### Resolution (2026-11-18)
+
+The user confirmed the Decision: the supervision host is off in Quarterdeck homes via `config/supervision-host-off`.
+
+- FirstMate at the pin (427056c) does not copy `config/` in `fm-home-seed.sh`. Inheritance happens at convergence instead: `supervision-host-off` is in `FM_INHERITABLE_CONFIG` (`bin/fm-config-inherit-lib.sh`), pushed by `fm-spawn.sh --secondmate`, which `qd-first-mate` step 0 already runs after seeding. So no `qd-first-mate` or skill change was needed, and FirstMate is unpatched.
+- Added `quarterdeck/fleet/config/supervision-host-off` (empty); `qd-first-mate` already copies every shipped config file if absent.
+- Test `ticket 26: ...` in `tests/quarterdeck.test.mjs` runs FirstMate's real `fm_supervision_host_enabled` (the gate `fm-claude-stop-autoarm.sh` calls) and `propagate_secondmate_inheritance` in the image: off for the First Mate home, off for a Second Mate home after propagation, on without the file. It does not run the Stop hook itself (needs a live Claude session lock), so "no `fm-supervision-host.sh` process after a Stop hook" is shown through the gate, not a process check.
+- The CHECKLIST SC-14 row notes that away supervision runs through the Stop-hook auto-arm.
+- Already provisioned Second Mates get the file at their next `fm-spawn.sh` or bootstrap convergence; the First Mate home gets it at the next Quarterdeck start (file absent only).
