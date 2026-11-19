@@ -8,7 +8,7 @@
     {
       "description": "Claude Code version pinned as a Dockerfile ARG",
       "customType": "regex",
-      "managerFilePatterns": ["/^(variants/(node|markdown)|quarterdeck)/Dockerfile$/"],
+      "managerFilePatterns": ["/^variants/(node|markdown)/Dockerfile$/"],
       "matchStrings": ["ARG CLAUDE_CODE_VERSION=(?<currentValue>\\S+)"],
       "datasourceTemplate": "npm",
       "depNameTemplate": "@anthropic-ai/claude-code"
@@ -32,7 +32,7 @@
     {
       "description": "pnpm version pinned as a Dockerfile ARG",
       "customType": "regex",
-      "managerFilePatterns": ["/^(variants/(node|markdown)|quarterdeck)/Dockerfile$/"],
+      "managerFilePatterns": ["/^variants/(node|markdown)/Dockerfile$/"],
       "matchStrings": ["ARG PNPM_VERSION=(?<currentValue>\\S+)"],
       "datasourceTemplate": "npm",
       "depNameTemplate": "pnpm"
@@ -46,14 +46,12 @@
       "depNameTemplate": "pnpm"
     },
     {
-      "description": "devcontainers CLI version pinned in the workflow env, the acceptance suite, the dev-container skill helper, the Quarterdeck Dockerfile, the host quarterdeck command and the README",
+      "description": "devcontainers CLI version pinned in the workflow env, the acceptance suite, the dev-container skill helper and the README",
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/.+\\.ya?ml$/",
         "/^tests/lib\\.mjs$/",
         "/^skills/dev-container/scripts/commands\\.mjs$/",
-        "/^quarterdeck/Dockerfile$/",
-        "/^quarterdeck/bin/quarterdeck$/",
         "/^README\\.md$/"
       ],
       "matchStrings": [
@@ -69,13 +67,6 @@
       "customType": "regex",
       "managerFilePatterns": ["/^skills/dev-container/scripts/commands\\.mjs$/"],
       "matchStrings": ["'(?<depName>ghcr\\.io/sigstore/cosign/cosign):(?<currentValue>v\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[0-9a-f]{64})'"],
-      "datasourceTemplate": "docker"
-    },
-    {
-      "description": "The Quarterdeck's Docker socket proxy image (tag plus digest) in quarterdeck/docker-proxy.conf",
-      "customType": "regex",
-      "managerFilePatterns": ["/^quarterdeck/docker-proxy\\.conf$/"],
-      "matchStrings": ["PROXY_IMAGE=(?<depName>[^:\\s]+/[^:\\s]+):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})"],
       "datasourceTemplate": "docker"
     },
     {

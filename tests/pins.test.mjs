@@ -20,20 +20,14 @@ test('rejects tag-pinned actions and images', () => {
 
 const dockerfile = (base, claude, pnpm = '11.0.0') => `FROM node:24@sha256:${base.repeat(64)}\nARG PNPM_VERSION=${pnpm}\nARG CLAUDE_CODE_VERSION=${claude}\n`;
 
-test('the Quarterdeck Dockerfile must agree with the Node Variant on base digest and Claude version', () => {
-  assert.deepEqual(findDrift(dockerfile('a', '2.1.0'), dockerfile('a', '2.1.0')), []);
-  const baseDrift = findDrift(dockerfile('a', '2.1.0'), dockerfile('b', '2.1.0'));
+test('a Dockerfile that repeats the Node Variant pins must agree on base digest, Claude Code and pnpm', () => {
+  assert.deepEqual(findDrift(dockerfile('a', '2.1.0'), dockerfile('a', '2.1.0'), 'x/Dockerfile'), []);
+  const baseDrift = findDrift(dockerfile('a', '2.1.0'), dockerfile('b', '2.1.0'), 'x/Dockerfile');
   assert.equal(baseDrift.length, 1);
   assert.match(baseDrift[0], /base image/);
-  const claudeDrift = findDrift(dockerfile('a', '2.1.0'), dockerfile('a', '2.2.0'));
+  const claudeDrift = findDrift(dockerfile('a', '2.1.0'), dockerfile('a', '2.2.0'), 'x/Dockerfile');
   assert.equal(claudeDrift.length, 1);
-  assert.equal(findDrift(dockerfile('a', '2.1.0'), dockerfile('a', '2.1.0', '12.0.0')).length, 1);
-});
-
-test('the repository Dockerfiles agree today and the Quarterdeck base is a digest', () => {
-  const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
-  assert.deepEqual(findDrift(read('variants/node/Dockerfile'), read('quarterdeck/Dockerfile')), []);
-  assert.deepEqual(findUnpinned('quarterdeck/Dockerfile', read('quarterdeck/Dockerfile')), []);
+  assert.equal(findDrift(dockerfile('a', '2.1.0'), dockerfile('a', '2.1.0', '12.0.0'), 'x/Dockerfile').length, 1);
 });
 
 test('the Markdown Variant Dockerfile agrees with the Node Variant and is digest-pinned', () => {
@@ -42,11 +36,4 @@ test('the Markdown Variant Dockerfile agrees with the Node Variant and is digest
   assert.deepEqual(findDrift(read('variants/node/Dockerfile'), md, 'variants/markdown/Dockerfile'), []);
   assert.deepEqual(findUnpinned('variants/markdown/Dockerfile', md), []);
   assert.match(findDrift(dockerfile('a', '2.1.0'), dockerfile('b', '2.1.0'), 'variants/markdown/Dockerfile')[0], /^variants\/markdown\/Dockerfile: base image/);
-});
-
-test('the Quarterdeck proxy image must be pinned to a digest, today and in general', () => {
-  assert.equal(findUnpinned('quarterdeck/docker-proxy.conf', 'PROXY_IMAGE=wollomatic/socket-proxy:1.13.2\n').length, 1);
-  assert.equal(findUnpinned('quarterdeck/docker-proxy.conf', 'PROXY_IMAGE=wollomatic/socket-proxy:1.13.2@sha256:' + 'c'.repeat(64) + '\n').length, 0);
-  const text = readFileSync(new URL('../quarterdeck/docker-proxy.conf', import.meta.url), 'utf8');
-  assert.deepEqual(findUnpinned('quarterdeck/docker-proxy.conf', text), []);
 });
