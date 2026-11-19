@@ -1,6 +1,6 @@
 # 06: Remove a Project
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 6 (Removal)
 
@@ -12,12 +12,12 @@ A tool that removes what the Quarterdeck created for one Project: its container,
 
 ## Acceptance criteria
 
-- [ ] `qd-project-rm <name>` removes the container labelled for that Project and home, the exports under `<work root>/quarterdeck/config/<name>/` and the Project's config record (SC-20).
-- [ ] A second Project's container, exports and record are untouched, and the Quarterdeck keeps running (SC-20).
-- [ ] The tool refuses, changing nothing, while FirstMate has an open record for that Project.
-- [ ] The tool never deletes the Project's folder or its git repository, and never removes a container that does not carry the creator, home and Project labels.
-- [ ] An unknown name exits non-zero and changes nothing.
-- [ ] `npm run test:errands` passes.
+- [x] `qd-project-rm <name>` removes the container labelled for that Project and home, the exports under `<work root>/quarterdeck/config/<name>/` and the Project's config record (SC-20).
+- [x] A second Project's container, exports and record are untouched, and the Quarterdeck keeps running (SC-20).
+- [x] The tool refuses, changing nothing, while FirstMate has an open record for that Project.
+- [x] The tool never deletes the Project's folder or its git repository, and never removes a container that does not carry the creator, home and Project labels.
+- [x] An unknown name exits non-zero and changes nothing.
+- [x] `npm run test:errands` passes.
 
 ## Technical context
 
@@ -43,3 +43,16 @@ A tool that removes what the Quarterdeck created for one Project: its container,
 - 02: Create a Project with no remote
 
 ## Comments
+
+### Resolution (Sonnet agent)
+
+Built in the commit "errands 06: remove a Project". New `quarterdeck/bin/qd-project-rm` (baked into the Quarterdeck image beside `qd-project-new`). Order: refusals first, then the labelled container(s), the exports, the `projects/<name>` link, and the config record last so a failed run can be repeated. A container is listed only by all three labels (creator `qd-project-up`, this home, this Project), with `docker rm -f` through the existing proxy (no proxy change); no volumes, no prune, no name patterns. Open work is any `<home>/state/*.meta` whose `project=` resolves to the Project's folder or its link (FirstMate's own record of live tasks); there is no force option. An unknown name (no container, exports or record) exits non-zero and changes nothing. The folder, its git repository and the registry entry are never touched. `tests/errands.test.mjs` has one new test (SC-20, tool half): two Projects, look-alike containers (other home, other creator, no creator) that survive, refusal for open records (also via the link path) with an unchanged snapshot, the other Project's and Secondmate records ignored, unknown and bad names, the folder kept, the other Project's files and container untouched, the Quarterdeck still running, the name reusable. `npm run test:errands` 8/8 green; cleanup clean. `ARCHITECTURE.md` and `quarterdeck/PROJECT-CONTAINERS.md` updated.
+
+Decisions and caveats:
+- The tool also removes the `<work root>/projects/<name>` link, but only when it is a symlink to the Project's folder. Without this a dangling link would make `qd-project-new` report "exists" after the skill removes the folder. The ticket does not list the link; it is Quarterdeck-made and the folder is untouched.
+- Exports are removed per home (`config/<name>/<home hash>`), and `config/<name>` only if then empty, so a same-named Project of another home keeps its exports.
+- A Project container can write `state/`, so a Crewmate could delete its own `.meta` and defeat the refusal. The user's confirmation in the `qd-project` skill (ticket 07) is the other guard.
+- `qd-project-rm` does not remove the container's anonymous volumes (same as `qd-project-up`'s replacement), and never Claude or Codex volumes.
+- Not run: `test:quarterdeck`, `test:skill`, pins and Renovate tests (nothing they cover changed except the Dockerfile COPY line; the Quarterdeck image was rebuilt by the errands test).
+
+Review: reviewer agents not spawned; careful self-review against the design and spec. Findings: none requiring change.
