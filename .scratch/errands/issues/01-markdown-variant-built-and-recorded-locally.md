@@ -1,6 +1,6 @@
 # 01: A Markdown Variant that is built and recorded locally
 
-**Status:** ready-for-agent
+**Status:** closed
 **Model:** Sonnet
 **Design slice:** 1 (Markdown Variant)
 
@@ -12,15 +12,15 @@ A second Variant, `markdown`, for Projects that hold no code: Base with Markdown
 
 ## Acceptance criteria
 
-- [ ] `variants/markdown/` builds an image from the same pinned base digest as the Node Variant, with Base's material, the managed Claude policy and the egress entrypoint, plus Markdown tooling. It contains no Node development toolchain beyond what Base itself needs.
-- [ ] `templates/markdown/` holds a Template whose `.devcontainer/` has the same shape and hardening options as `templates/node/`.
-- [ ] A subcommand of the host `quarterdeck` command builds the Markdown Variant and writes its image id to a local Variant record under `<work root>/quarterdeck/`. The subcommand is documented in the command's header and in `README.md`.
-- [ ] `qd-project-up` accepts a project whose image is listed in that record. An image that is neither a digest-pinned published Variant nor in the record is refused with a message that names the reason. `QD_PROJECT_TEST_IMAGE` still works as a test seam.
-- [ ] A container started from the Markdown Variant fails closed when its egress setup cannot run, has the managed Claude policy in place, and runs with capabilities dropped. This is proven by a small targeted test of the built image, not by the Node acceptance files.
-- [ ] `package.json` has `test:errands`, which runs only `tests/errands.test.mjs`, and `README.md`'s test table has a row for it.
-- [ ] The Markdown Variant's pins are covered by `scripts/check-pins.mjs` and Renovate in the same way as the Node Variant's; `node scripts/check-pins.mjs` and `node --test tests/pins.test.mjs tests/renovate.test.mjs` pass.
-- [ ] `.github/workflows/ci.yml` gains no job that publishes, signs or attests the Markdown Variant or its Template. If the new test file is picked up by the existing acceptance job, that job builds what the file needs and stays green.
-- [ ] `npm run test:errands` and `npm run test:quarterdeck` pass.
+- [x] `variants/markdown/` builds an image from the same pinned base digest as the Node Variant, with Base's material, the managed Claude policy and the egress entrypoint, plus Markdown tooling. It contains no Node development toolchain beyond what Base itself needs.
+- [x] `templates/markdown/` holds a Template whose `.devcontainer/` has the same shape and hardening options as `templates/node/`.
+- [x] A subcommand of the host `quarterdeck` command builds the Markdown Variant and writes its image id to a local Variant record under `<work root>/quarterdeck/`. The subcommand is documented in the command's header and in `README.md`.
+- [x] `qd-project-up` accepts a project whose image is listed in that record. An image that is neither a digest-pinned published Variant nor in the record is refused with a message that names the reason. `QD_PROJECT_TEST_IMAGE` still works as a test seam.
+- [x] A container started from the Markdown Variant fails closed when its egress setup cannot run, has the managed Claude policy in place, and runs with capabilities dropped. This is proven by a small targeted test of the built image, not by the Node acceptance files.
+- [x] `package.json` has `test:errands`, which runs only `tests/errands.test.mjs`, and `README.md`'s test table has a row for it.
+- [x] The Markdown Variant's pins are covered by `scripts/check-pins.mjs` and Renovate in the same way as the Node Variant's; `node scripts/check-pins.mjs` and `node --test tests/pins.test.mjs tests/renovate.test.mjs` pass.
+- [x] `.github/workflows/ci.yml` gains no job that publishes, signs or attests the Markdown Variant or its Template. If the new test file is picked up by the existing acceptance job, that job builds what the file needs and stays green.
+- [x] `npm run test:errands` and `npm run test:quarterdeck` pass.
 
 ## Technical context
 
@@ -46,3 +46,19 @@ A second Variant, `markdown`, for Projects that hold no code: Base with Markdown
 None (can start immediately).
 
 ## Comments
+
+### Resolution (Sonnet agent)
+
+Built in 4796ead. `variants/markdown/` (same base digest, pandoc and a pinned markdownlint-cli2, Claude Code and pnpm for Base's installer, no Codex), `templates/markdown/.devcontainer/`, `quarterdeck build-variant markdown` (devcontainer CLI; records `markdown <image id>` in `<work root>/quarterdeck/local-variants`), and `qd-project-up` accepting an id from that record (refusal names the reason). `tests/errands.test.mjs` with `npm run test:errands` (5 tests, green); `npm run test:quarterdeck` 45/45 green; pins and Renovate tests green.
+
+Decisions worth knowing:
+- `base/egress/start.sh` hard-coded `manifests/node.json`; it now passes every non-Base manifest in that directory (identical result for Node). Without this a Markdown container with a project `extensions.json` would fail closed.
+- `variants/markdown` has no `variant.json` and `templates/markdown` has no `devcontainer-template.json`, so the host skill does not offer it and the CI Template publish skips it. Ticket 02's `qd-project-new` must substitute `${templateOption:image}` itself (with the recorded image id).
+- A Project config using an image id works through `qd-project-up` (it sets updateRemoteUserUID false); a hand-run `devcontainer up` needs the tag, because the CLI's UID step cannot build FROM an id.
+- `ci.yml`: only the `tests` path group gained `variants/markdown/`; no publish, sign or attest step touches the Markdown Variant. `quarterdeck/bin/quarterdeck` joined the devcontainer CLI pin's Renovate patterns.
+
+Not checked: the Node acceptance suite after the `start.sh` change (rules forbid the full suite; the Markdown container exercised the same code path). `test:skill` could not run here (host deps not installed); one added assertion there is unrun.
+
+Risk: the record sits in the work root, which mates can write, so a mate could list another local image id. Accepted by the design (the record is only as trusted as the work root).
+
+Review: reviewer agents were not spawned; I did a self-review against the design and spec. Findings: none requiring change beyond the `start.sh` generalisation noted above.
