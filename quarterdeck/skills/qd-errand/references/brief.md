@@ -42,3 +42,18 @@ Ship branch: fm/<id>
 ```
 
 Done when neither placeholder remains, both contract lines match `<id>`, and every generated section is still there.
+
+## For a Project with a GitHub repository (the Second Mate)
+
+`fm-brief.sh <id> <project> --mode direct-PR --branch-prefix <prefix>` writes the same two placeholders, `{TASK}` and `{FIRSTMATE_SPEC}`. Replace both, and only them.
+
+- **Captain's intent:** the whole handoff verbatim: the `Errand`, `Branch prefix` and `Project` headers, then the user's words and answers. The publish session builds the pull request text from this section, so it must read as something to review.
+- **Firstmate spec:** the same lines as above, with `Errand <id> in Project <project>` and branch `<prefix><id>`, plus the check line read from the Project's default branch in `$S/projects/<project>` (`origin/<default branch>`), and this bullet, filled with the real paths:
+
+  ```text
+  - **Publish.** Run `FM_HOME="<Second Mate home>" qd-publish --body-from-brief "<Second Mate home>" "<project>" "<prefix><id>" "<id>"` and nothing else. This session is routed into the Quarterdeck. On success append `done: PR <url>` with the URL the command printed. On failure report its diagnostic; never claim a pull request from intent. Make no new commit.
+  ```
+
+- **Definition of done:** keep `Delivery contract: mode=direct-PR` and `Ship branch: <prefix><id>` as generated. Replace the push and pull request instructions with: `Commit, append your final status line (done ... check: ...); do not push and do not open a pull request, except in a Publish. session.`
+
+Keep `# Setup`, `# Rules` and the other generated sections unchanged. Done when both placeholders are gone, both contract lines match the branch, and the publish command has no placeholder left.

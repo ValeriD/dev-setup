@@ -5,7 +5,7 @@ description: Provision a Consuming Project's Second Mate or hand the user's deci
 
 # First Mate: hand off a Spec Run
 
-Use the user's supplied grilling decisions as input. In a Project with a Second Mate, only that Second Mate starts Crewmates. The First Mate starts a Crewmate only for an Errand in a Project with no remote, through `qd-errand`. It never writes project files.
+Use the user's supplied grilling decisions as input. In a Project with a Second Mate, only that Second Mate starts Crewmates. The First Mate starts a Crewmate only for an Errand in a Project with no remote, through `qd-errand`. An Errand in a Project with a Second Mate is handed over to it (section 1b). It never writes project files.
 
 ## 0. Register and provision once per project
 
@@ -42,6 +42,24 @@ FM_HOME="$M" bin/fm-send.sh "sm-$project" "$handoff"
 ```
 
 The Second Mate follows `qd-spec-run`. Track its correlated returns through FirstMate's parent channel, not its chat or its child sessions.
+
+## 1b. Hand off an Errand to a Second Mate
+
+An Errand on a Project that has a Second Mate is grilled by you as `qd-errand` section 1 says, then handed over; you start no Crewmate and merge nothing. Pick a unique Errand id (lowercase letters, digits, `-`, starting with the Project's name) and a branch prefix from `feat/`, `fix/`, `chore/`. Build `$handoff` as these three header lines followed by the user's Errand and every answer verbatim:
+
+```text
+Errand: <id>
+Branch prefix: <prefix>
+Project: <project>
+
+<the Errand and the answers verbatim>
+```
+
+```sh
+FM_HOME="$M" bin/fm-send.sh "sm-$project" "$handoff"
+```
+
+The Second Mate follows `qd-errand` section 7. Questions and answers take section 2 with `<id>` as the key. Its final `done` pointer names `$S/data/<id>/report.md`: relay that file to the user verbatim (section 3), without a summary. The pull request in it is the user's to merge.
 
 ## 2. Carry a question to the user and the answer back
 

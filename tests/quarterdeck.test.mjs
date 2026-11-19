@@ -896,6 +896,10 @@ test('mate procedures: qd-project and qd-errand are installed and name only inst
   const first = skills['qd-first-mate'];
   assert.match(first, /In a Project with a Second Mate, only that Second Mate starts Crewmates\. The First Mate starts a Crewmate only for an Errand in a Project with no remote, through `qd-errand`\./);
   assert.doesNotMatch(first, /never spawns a project Crewmate/);
+  // Errands on a GitHub Project: handed to the Second Mate, who publishes through the existing route and qd-publish.
+  for (const line of ['Errand: <id>', 'Branch prefix: <prefix>', 'Project: <project>', 'fm-send.sh "sm-$project" "$handoff"', 'report.md', 'verbatim']) assert.ok(first.includes(line), line);
+  for (const line of ['--mode direct-PR --yolo off --branch-prefix', 'qd-route', 'relaunch --model sonnet --note "Publish."', 'qd-publish --body-from-brief', 'no publish', 'merge nothing', 'has exited']) assert.ok(errand.includes(line), line);
+  for (const line of ['--mode direct-PR --branch-prefix', 'qd-publish --body-from-brief "<Second Mate home>" "<project>" "<prefix><id>" "<id>"', '- **Publish.** Run `', 'Delivery contract: mode=direct-PR', 'do not push']) assert.ok(brief.includes(line), line);
 });
 
 test("Claude's policy keeps Base's keys except allowManagedHooksOnly", () => {
@@ -1482,6 +1486,32 @@ test('qd-publish pushes exactly the named branch and opens one pull request agai
   assert.equal(val('--base'), 'main');
   assert.equal(val('--head'), 'qd/spec');
   assert.ok(log.includes('arg=Tickets implemented in this Spec Run:\n\n- 01: First\n- 02: Second\n- 9: Ninth\n- 10: Third\n'), log);
+});
+
+test('qd-publish --body-from-brief takes the pull request text from the Errand\'s Brief, on a branch with no tickets; without the flag it still fails before the push (Errands SC-15)', () => {
+  const r = publishRun(`
+    c=$b/home/projects/proj; mkdir -p $b/home/data/errx $b/home/data/emptyx
+    git -C $c checkout -q -b chore/errx main; echo e > $c/e.md; git -C $c add e.md; git -C $c commit -q -m errand
+    printf '# Task\n\n## Captain\\x27s intent\n\nErrand: errx\nProject: proj\n\nWrite e.md, short.\n\n## Firstmate spec\nSTOP-HERE\n' > $b/home/data/errx/brief.md
+    printf '## Captain\\x27s intent\n\n## Firstmate spec\nx\n' > $b/home/data/emptyx/brief.md
+    refs() { git --git-dir $b/origin.git for-each-ref --format='%(refname)' | sort | tr '\\n' ' '; echo; }
+    echo "noflag:"; qd-publish $b/home proj chore/errx errx > $b/o 2>&1 && echo ok || echo "code=$?"; cat $b/o; refs; test ! -e $b/gh.log && echo no-gh-call
+    echo "nobrief:"; qd-publish --body-from-brief $b/home proj chore/errx nonesuch > $b/o 2>&1 && echo ok || echo "code=$?"; test ! -e $b/gh.log && echo no-gh-call
+    echo "emptybrief:"; qd-publish --body-from-brief $b/home proj chore/errx emptyx > $b/o 2>&1 && echo ok || echo "code=$?"; refs
+    echo "flag:"; qd-publish --body-from-brief $b/home proj chore/errx errx; refs; echo ---; cat $b/gh.log`);
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  const [, noflag, nobrief, emptybrief, flag] = r.out.split(/^(?:noflag|nobrief|emptybrief|flag):\n/m);
+  assert.match(noflag, /^code=1\nqd-publish: no tickets under \.scratch\/errx\/issues on chore\/errx\nrefs\/heads\/main \nno-gh-call\n$/);
+  assert.match(nobrief, /^code=1\nno-gh-call\n$/);
+  assert.match(emptybrief, /^code=1\nrefs\/heads\/main \n$/);
+  const [printed, log] = flag.split('---\n');
+  assert.equal(printed, 'https://github.com/o/r/pull/7\nrefs/heads/chore/errx refs/heads/main \n');
+  const args = log.split('\n').filter((l) => l.startsWith('arg=')).map((l) => l.slice(4));
+  assert.equal((log.match(/^CALL$/gm) ?? []).length, 1);
+  const val = (k) => args[args.indexOf(k) + 1];
+  assert.deepEqual([val('--base'), val('--head'), val('--title')], ['main', 'chore/errx', 'Errand: errx']);
+  assert.ok(log.includes('arg=Errand errx, from its Brief:\n\nErrand: errx\nProject: proj\n\nWrite e.md, short.\n'), log);
+  assert.doesNotMatch(log, /STOP-HERE/);
 });
 
 test('SC-18: hooks, core.hooksPath, core.fsmonitor and a redirected worktree .git file never run during qd-publish', () => {

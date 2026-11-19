@@ -752,3 +752,162 @@ test('an Errand stops on a question, survives a dead Crewmate, is sent back, run
     run('docker', ['rm', '-fv', cid]);
   }
 });
+
+// Ticket 09: an Errand on a Project with a GitHub repository (a local bare origin and a stub gh stand in for GitHub).
+// The test script plays the Second Mate (qd-errand section 7) with FirstMate's own commands, beside a Spec Run record of
+// the same Project in the same container. The stub Crewmate is the Errands one; the Spec Run record's is the MVP's.
+test('an Errand handed to a Second Mate\'s home is pushed and opened as one pull request from the Quarterdeck, beside a Spec Run, with no GitHub credential in the container (SC-15, SC-18)', async () => {
+  if (!quarterdeckStarted) {
+    const started = quarterdeck('start', '--no-first-mate');
+    assert.equal(started.code, 0, `${started.out}\n${started.err}`);
+    quarterdeckStarted = true;
+  }
+  const parent = `${work}/fleet/firstmate`;
+  const mate = 'sm-ghp';
+  const home = `${work}/fleet/${mate}`;
+  const origin = `${work}/ghp-origin.git`;
+  const clone = `${home}/projects/ghp`;
+  const errandId = 'ghp-errand';
+  const specId = 'spec-ghp';
+  const branch = `chore/${errandId}`;
+  const fm = (command) => okInside(`cd ${home}; FM_HOME=${home} ${command}`);
+  const read = (p) => okInside(`cat ${p}`);
+  const git = (args) => okInside(`git -C ${clone} ${args}`).trim();
+  const refsOf = () => okInside(`git --git-dir=${origin} for-each-ref --format='%(refname)'`).trim().split('\n').sort();
+  const sessions = (taskId) => okInside(`cat ${home}/state/${taskId}.stub-sessions 2>/dev/null; true`).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const lastStatus = (taskId) => okInside(`tail -n1 ${home}/state/${taskId}.status`).trim();
+  const waitSession = async (taskId, n) => {
+    for (let i = 0; i < 120; i++) {
+      if (sessions(taskId).length >= n) return sessions(taskId)[n - 1];
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    assert.fail(`no report: ${inside(`cat ${home}/state/${taskId}.status`).out}`);
+  };
+
+  // The Project on a local bare origin, with the Markdown Variant's config (the local Variant record accepts its image).
+  const cfg = JSON.parse(markdownConfig().replace(/^\s*\/\/.*$/gm, ''));
+  okInside(`rm -rf ${parent}/projects/ghp; mkdir -p ${parent}/data ${parent}/projects/ghp/.devcontainer; git init -q --bare -b main ${origin}; git -C ${parent}/projects/ghp init -q -b main`);
+  put(`${parent}/projects/ghp/.devcontainer/devcontainer.json`, JSON.stringify({ ...cfg, containerEnv: pinEnv() }));
+  put(`${parent}/projects/ghp/.devcontainer/extensions.json`, readFileSync(join(REPO, 'templates/markdown/.devcontainer/extensions.json')));
+  put(`${parent}/projects/ghp/.gitignore`, '.claude/\n');
+  okInside(`cd ${parent}/projects/ghp; git add .; git -c user.name=T -c user.email=t@example.invalid commit -qm initial; git remote add origin ${origin}; git push -q origin main`);
+  okInside(`printf '%s\\n' '- ghp [direct-PR branch=chore/] - Errands GitHub fixture (added 2026-01-01)' >> ${parent}/data/projects.md`);
+  okInside(`cd ${parent}; FM_HOME=${parent} FM_SECONDMATE_CHARTER='Second Mate for ghp. Commit only.' bin/fm-brief.sh ${mate} --secondmate ghp; FM_HOME=${parent} bin/fm-home-seed.sh ${mate} ${home} ghp`);
+  okInside(`cp /opt/qd/fleet/config/* ${home}/config/`);
+  const base = git('rev-parse origin/main');
+  assert.deepEqual(refsOf(), ['refs/heads/main']);
+
+  const up = fm(`env -u QUARTERDECK_EXTENSIONS_TOKEN -u QD_PROJECT_TEST_IMAGE QD_RUN_LABEL=${runLabel} qd-project-up ${home} ghp`);
+  const cid = up.trim().split('\n').pop();
+  // Both Crewmates are stubs, chosen by record id: the Errands stub, and the MVP's for the Spec Run record's plan.
+  const lib = '/usr/local/lib/qd-test-stubs';
+  const rootIn = (container, script, input) => run('docker', ['exec', '-i', '-u', 'root', container, 'sh', '-c', script], { input });
+  const errandStub = readFileSync(join(REPO, 'tests/fixtures/errands-crewmate/claude.mjs'), 'utf8');
+  const specStub = readFileSync(join(REPO, 'tests/fixtures/quarterdeck-crewmate/claude.mjs'), 'utf8');
+  assert.equal(rootIn(cid, `mkdir -p ${lib}; cat > ${lib}/errand.mjs`, errandStub).code, 0);
+  assert.equal(rootIn(cid, `cat > ${lib}/spec.mjs`, specStub).code, 0);
+  assert.equal(rootIn(cid, `rm -f /usr/local/bin/claude; cat > /usr/local/bin/claude; chmod 755 /usr/local/bin/claude`,
+    `#!/bin/sh\ncase "$FM_TASK_ID" in ${specId}) exec node ${lib}/spec.mjs "$@";; *) exec node ${lib}/errand.mjs "$@";; esac\n`).code, 0);
+
+  // SC-15: nothing GitHub in the Project's container: no variable (names only) and no credential file, now and at each later point.
+  const noGithub = (when) => {
+    const names = [
+      ...JSON.parse(run('docker', ['inspect', cid]).out)[0].Config.Env.map((e) => e.split('=')[0]),
+      ...run('docker', ['exec', '-u', 'node', cid, 'sh', '-c', 'env | cut -d= -f1']).out.split('\n'),
+    ];
+    assert.deepEqual(names.filter((n) => /github|^GH_|token|credential/i.test(n)), [], `${when}: no GitHub variable in the container`);
+    const files = run('docker', ['exec', '-u', 'node', cid, 'sh', '-c', 'for f in "$HOME/.git-credentials" "$HOME/.config/gh" "$HOME/.config/git/credentials" /run/secrets; do test -e "$f" && echo "$f"; done; git config --system --get-regexp "^credential" ; git config --global --get-regexp "^credential"; true']).out.trim();
+    assert.equal(files, '', `${when}: no GitHub credential file or helper in the container`);
+    const mounts = JSON.parse(run('docker', ['inspect', cid]).out)[0].Mounts.map((m) => m.Source);
+    assert.deepEqual(mounts.filter((s) => /\.config\/quarterdeck|token|\.git-credentials|\/secrets/i.test(s)), [], `${when}: no credential mounted`);
+  };
+  noGithub('after start');
+
+  // The Spec Run record of the same Project: planning only is enough to hold a branch and a worktree of its own.
+  const brief = (taskId, task, spec, prefix) => {
+    fm(`bin/fm-brief.sh ${taskId} ghp --mode direct-PR --branch-prefix ${prefix}`);
+    const path = `${home}/data/${taskId}/brief.md`;
+    put(path, read(path).replace('{TASK}', task).replace('{FIRSTMATE_SPEC}', spec)
+      .replace(/This task ships \*\*direct-PR\*\*:[\s\S]*?(?=Do NOT run \/no-mistakes\.)/, 'Commit and report; do not push, do not open a pull request, except in a `Publish.` session.\n'));
+    fm(`bin/fm-dispatch-resolve.sh ${path}`);
+    const out = fm(`bin/fm-spawn.sh ${taskId} projects/ghp --mode direct-PR --yolo off --branch-prefix ${prefix} --harness claude --model sonnet`);
+    const wt = out.match(/worktree=(\S+)/)?.[1];
+    assert.ok(wt, out);
+    return wt;
+  };
+  const specWt = brief(specId, `Spec Run: ${specId}\nProject: ghp\nBranch prefix: feat/`, `Each session does exactly one job named by the latest ## Progress note. No note: plan.\nFixture failure: false\nFixture question: false\n`, 'feat/');
+  const specPlan = await waitSession(specId, 1);
+  const specBranch = `feat/${specId}`;
+  assert.match(lastStatus(specId), /^done \[at=\d+\]: plan committed [0-9a-f]{40}; 2 tickets$/);
+  const specState = () => okInside(`cd ${specWt} && { git rev-parse HEAD; git symbolic-ref HEAD; git status --porcelain --ignored; }`);
+  const specBefore = specState();
+
+  // The Errand: handed over, run as its own record on its own branch, in the same container.
+  const handoff = `Errand: ${errandId}\nBranch prefix: chore/\nProject: ghp\n\nWrite note.md with one line.`;
+  const publishLine = `- **Publish.** Run \`FM_HOME="${home}" qd-publish --body-from-brief "${home}" "ghp" "${branch}" "${errandId}"\` and nothing else. This session is routed into the Quarterdeck. On success append \`done: PR <url>\` with the URL the command printed. Make no new commit.`;
+  const errandWt = brief(errandId, handoff, `Errand file: note.md\nThis Project has no check.\nYour final status line ends with \`check: none\`.\n${publishLine}\n`, 'chore/');
+  const e1 = await waitSession(errandId, 1);
+  assert.match(lastStatus(errandId), new RegExp(`^done \\[at=\\d+\\]: ready in branch ${branch}; check: none$`));
+  assert.equal(e1.branch, branch);
+  assert.equal(e1.cwd, errandWt);
+  assert.equal(e1.start, base, 'its branch starts from the default branch');
+  assert.equal(e1.host, cid.slice(0, 12), 'the Crewmate ran in the Project container');
+  assert.deepEqual(e1.githubEnv, [], 'the Crewmate\'s own environment held no GitHub variable');
+  noGithub('after the Errand reported');
+  // Nothing was pushed by the Crewmate: the Errand is only local until the publish session.
+  assert.deepEqual(refsOf(), ['refs/heads/main']);
+
+  // SC-18: two records, two branches, two worktrees, one container; neither changed the other.
+  assert.notEqual(errandWt, specWt);
+  assert.equal(git(`rev-parse refs/heads/${specBranch}`), specPlan.head);
+  assert.equal(git(`rev-parse refs/heads/${branch}`), e1.head);
+  assert.notEqual(e1.head, specPlan.head);
+  assert.equal(specState(), specBefore, 'the Spec Run record\'s branch and worktree are as they were');
+  assert.equal(inside(`test -e ${specWt}/note.md -o -e ${specWt}/.scratch/${errandId}`).code, 1, 'the Errand\'s files are not in the Spec Run\'s worktree');
+  assert.equal(inside(`test -e ${errandWt}/.scratch`).code, 1, 'the Spec Run\'s files are not in the Errand\'s worktree');
+  assert.equal(okInside(`git -C ${errandWt} status --porcelain`).trim(), '');
+  const launches = read(`${work}/quarterdeck/logs/launch.log`).trim().split('\n').map((l) => JSON.parse(l));
+  const containerOf = (wt) => new Set(launches.filter((l) => l.cwd === wt && l.route === 'project').map((l) => l.container));
+  assert.deepEqual([...containerOf(errandWt)], [...containerOf(specWt)], 'both ran in the same container');
+  assert.equal([...containerOf(errandWt)].length, 1);
+  assert.ok([...containerOf(errandWt)][0].startsWith(cid));
+
+  // Publish, as qd-errand section 7 says: the marker, then a relaunch of the same record. Only this throwaway Quarterdeck's
+  // Claude and gh are swapped; the stub gh records every call and fails on anything but `pr create`.
+  const ghStub = `#!/usr/bin/env node\nconst fs = require('fs');\nconst args = process.argv.slice(2);\nfs.appendFileSync('${home}/gh-calls', JSON.stringify(args) + '\\n');\nif (args[0] !== 'pr' || args[1] !== 'create') process.exit(2);\nconsole.log('https://github.com/fixture/ghp/pull/1');\n`;
+  assert.equal(rootIn(name, 'mv /usr/local/bin/claude /usr/local/bin/claude.saved; cat > /usr/local/bin/claude; chmod +x /usr/local/bin/claude', errandStub).code, 0);
+  assert.equal(rootIn(name, 'mv /usr/local/bin/gh /usr/local/bin/gh.saved; cat > /usr/local/bin/gh; chmod +x /usr/local/bin/gh', ghStub).code, 0);
+  try {
+    okInside(`printf quarterdeck > ${home}/data/${errandId}/qd-route`);
+    const relaunched = inside(`cd ${home}; FM_HOME=${home} bin/fm-control.sh ${errandId} relaunch --model sonnet --note 'Publish.' 2>&1`);
+    assert.equal(relaunched.code, 0, relaunched.out);
+    const published = await waitSession(errandId, 2);
+    assert.match(lastStatus(errandId), /^done \[at=\d+\]: PR https:\/\/github.com\/fixture\/ghp\/pull\/1$/);
+    assert.equal(inside(`test -e ${home}/data/${errandId}/qd-route`).code, 1, 'the marker was consumed');
+    assert.equal(published.cwd, errandWt);
+    assert.equal(published.head, e1.head, 'the publish session added no commit');
+    assert.deepEqual(JSON.parse(read(`${work}/quarterdeck/logs/launch.log`).trim().split('\n').at(-1)), { route: 'publish', container: '', cwd: errandWt, model: 'sonnet' });
+    // Exactly its branch is on the origin, at the Errand's head; the default branch and the Spec Run's branch are not touched.
+    assert.deepEqual(refsOf(), [`refs/heads/${branch}`, 'refs/heads/main']);
+    assert.equal(okInside(`git --git-dir=${origin} rev-parse refs/heads/${branch}`).trim(), e1.head);
+    assert.equal(okInside(`git --git-dir=${origin} rev-parse refs/heads/main`).trim(), base);
+    // One gh call: a pull request against the default branch, its text from the Brief; no merge, no other call.
+    const calls = read(`${home}/gh-calls`).trim().split('\n').map(JSON.parse);
+    assert.equal(calls.length, 1, JSON.stringify(calls));
+    const option = (key) => calls[0][calls[0].indexOf(key) + 1];
+    assert.deepEqual(calls[0].slice(0, 2), ['pr', 'create']);
+    assert.equal(option('--base'), 'main');
+    assert.equal(option('--head'), branch);
+    assert.equal(option('--title'), `Errand: ${errandId}`);
+    assert.equal(option('--body'), `Errand ${errandId}, from its Brief:\n\n${handoff}\n`);
+    assert.ok(!calls[0].includes('merge'));
+  } finally {
+    assert.equal(rootIn(name, 'mv /usr/local/bin/claude.saved /usr/local/bin/claude; mv /usr/local/bin/gh.saved /usr/local/bin/gh').code, 0);
+  }
+  // Still nothing GitHub in the Project's container, and the Spec Run record is as it was.
+  noGithub('after the pull request');
+  assert.equal(specState(), specBefore);
+  assert.equal(git(`rev-parse refs/heads/${specBranch}`), specPlan.head);
+  assert.equal(okInside(`git -C ${home} status --porcelain --untracked-files=no`).trim(), '', 'FirstMate unpatched');
+  run('docker', ['rm', '-fv', cid]);
+});

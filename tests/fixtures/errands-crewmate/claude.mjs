@@ -24,7 +24,7 @@ try {
   const notes = brief.split(/^## Progress note[^\n]*\n/m);
   const note = notes.length > 1 ? notes.at(-1).trim() : '';
   const start = git('rev-parse', 'HEAD');
-  const sessionRecord = (extra = {}) => appendFileSync(`${state}/${id}.stub-sessions`, `${JSON.stringify({ host: hostname(), cwd: process.cwd(), branch: git('branch', '--show-current'), note, start, head: git('rev-parse', 'HEAD'), log: git('log', '--format=%s', '-n', '20'), ...extra })}\n`);
+  const sessionRecord = (extra = {}) => appendFileSync(`${state}/${id}.stub-sessions`, `${JSON.stringify({ host: hostname(), cwd: process.cwd(), branch: git('branch', '--show-current'), note, start, head: git('rev-parse', 'HEAD'), githubEnv: Object.keys(process.env).filter((k) => /github|^GH_/i.test(k)), log: git('log', '--format=%s', '-n', '20'), ...extra })}\n`);
   const prompt = () => {
     // Stay at a prompt like an interactive Claude, until FirstMate ends the session with /exit.
     let composer = '';
@@ -49,6 +49,19 @@ try {
     const settings = JSON.parse(readFileSync('.claude/settings.local.json', 'utf8'));
     for (const entry of settings.hooks.Stop) for (const hook of entry.hooks) execFileSync('bash', ['-c', hook.command]);
   };
+  if (/(?:^|\n)Publish\.$/.test(note)) {
+    // The publish job of an Errand on a Project with a GitHub repository: it runs in the Quarterdeck (the launcher's publish
+    // route) and does only the command the Brief names. The command is the Brief's `- **Publish.** Run `...` and nothing else.` line.
+    if (argv.at(-2) !== '--setting-sources' || argv.at(-1) !== 'user') throw Error('publish must use the Quarterdeck route');
+    const command = brief.match(/^- \*\*Publish\.\*\* Run `(.+)` and nothing else\./m)?.[1];
+    if (!command) throw Error('the Brief names no publish command');
+    const url = execFileSync('sh', ['-c', command], { encoding: 'utf8' }).trim();
+    status(`done: PR ${url}`);
+    stopHooks();
+    sessionRecord({ published: url });
+    prompt();
+    throw Object.assign(Error('published'), { hung: true });
+  }
   if (git('branch', '--show-current') !== branch) git('checkout', '-b', branch);
   const question = brief.match(/^Errand question: (.+)$/m)?.[1];
   const answer = note.match(/^Answer: (.+)$/m)?.[1];
