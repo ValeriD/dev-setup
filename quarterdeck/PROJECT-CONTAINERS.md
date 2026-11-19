@@ -10,6 +10,12 @@ Containers are selected by creator, project and canonical home labels (plus `QD_
 
 All bind sources are prepared as the invoking user. The host work root must map to the same path in Docker and be writable by uid 1000, as required by `quarterdeck`. The pool uses the host `QD_WORK_ROOT/pool` source and `/home/node/.treehouse` destination in both containers.
 
+## Projects with no remote
+
+`qd-project-new <name> <variant> [preset…]` (as `node`, in the Quarterdeck; `QD_WORK_ROOT` set) creates `<First Mate home>/projects/<name>` (the home is `QD_FIRST_MATE_HOME`, default `<work root>/fleet/firstmate`) as a git repository with no remote. Its first commit on `main` holds `.devcontainer/` from the Variant's Template (baked into the image under `/opt/qd/templates`), with `${templateOption:image}` filled from the image id in `<work root>/quarterdeck/local-variants` and `patEnvVar` left at its default, and the named Presets (`/opt/qd/presets`) copied into `extensions.json`, each entry tagged with its Preset (ADR 0005). It writes the git tree id of that `.devcontainer/` to `<work root>/quarterdeck/local-projects/<name>` and links `<work root>/projects/<name>` to the folder. An existing name (folder, record or link), an unknown Variant, an unbuilt Variant or an unknown Preset is refused before anything is created. It registers nothing in FirstMate and starts nothing.
+
+With no `origin` remote, `qd-project-up` skips the fetch and renders the recorded tree, not `main`: a Project container can write its own git store and so move `main`, but no Project container mounts the record. Objects are checked by hash, and `GIT_NO_REPLACE_OBJECTS` is set so replace refs cannot substitute the tree. A Project with no remote and no record is refused; it never falls back to `main`. Only an explicit, user-requested update through the `qd-project` skill replaces the record. A Project with an `origin` remote is unchanged. The record is only as trusted as the work root, which mates can write (accepted in the design).
+
 ## Claude launches
 
 FirstMate invokes `/opt/qd/bin/claude` through PATH. From a directory below `/home/node/.treehouse`, it resolves the home from `FM_TASK_INBOX=<home>/state/<id>.inbox` and normally requires exactly one running `qd-project-up` container labelled for that canonical home. Run the creator first; missing/ambiguous containers fail rather than launching locally. The pool root itself is refused. Other directories exec `/usr/local/bin/claude` unchanged.

@@ -4,6 +4,7 @@
 // The Quarterdeck-added entries in project-layer.json (FirstMate's Crewmate busy hook) join the project's Extension
 // Layer in the export only: the
 // project's own files, Base, the Variant and a hand-opened container stay as they are (ticket 15).
+// With no origin remote the container is built from the tree recorded by qd-project-new (no fetch).
 // An image listed in <work root>/quarterdeck/local-variants (written by the host command) is also accepted.
 // QD_PROJECT_TEST_IMAGE permits exactly one local fixture image instead of the published digest, and only in a
 // Quarterdeck the test suite started (root-owned /run/quarterdeck-test-run, written by qd-entry from QD_RUN_LABEL).
@@ -28,6 +29,15 @@ function localVariantImages(root) {
   try { return new Set(fs.readFileSync(path.join(root, 'quarterdeck/local-variants'), 'utf8').split('\n').map(l => /^[a-z0-9-]+ (sha256:[a-f0-9]{64})$/.exec(l)?.[1]).filter(Boolean)); } catch { return new Set(); }
 }
 
+// The config tree qd-project-new recorded for a Project with no remote: one file per Project under
+// <work root>/quarterdeck/local-projects, which no Project container mounts.
+function recordedTree(root, project) {
+  let text;
+  try { text = fs.readFileSync(path.join(root, 'quarterdeck/local-projects', project), 'utf8').trim(); } catch { throw Error(`${project} has no origin remote and no recorded config; create it with qd-project-new`); }
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(text)) throw Error('the recorded config is not a git tree id');
+  return text;
+}
+
 function main() {
   const [homeArg, project, ...rest] = process.argv.slice(2);
   if (!homeArg || !project || rest.length || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(project)) throw Error('usage: qd-project-up <home> <project> (plain project name)');
@@ -41,13 +51,22 @@ function main() {
   if (!fs.lstatSync(gitdir).isDirectory()) throw Error('project must have a clone git directory');
   const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
   // Keep the image-owned credential helper for fetch, never a caller-selected global config.
-  Object.assign(gitEnv, { GIT_CONFIG_GLOBAL: '/etc/dev-setup/gitconfig', GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null', GIT_CONFIG_KEY_1: 'core.fsmonitor', GIT_CONFIG_VALUE_1: 'false' });
+  Object.assign(gitEnv, { GIT_CONFIG_GLOBAL: '/etc/dev-setup/gitconfig', GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null', GIT_CONFIG_KEY_1: 'core.fsmonitor', GIT_CONFIG_VALUE_1: 'false', GIT_NO_REPLACE_OBJECTS: '1' });
   const git = (...args) => execFileSync('git', ['--git-dir', gitdir, ...args], { cwd: '/', env: gitEnv, maxBuffer: 64 << 20 });
-  // The default branch is whatever origin's HEAD names (same query as qd-publish); never a guess.
-  const base = git('ls-remote', '--symref', 'origin', 'HEAD').toString().split('\n').map(l => /^ref: refs\/heads\/(\S+)\s+HEAD$/.exec(l)?.[1]).find(Boolean);
-  if (!base) throw Error('origin reports no default branch (its HEAD names no branch); refusing to guess main');
-  git('fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`);
-  const tree = git('rev-parse', `refs/remotes/origin/${base}:.devcontainer`).toString().trim();
+  const hasOrigin = () => { try { git('remote', 'get-url', 'origin'); return true; } catch { return false; } };
+  let tree;
+  if (hasOrigin()) {
+    // The default branch is whatever origin's HEAD names (same query as qd-publish); never a guess.
+    const base = git('ls-remote', '--symref', 'origin', 'HEAD').toString().split('\n').map(l => /^ref: refs\/heads\/(\S+)\s+HEAD$/.exec(l)?.[1]).find(Boolean);
+    if (!base) throw Error('origin reports no default branch (its HEAD names no branch); refusing to guess main');
+    git('fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`);
+    tree = git('rev-parse', `refs/remotes/origin/${base}:.devcontainer`).toString().trim();
+  } else {
+    // No remote: the tree qd-project-new recorded, never `main`, whose ref a Project container can move.
+    const recorded = recordedTree(root, project);
+    if (git('cat-file', '-t', recorded).toString().trim() !== 'tree') throw Error('the recorded config is not a tree of this project');
+    tree = recorded;
+  }
   const errors = [];
   const source = parse(git('show', `${tree}:devcontainer.json`).toString(), errors, { allowTrailingComma: true });
   if (errors.length || !source || typeof source !== 'object' || Array.isArray(source)) throw Error('invalid devcontainer JSONC');

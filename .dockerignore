@@ -3,6 +3,8 @@
 !installer/
 !extensions/
 !quarterdeck/
+!presets/
+!templates/markdown/
 !skills/
 skills/**
 !skills/dev-container/

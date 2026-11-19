@@ -1,4 +1,5 @@
 // Errands feature tests, token-free (run with `npm run test:errands`; never the whole suite).
+// Ticket 02: qd-project-new makes a Project with no remote and records its config tree; qd-project-up follows the record.
 // Ticket 01: the Markdown Variant is built on this machine by the host command and recorded, the built
 // image is hardened like the Node Variant, and qd-project-up accepts an image only from that record.
 // Everything the file creates carries the run label; teardown removes only that. No prune.
@@ -44,7 +45,7 @@ after(() => {
   }
   run(COMMAND, ['stop'], { env: hostEnv() });
   // FirstMate makes hook directories read-only: remove this test's folders as root, from a labelled container.
-  run('docker', ['run', '--rm', '--label', runLabel, '--user', 'root', '--entrypoint', 'rm', '-v', `${work}:${work}`, qdImage, '-rf', join(work, 'fleet'), join(work, 'quarterdeck/config'), join(work, 'pool')]);
+  run('docker', ['run', '--rm', '--label', runLabel, '--user', 'root', '--entrypoint', 'rm', '-v', `${work}:${work}`, qdImage, '-rf', join(work, 'fleet'), join(work, 'quarterdeck/config'), join(work, 'quarterdeck/local-projects'), join(work, 'projects'), join(work, 'pool')]);
   run('docker', ['rmi', qdImage]);
   run('docker', ['rmi', variantImage]);
   rmSync(work, { recursive: true, force: true });
@@ -223,4 +224,75 @@ test('qd-project-up accepts an image from the local Variant record and refuses a
   }
   assert.ok(existsSync(record()));
   assert.deepEqual(containers(), []);
+});
+
+test('qd-project-new creates a Project with no remote, qd-project-up runs it from the record, and a moved main changes nothing', () => {
+  const started = quarterdeck('start', '--no-first-mate');
+  assert.equal(started.code, 0, `${started.out}\n${started.err}`);
+  const home = `${work}/fleet/firstmate`;
+  const p = 'mdnew';
+  const dir = `${home}/projects/${p}`;
+  const recordOf = (n) => `${work}/quarterdeck/local-projects/${n}`;
+  const run1 = (args) => inside(`env QD_WORK_ROOT=${work} qd-project-new ${args}`);
+  const listing = () => okInside(`find ${work}/fleet ${work}/projects ${work}/quarterdeck/local-projects -printf '%p %y %T@\\n' 2>/dev/null | sort`);
+  // Unknown Variant and unknown Preset are refused before anything is created.
+  const before = listing();
+  const badVariant = run1(`${p} nonesuch`);
+  assert.notEqual(badVariant.code, 0);
+  assert.match(badVariant.err, /unknown Variant/);
+  const badPreset = run1(`${p} markdown nonesuch`);
+  assert.notEqual(badPreset.code, 0);
+  assert.match(badPreset.err, /unknown or unreadable Preset/);
+  assert.equal(listing(), before);
+  // A Project with a Preset: the entries are copied in and tagged (ADR 0005). Not started: its skills need the network.
+  const withPreset = run1('mdpre markdown engineering-workflow');
+  assert.equal(withPreset.code, 0, `${withPreset.out}\n${withPreset.err}`);
+  const presetEntries = JSON.parse(okInside(`git -C ${home}/projects/mdpre show HEAD:.devcontainer/extensions.json`)).extensions;
+  const wanted = JSON.parse(readFileSync(join(REPO, 'presets/engineering-workflow.json'), 'utf8')).extensions;
+  assert.equal(presetEntries.length, wanted.length);
+  assert.ok(presetEntries.every((e) => e.preset === 'engineering-workflow'));
+  // The Project itself.
+  const made = run1(`${p} markdown`);
+  assert.equal(made.code, 0, `${made.out}\n${made.err}`);
+  assert.equal(okInside(`git -C ${dir} rev-list --count main`).trim(), '1');
+  assert.equal(okInside(`git -C ${dir} ls-tree -r --name-only HEAD`).trim().split('\n').every((f) => f.startsWith('.devcontainer/')), true);
+  assert.equal(okInside(`git -C ${dir} remote`).trim(), '', 'no remote');
+  assert.equal(inside(`test -e ${work}/fleet/${p}`).code === 0, false, 'no Second Mate home');
+  const config = okInside(`git -C ${dir} show HEAD:.devcontainer/devcontainer.json`);
+  assert.ok(config.includes(`"image": "${recorded}"`) && !config.includes('${templateOption'));
+  const tree = okInside(`git -C ${dir} rev-parse HEAD:.devcontainer`).trim();
+  assert.equal(okInside(`cat ${recordOf(p)}`).trim(), tree);
+  assert.equal(okInside(`readlink ${work}/projects/${p}`).trim(), dir);
+  // Starting it again, the same name changes nothing and says so.
+  const snapshot = listing();
+  const again = run1(`${p} markdown`);
+  assert.notEqual(again.code, 0);
+  assert.match(again.err, /Project mdnew exists/);
+  assert.equal(listing(), snapshot);
+  // The test's offline pin: committed through the record's own path, as an explicit config update would be.
+  const pinned = JSON.stringify({ ...JSON.parse(config.replace(/^\s*\/\/.*$/gm, '')), containerEnv: pinEnv() });
+  put(`${dir}/.devcontainer/devcontainer.json`, pinned);
+  okInside(`git -C ${dir} add -A && git -C ${dir} -c user.name=T -c user.email=t@example.invalid commit -qm pin && git -C ${dir} rev-parse HEAD:.devcontainer > ${recordOf(p)}`);
+  const recordedTree = okInside(`cat ${recordOf(p)}`).trim();
+  const up = () => inside(`env -u QUARTERDECK_EXTENSIONS_TOKEN -u QD_PROJECT_TEST_IMAGE QD_RUN_LABEL=${runLabel} qd-project-up ${home} ${p}`);
+  const first = up();
+  assert.equal(first.code, 0, `${first.out}\n${first.err}`);
+  const cid = first.out.trim().split('\n').pop();
+  const [c] = JSON.parse(run('docker', ['inspect', cid]).out);
+  assert.equal(c.State.Running, true);
+  assert.equal(c.Config.Image === recorded || c.Image === recorded, true);
+  assert.equal(c.Config.Labels['quarterdeck.config'], recordedTree);
+  assert.deepEqual(c.HostConfig.CapDrop, ['ALL']);
+  const dests = c.Mounts.map((m) => m.Destination);
+  assert.ok(dests.includes('/workspace') && dests.includes('/home/node/.treehouse') && dests.includes(`${dir}/.git`));
+  assert.equal(c.Mounts.find((m) => m.Destination === '/workspace').RW, false);
+  assert.equal(run('docker', ['exec', '-u', 'node', cid, 'test', '-e', '/run/egress/ready']).code, 0, 'egress ready');
+  // main moves to a different .devcontainer (as a container with the git store could do): the record still wins.
+  okInside(`mkdir -p ${dir}/.devcontainer && echo x > ${dir}/.devcontainer/planted && git -C ${dir} add -A && git -C ${dir} -c user.name=T -c user.email=t@example.invalid commit -qm moved`);
+  assert.notEqual(okInside(`git -C ${dir} rev-parse HEAD:.devcontainer`).trim(), recordedTree);
+  const second = up();
+  assert.equal(second.code, 0, `${second.out}\n${second.err}`);
+  assert.equal(second.out.trim().split('\n').pop(), cid, 'the same container: the recorded tree is unchanged');
+  assert.equal(inside(`find ${work}/quarterdeck/config/${p} -name planted | grep -q .`).code === 0, false, 'the new tree was not rendered');
+  run('docker', ['rm', '-fv', cid]);
 });
