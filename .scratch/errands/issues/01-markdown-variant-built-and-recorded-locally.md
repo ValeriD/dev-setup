@@ -1,6 +1,6 @@
 # 01: A Markdown Variant that is built and recorded locally
 
-**Status:** closed
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 1 (Markdown Variant)
 
