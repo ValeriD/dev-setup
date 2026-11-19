@@ -25,6 +25,17 @@ test('regex managers match the Dockerfile ARG pins', () => {
   }
 });
 
+test('regex managers match the Markdown Variant Dockerfile ARG pins', () => {
+  const docker = read('variants/markdown/Dockerfile');
+  for (const [dep, arg] of [['pnpm', 'PNPM_VERSION'], ['@anthropic-ai/claude-code', 'CLAUDE_CODE_VERSION'], ['markdownlint-cli2', 'MARKDOWNLINT_CLI2_VERSION']]) {
+    const m = config.customManagers.find((x) => x.depNameTemplate === dep && patternMatches(x, 'variants/markdown/Dockerfile'));
+    const [hit] = run(m, docker);
+    assert.ok(hit, dep);
+    assert.match(hit.currentValue, /^\d+\.\d+\.\d+$/);
+    assert.ok(docker.includes(`ARG ${arg}=${hit.currentValue}`));
+  }
+});
+
 test('regex managers match the Quarterdeck Dockerfile ARG pins', () => {
   const docker = read('quarterdeck/Dockerfile');
   for (const [dep, arg] of [['pnpm', 'PNPM_VERSION'], ['@anthropic-ai/claude-code', 'CLAUDE_CODE_VERSION'], ['@devcontainers/cli', 'DEVCONTAINER_CLI_VERSION']]) {

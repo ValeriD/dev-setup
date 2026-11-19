@@ -8,7 +8,7 @@
     {
       "description": "Claude Code version pinned as a Dockerfile ARG",
       "customType": "regex",
-      "managerFilePatterns": ["/^(variants/node|quarterdeck)/Dockerfile$/"],
+      "managerFilePatterns": ["/^(variants/(node|markdown)|quarterdeck)/Dockerfile$/"],
       "matchStrings": ["ARG CLAUDE_CODE_VERSION=(?<currentValue>\\S+)"],
       "datasourceTemplate": "npm",
       "depNameTemplate": "@anthropic-ai/claude-code"
@@ -22,9 +22,17 @@
       "depNameTemplate": "@openai/codex"
     },
     {
+      "description": "markdownlint-cli2 version pinned as a Dockerfile ARG (Markdown Variant)",
+      "customType": "regex",
+      "managerFilePatterns": ["/^variants/markdown/Dockerfile$/"],
+      "matchStrings": ["ARG MARKDOWNLINT_CLI2_VERSION=(?<currentValue>\\S+)"],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "markdownlint-cli2"
+    },
+    {
       "description": "pnpm version pinned as a Dockerfile ARG",
       "customType": "regex",
-      "managerFilePatterns": ["/^(variants/node|quarterdeck)/Dockerfile$/"],
+      "managerFilePatterns": ["/^(variants/(node|markdown)|quarterdeck)/Dockerfile$/"],
       "matchStrings": ["ARG PNPM_VERSION=(?<currentValue>\\S+)"],
       "datasourceTemplate": "npm",
       "depNameTemplate": "pnpm"
@@ -38,13 +46,14 @@
       "depNameTemplate": "pnpm"
     },
     {
-      "description": "devcontainers CLI version pinned in the workflow env, the acceptance suite, the dev-container skill helper, the Quarterdeck Dockerfile and the README",
+      "description": "devcontainers CLI version pinned in the workflow env, the acceptance suite, the dev-container skill helper, the Quarterdeck Dockerfile, the host quarterdeck command and the README",
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/.+\\.ya?ml$/",
         "/^tests/lib\\.mjs$/",
         "/^skills/dev-container/scripts/commands\\.mjs$/",
         "/^quarterdeck/Dockerfile$/",
+        "/^quarterdeck/bin/quarterdeck$/",
         "/^README\\.md$/"
       ],
       "matchStrings": [

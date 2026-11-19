@@ -11,4 +11,5 @@ skills/**
 !skills/dev-container/scripts/pnpm-lock.yaml
 quarterdeck/node_modules
 !variants/node/extensions.json
+!variants/markdown/extensions.json
 installer/node_modules

@@ -1,0 +1,7 @@
+{
+  "id": "egress",
+  "version": "0.1.0",
+  "name": "Egress Allowlist start-up step",
+  "description": "Root entrypoint that applies the Egress Allowlist before any dev-user process exists. The scripts live in base/egress and are copied by the Dockerfile.",
+  "entrypoint": "/usr/local/share/egress/start.sh"
+}

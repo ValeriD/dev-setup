@@ -4,6 +4,7 @@
 // The Quarterdeck-added entries in project-layer.json (FirstMate's Crewmate busy hook) join the project's Extension
 // Layer in the export only: the
 // project's own files, Base, the Variant and a hand-opened container stay as they are (ticket 15).
+// An image listed in <work root>/quarterdeck/local-variants (written by the host command) is also accepted.
 // QD_PROJECT_TEST_IMAGE permits exactly one local fixture image instead of the published digest, and only in a
 // Quarterdeck the test suite started (root-owned /run/quarterdeck-test-run, written by qd-entry from QD_RUN_LABEL).
 import { execFileSync } from 'node:child_process';
@@ -19,6 +20,12 @@ function testImage() {
   if (!wanted) return undefined;
   const marker = fs.lstatSync(TEST_RUN, { throwIfNoEntry: false });
   return marker?.isFile() && marker.uid === 0 ? wanted : undefined;
+}
+
+// Images the host `quarterdeck build-variant` built on this machine: lines `<variant> <image id>` in a file under
+// <work root>/quarterdeck, which no Project container mounts. Missing means none.
+function localVariantImages(root) {
+  try { return new Set(fs.readFileSync(path.join(root, 'quarterdeck/local-variants'), 'utf8').split('\n').map(l => /^[a-z0-9-]+ (sha256:[a-f0-9]{64})$/.exec(l)?.[1]).filter(Boolean)); } catch { return new Set(); }
 }
 
 function main() {
@@ -44,7 +51,8 @@ function main() {
   const errors = [];
   const source = parse(git('show', `${tree}:devcontainer.json`).toString(), errors, { allowTrailingComma: true });
   if (errors.length || !source || typeof source !== 'object' || Array.isArray(source)) throw Error('invalid devcontainer JSONC');
-  if (typeof source.image !== 'string' || (!/^ghcr\.io\/valerid\/dev-setup\/[a-z0-9-]+@sha256:[a-f0-9]{64}$/.test(source.image) && source.image !== testImage())) throw Error('image must be a digest-pinned published Variant');
+  if (typeof source.image !== 'string') throw Error('image must be a digest-pinned published Variant or an image id in the local Variant record');
+  if (!/^ghcr\.io\/valerid\/dev-setup\/[a-z0-9-]+@sha256:[a-f0-9]{64}$/.test(source.image) && source.image !== testImage() && !localVariantImages(root).has(source.image)) throw Error('image must be a digest-pinned published Variant; this one is not, and it is not in the local Variant record written by `quarterdeck build-variant`');
   const runArgs = source.runArgs ?? [];
   if (!Array.isArray(runArgs) || runArgs.some(v => typeof v !== 'string' || !/^(--cap-drop=ALL|--memory=[1-9][0-9]*[kmg]?|--pids-limit=[1-9][0-9]*)$/.test(v))) throw Error('unsupported runArgs; only Template capability-drop, memory and PID limits are allowed');
   const containerEnv = {};

@@ -1,9 +1,15 @@
 #!/bin/bash
-# quarterdeck [attach|start [--no-first-mate]|stop|rebuild]
+# quarterdeck [attach|start [--no-first-mate]|stop|rebuild|build-variant markdown]
 #   attach   (default) build the image if missing, start the container if it is not running, attach to Herdr
 #   start    start without attaching; --no-first-mate seeds the home without opening its workspace or launching Claude
 #   stop     remove the Quarterdeck container, its Docker proxy and the proxy's volume that this command labelled, nothing else
 #   rebuild  build the image again (run `quarterdeck stop` first to use it)
+#   build-variant markdown
+#            build the Markdown Variant (variants/markdown) on this machine and record its image id in
+#            <work root>/quarterdeck/local-variants (one `<variant> <image id>` line per build). qd-project-up
+#            accepts a Project image only if it is a digest-pinned published Variant or listed there. The
+#            Variant is not published. The build runs the devcontainer CLI: `devcontainer` from the path, else
+#            `npx -y @devcontainers/cli@0.89.0`. Prints the image id.
 # Token file: a file you own (not root), mode 0600, at $QUARTERDECK_SECRETS (default
 # ~/.config/quarterdeck/secrets.env), with `NAME=value` lines. This command never reads it: it checks
 # the owner and mode and mounts it read-only at /run/quarterdeck/secrets.env. Inside, a non-root process
@@ -15,7 +21,8 @@
 # A missing or empty name is warned about by name when the container starts. Edit the file, then
 # `quarterdeck stop` and `quarterdeck` again: a running container keeps the values it started with.
 # The container user is uid 1000, so the file must be owned by uid 1000 to be readable there.
-# Overrides (the tests use them): QUARTERDECK_NAME, QUARTERDECK_IMAGE, QUARTERDECK_WORK_ROOT,
+# Overrides (the tests use them): QUARTERDECK_VARIANT_TAG (tag of the built Variant image, default local),
+# QUARTERDECK_DEVCONTAINER_CLI (path of the devcontainer CLI), QUARTERDECK_NAME, QUARTERDECK_IMAGE, QUARTERDECK_WORK_ROOT,
 # QUARTERDECK_RUN_LABEL (key=value added to everything created), QUARTERDECK_ATTACH_CMD (default: herdr),
 # QUARTERDECK_DOCKER_SOCKET (the host socket the proxy mounts read-only, default /var/run/docker.sock).
 # QUARTERDECK_RUN_LABEL also marks the container as test-started: only then does qd-project-up honour its
@@ -66,6 +73,27 @@ build() {
   local rev; rev=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
   echo "quarterdeck: building $image" >&2
   docker build -f "$repo/quarterdeck/Dockerfile" -t "$image" ${extra[@]+"${extra[@]}"} --build-arg "REVISION=$rev" "$repo" >&2
+}
+
+# build-variant markdown: build with the devcontainer CLI (the Variant's hardening is image metadata only it
+# writes), then record the image id. Nothing is pushed.
+build_variant() {
+  [ "${1:-}" = markdown ] && [ "$#" -eq 1 ] || die "usage: quarterdeck build-variant markdown"
+  local variant=$1 rev tag cli=() id
+  rev=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)
+  tag=dev-setup-$variant:${QUARTERDECK_VARIANT_TAG:-local}
+  if [ -n "${QUARTERDECK_DEVCONTAINER_CLI:-}" ]; then cli=("$QUARTERDECK_DEVCONTAINER_CLI")
+  elif command -v devcontainer >/dev/null; then cli=(devcontainer)
+  else command -v npx >/dev/null || die "neither devcontainer nor npx found"; cli=(npx -y @devcontainers/cli@0.89.0); fi
+  mkdir -p "$work/quarterdeck"
+  echo "quarterdeck: building $tag" >&2
+  DEV_SETUP_REVISION=$rev "${cli[@]}" build --workspace-folder "$repo/variants/$variant" \
+    --config "$repo/variants/$variant/devcontainer.json" --image-name "$tag" ${extra[@]+"${extra[@]}"} >&2 || die "the $variant build failed"
+  id=$(docker image inspect --format '{{.Id}}' "$tag") || die "no image $tag after the build"
+  [[ $id =~ ^sha256:[0-9a-f]{64}$ ]] || die "unexpected image id: $id"
+  local record=$work/quarterdeck/local-variants
+  grep -qxF "$variant $id" "$record" 2>/dev/null || echo "$variant $id" >>"$record"
+  echo "$id"
 }
 
 # The proxy container and volume this command labelled for this name. The volume is removed only if it carries the label.
@@ -199,5 +227,6 @@ case "${1:-attach}" in
     ;;
   stop) stop ;;
   rebuild) build ;;
-  *) die "usage: quarterdeck [attach|start [--no-first-mate]|stop|rebuild]" ;;
+  build-variant) shift; build_variant "$@" ;;
+  *) die "usage: quarterdeck [attach|start [--no-first-mate]|stop|rebuild|build-variant markdown]" ;;
 esac

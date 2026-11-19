@@ -45,6 +45,8 @@ It never commits. The skill finds this repository through the symlink, so if you
 
 `quarterdeck/` builds the image that runs Herdr and the mates. Put its command on your path once (`ln -s "$PWD/quarterdeck/bin/quarterdeck" ~/.local/bin/quarterdeck`), then `quarterdeck` builds the image if needed, starts the container and attaches to Herdr. `quarterdeck stop` removes it. The work root defaults to `~/work`; set `QUARTERDECK_WORK_ROOT` to change it.
 
+`quarterdeck build-variant markdown` builds the Markdown Variant (`variants/markdown/`, for Projects that hold no code) on this machine and records its image id in `<work root>/quarterdeck/local-variants`. `qd-project-up` accepts a Project image only if it is a digest-pinned published Variant or listed there. The Markdown Variant is not published. It needs `docker` and either `devcontainer` on your path or `npx`.
+
 For manual work without an agent, use `quarterdeck start --no-first-mate` on a stopped container. It starts the Docker proxy and Herdr, seeds the same First Mate home and Claude trust/configuration as normal startup, then returns without attaching or opening the `firstmate` workspace. `quarterdeck start` starts normally without attaching; `quarterdeck` (or `quarterdeck attach`) still attaches. A later normal start or attach opens the First Mate even in the same running container, and reuses the same home after stop/start. The option refuses a running container with a `firstmate` workspace; it never stops existing sessions.
 
 The tokens come from one file you own (not root), mode 0600, at `~/.config/quarterdeck/secrets.env` or the path in `QUARTERDECK_SECRETS`, with plain `NAME=value` lines (nothing is sourced or expanded). The command mounts it read-only; it never reads it. A non-root process in the container takes only these names and hands them to Herdr's server, so processes started from Herdr's panes inherit the token variables and a plain `docker exec` shell does not. The mounted source file remains readable by the host user from an exec shell; ticket 21 accepts that access, not filesystem isolation:
@@ -77,6 +79,7 @@ VS Code's "Reopen in Container" works too, but VS Code passes more of the host i
 | `npm run test:installer` | the Agent Extension installer | Node 24 |
 | `npm run test:skill` | the skill's helper scripts | Node 24 |
 | `npm run test:quarterdeck` | the Quarterdeck only: its image, host command, proxy, tokens and tools; skips the Node image build | Docker |
+| `npm run test:errands` | the Errands feature only: the Markdown Variant build and record, its hardening, and `qd-project-up` accepting a recorded image; skips the Node image build | Docker |
 | `npm test` | the whole image: build, Template, hardening, extensions, the skill against a real container | Docker, about 4 min |
 
 `npm test` deletes only the Docker containers, images and volumes it created. `DEV_SETUP_TEST_KEEP=1` keeps them so you can debug. Logins, VS Code and the skill's conversations are checked by hand: [`docs/manual/`](docs/manual/).

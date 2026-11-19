@@ -35,7 +35,7 @@ env:
 
 jobs:
   # Decides what runs. Path groups: image = what goes into the image;
-  # tests = what the acceptance suite or CI itself reads; template = templates/;
+  # tests = what the acceptance suite or CI itself reads (including variants/markdown/, which tests/errands.test.mjs builds locally; it is never published); template = templates/;
   # quarterdeck = quarterdeck/ (built and tested, never published).
   # schedule, workflow_dispatch, a missing/all-zero `before` and an unreachable
   # base (force push) count as everything changed.
@@ -80,7 +80,7 @@ jobs:
           else
             echo "changed files:"; echo "$files"
             grep -Eq '^(base|installer|extensions|variants/node)/' <<<"$files" && image=true
-            grep -Eq '^(tests/|templates/|skills/dev-container/|package\.json$|\.github/|renovate\.json$)' <<<"$files" && tests=true
+            grep -Eq '^(tests/|templates/|variants/markdown/|skills/dev-container/|package\.json$|\.github/|renovate\.json$)' <<<"$files" && tests=true
             grep -Eq '^templates/' <<<"$files" && template=true
             grep -Eq '^quarterdeck/' <<<"$files" && quarterdeck=true
           fi
