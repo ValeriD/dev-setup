@@ -372,3 +372,85 @@ test('the launcher routes a Crewmate launch by home and Project, from FirstMate\
   assert.equal(other[wts[0]], undefined, 'the other Project container was not touched');
   for (const c of Object.values(cids)) run('docker', ['rm', '-fv', c]);
 });
+
+test('qd-project-rm removes one Project\'s container, exports and record, refuses open work and unknown names, and touches nothing else (SC-20)', () => {
+  const started = quarterdeck('start', '--no-first-mate');
+  assert.equal(started.code, 0, `${started.out}\n${started.err}`);
+  const home = `${work}/fleet/firstmate`;
+  const recordOf = (n) => `${work}/quarterdeck/local-projects/${n}`;
+  okInside(`mkdir -p ${home}/state ${home}/data ${home}/bin ${home}/config`);
+  const cids = {};
+  for (const p of ['rmx', 'rmy']) {
+    const made = inside(`env QD_WORK_ROOT=${work} qd-project-new ${p} markdown`);
+    assert.equal(made.code, 0, `${made.out}\n${made.err}`);
+    const dir = `${home}/projects/${p}`;
+    const cfg = okInside(`git -C ${dir} show HEAD:.devcontainer/devcontainer.json`);
+    put(`${dir}/.devcontainer/devcontainer.json`, JSON.stringify({ ...JSON.parse(cfg.replace(/^\s*\/\/.*$/gm, '')), containerEnv: pinEnv() }));
+    okInside(`git -C ${dir} add -A && git -C ${dir} -c user.name=T -c user.email=t@example.invalid commit -qm pin && git -C ${dir} rev-parse HEAD:.devcontainer > ${recordOf(p)}`);
+    const up = inside(`env -u QUARTERDECK_EXTENSIONS_TOKEN -u QD_PROJECT_TEST_IMAGE QD_RUN_LABEL=${runLabel} qd-project-up ${home} ${p}`);
+    assert.equal(up.code, 0, `${up.out}\n${up.err}`);
+    cids[p] = up.out.trim().split('\n').pop();
+  }
+  // Look-alikes that must survive: same Project name but another home, and same name and home but another creator.
+  const decoy = (labels) => {
+    const r = run('docker', ['run', '-d', '--label', runLabel, ...labels.flatMap((l) => ['--label', l]), '--entrypoint', 'sleep', recorded, '600']);
+    assert.equal(r.code, 0, r.err);
+    return r.out.trim();
+  };
+  const otherHome = decoy(['quarterdeck.creator=qd-project-up', 'quarterdeck.project=rmx', `quarterdeck.home=${work}/fleet/sm-elsewhere`]);
+  const otherCreator = decoy(['quarterdeck.creator=someone-else', 'quarterdeck.project=rmx', `quarterdeck.home=${home}`]);
+  const noCreator = decoy(['quarterdeck.project=rmx', `quarterdeck.home=${home}`]);
+  const rm = (n) => inside(`env QD_WORK_ROOT=${work} qd-project-rm ${n}`);
+  const alive = (c) => run('docker', ['inspect', '--format', '{{.State.Running}}', c]).out.trim() === 'true';
+  const exportsOf = (n) => okInside(`find ${work}/quarterdeck/config/${n} -type f 2>/dev/null | sort | head -50`);
+  const snapshot = () => okInside(`find ${work}/fleet ${work}/projects ${work}/quarterdeck/local-projects ${work}/quarterdeck/config -printf '%p %y %T@\\n' 2>/dev/null | sort`);
+  try {
+    assert.ok(exportsOf('rmx').includes('devcontainer.json') && exportsOf('rmy').includes('devcontainer.json'));
+    // An unknown name and a bad name change nothing.
+    let snap = snapshot();
+    const unknown = rm('nonesuch');
+    assert.notEqual(unknown.code, 0);
+    assert.match(unknown.err, /unknown Project nonesuch/);
+    assert.notEqual(rm('../rmx').code, 0);
+    assert.equal(snapshot(), snap);
+    // Open FirstMate work for rmx (its pool worktree is not a Project path): refused, nothing changed.
+    put(`${home}/state/open1.meta`, `window=default:w1:p1\nworktree=/home/node/.treehouse/x\nproject=${home}/projects/rmx\nkind=ship\n`);
+    put(`${home}/state/other.meta`, `project=${home}/projects/rmy\nkind=ship\n`);
+    put(`${home}/state/sm.meta`, `project=${work}/fleet/sm-rmx\nkind=secondmate\nprojects=rmx\n`);
+    snap = snapshot();
+    const refused = rm('rmx');
+    assert.notEqual(refused.code, 0);
+    assert.match(refused.err, /still has open FirstMate work \(open1\)/);
+    assert.equal(snapshot(), snap);
+    assert.ok(alive(cids.rmx) && alive(cids.rmy));
+    assert.ok(existsSync(recordOf('rmx')) && exportsOf('rmx') !== '');
+    // The same record named through the convenience link also counts.
+    okInside(`rm ${home}/state/open1.meta`);
+    put(`${home}/state/open2.meta`, `project=${work}/projects/rmx\nkind=ship\n`);
+    assert.match(rm('rmx').err, /open FirstMate work \(open2\)/);
+    assert.ok(alive(cids.rmx));
+    okInside(`rm ${home}/state/open2.meta`);
+    // Closed: it goes. Only the labelled container, its exports, the link and the record.
+    const ySnapshot = okInside(`find ${work}/quarterdeck/config/rmy ${recordOf('rmy')} ${work}/projects/rmy ${home}/projects/rmy -printf '%p %y %T@\\n' | sort`);
+    const done = rm('rmx');
+    assert.equal(done.code, 0, `${done.out}\n${done.err}`);
+    assert.equal(run('docker', ['inspect', cids.rmx]).code === 0, false, 'the container is gone');
+    assert.equal(exportsOf('rmx'), '');
+    assert.equal(inside(`test -e ${work}/quarterdeck/config/rmx`).code === 0, false);
+    assert.equal(inside(`test -e ${recordOf('rmx')}`).code === 0, false);
+    assert.equal(inside(`test -e ${work}/projects/rmx`).code === 0, false);
+    // The folder and its repository stay.
+    assert.equal(okInside(`git -C ${home}/projects/rmx rev-list --count main`).trim(), '2');
+    // The look-alikes and the other Project are untouched, and the Quarterdeck still runs.
+    assert.ok(alive(otherHome) && alive(otherCreator) && alive(noCreator), 'unlabelled look-alikes survive');
+    assert.ok(alive(cids.rmy));
+    assert.equal(okInside(`find ${work}/quarterdeck/config/rmy ${recordOf('rmy')} ${work}/projects/rmy ${home}/projects/rmy -printf '%p %y %T@\\n' | sort`), ySnapshot);
+    assert.equal(okInside('echo up').trim(), 'up');
+    assert.equal(run('docker', ['exec', '-u', 'node', cids.rmy, 'test', '-e', '/run/egress/ready']).code, 0);
+    // A second removal finds nothing left to remove; the name can be created again.
+    assert.match(rm('rmx').err, /unknown Project rmx/);
+    assert.equal(okInside(`rm -rf ${home}/projects/rmx; env QD_WORK_ROOT=${work} qd-project-new rmx markdown`).trim(), `${home}/projects/rmx`);
+  } finally {
+    for (const c of [...Object.values(cids), otherHome, otherCreator, noCreator]) run('docker', ['rm', '-fv', c]);
+  }
+});
