@@ -76,9 +76,14 @@ main() {
     applied="sha256:${sum%% *}"
     gitbase=
     [ -z "${DEV_SETUP_GIT_BASE:-}" ] || gitbase="--git-base $DEV_SETUP_GIT_BASE" # test seam: local git fixtures
+    # Base first, then the one Variant manifest the image ships (node.json, markdown.json, ...).
+    variant=
+    for m in "$MANIFESTS"/*.json; do
+      [ "$m" = "$MANIFESTS/base.json" ] || variant="$variant --manifest $m"
+    done
     # shellcheck disable=SC2086
     node "$INSTALLER" install --mode start $gitbase \
-      --manifest "$MANIFESTS/base.json" --manifest "$MANIFESTS/node.json" \
+      --manifest "$MANIFESTS/base.json" $variant \
       --project "$PROJECT_MANIFEST" --egress-out "$RUN/allowlist.full" 2>"$RUN/installer.log" \
       || fail "project layer rejected: $(tr '\n' ' ' <"$RUN/installer.log")"
     apply "$RUN/allowlist.full" "$RUN/resolv.orig"

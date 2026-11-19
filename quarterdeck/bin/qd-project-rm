@@ -1,0 +1,72 @@
+#!/usr/bin/env node
+// qd-project-rm <name>: remove what the Quarterdeck created for one Project: its container (the one labelled with
+// creator qd-project-up, this home and this Project), its rendered config exports and its config record. The link
+// <work root>/projects/<name> that qd-project-new made goes with them, only when it is a symlink to the Project's folder.
+// It refuses, changing nothing, while FirstMate has an open record (state/<id>.meta) naming the Project, and for a name
+// with no container, exports or record. It never deletes the Project's folder or its git repository, never a container
+// without all three labels, and never a volume. The registry entry and the folder are left to the qd-project skill.
+// Order: refusals, container, exports, link, record last, so a failed run can be repeated.
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+
+const NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+const real = p => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+
+// state/<id>.meta records name their Project as `project=<absolute path>`. Any record that does is open work.
+function openRecords(home, dirs) {
+  const state = path.join(home, 'state');
+  let files;
+  try { files = fs.readdirSync(state).filter(f => f.endsWith('.meta')); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  const targets = new Set(dirs.map(real));
+  const open = [];
+  for (const f of files) {
+    let text;
+    try { text = fs.readFileSync(path.join(state, f), 'utf8'); } catch { throw Error(`cannot read FirstMate record ${f}; not removing anything`); }
+    const project = text.split('\n').map(l => /^project=(.*)$/.exec(l)?.[1]).find(v => v !== undefined);
+    if (project !== undefined && (dirs.includes(project) || targets.has(real(project)))) open.push(f.slice(0, -'.meta'.length));
+  }
+  return open;
+}
+
+function main() {
+  const [name, ...rest] = process.argv.slice(2);
+  if (!name || rest.length || !NAME.test(name)) throw Error('usage: qd-project-rm <name> (plain project name)');
+  if (!process.env.QD_WORK_ROOT) throw Error('QD_WORK_ROOT is not set');
+  const root = fs.realpathSync(process.env.QD_WORK_ROOT);
+  const home = real(process.env.QD_FIRST_MATE_HOME ?? path.join(root, 'fleet/firstmate'));
+  if (!home.startsWith(root + '/')) throw Error('home must be under QD_WORK_ROOT');
+  const dir = path.join(home, 'projects', name);
+  const link = path.join(root, 'projects', name);
+  const recordFile = path.join(root, 'quarterdeck/local-projects', name);
+  const owner = createHash('sha256').update(home).digest('hex').slice(0, 16);
+  const exportsDir = path.join(root, 'quarterdeck/config', name);
+  const exported = path.join(exportsDir, owner);
+
+  const env = { PATH: '/usr/local/bin:/usr/bin:/bin:/opt/qd/bin', DOCKER_HOST: process.env.DOCKER_HOST || 'unix:///run/docker-proxy/docker.sock' };
+  const docker = (...args) => execFileSync('docker', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // All three labels, exactly as qd-project-up sets them: nothing else is ever listed, so nothing else is removed.
+  const containers = docker('ps', '-aq', '--no-trunc',
+    '--filter', 'label=quarterdeck.creator=qd-project-up', '--filter', `label=quarterdeck.project=${name}`, '--filter', `label=quarterdeck.home=${home}`)
+    .split('\n').filter(Boolean);
+  const exists = p => fs.lstatSync(p, { throwIfNoEntry: false }) !== undefined;
+  if (!containers.length && !exists(exported) && !exists(recordFile)) throw Error(`unknown Project ${name}; nothing was changed`);
+
+  const open = openRecords(home, [dir, link]);
+  if (open.length) throw Error(`${name} still has open FirstMate work (${open.join(', ')}); finish or close it first. Nothing was changed`);
+
+  for (const id of containers) docker('rm', '-f', id);
+  fs.rmSync(exported, { recursive: true, force: true });
+  try { fs.rmdirSync(exportsDir); } catch { /* another home's exports remain, or none */ }
+  const l = fs.lstatSync(link, { throwIfNoEntry: false });
+  if (l?.isSymbolicLink() && real(link) === real(dir)) fs.unlinkSync(link);
+  fs.rmSync(recordFile, { force: true });
+  console.log(`removed ${name}: ${containers.length} container(s), exports, config record`);
+}
+
+try { main(); } catch (e) {
+  console.error(`qd-project-rm: ${e.stderr?.trim() || e.message}`);
+  process.exitCode = 1;
+}

@@ -36,6 +36,14 @@ test('the repository Dockerfiles agree today and the Quarterdeck base is a diges
   assert.deepEqual(findUnpinned('quarterdeck/Dockerfile', read('quarterdeck/Dockerfile')), []);
 });
 
+test('the Markdown Variant Dockerfile agrees with the Node Variant and is digest-pinned', () => {
+  const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+  const md = read('variants/markdown/Dockerfile');
+  assert.deepEqual(findDrift(read('variants/node/Dockerfile'), md, 'variants/markdown/Dockerfile'), []);
+  assert.deepEqual(findUnpinned('variants/markdown/Dockerfile', md), []);
+  assert.match(findDrift(dockerfile('a', '2.1.0'), dockerfile('b', '2.1.0'), 'variants/markdown/Dockerfile')[0], /^variants\/markdown\/Dockerfile: base image/);
+});
+
 test('the Quarterdeck proxy image must be pinned to a digest, today and in general', () => {
   assert.equal(findUnpinned('quarterdeck/docker-proxy.conf', 'PROXY_IMAGE=wollomatic/socket-proxy:1.13.2\n').length, 1);
   assert.equal(findUnpinned('quarterdeck/docker-proxy.conf', 'PROXY_IMAGE=wollomatic/socket-proxy:1.13.2@sha256:' + 'c'.repeat(64) + '\n').length, 0);

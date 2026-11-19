@@ -483,6 +483,7 @@ test('the devcontainer CLI pin matches the acceptance suite, CI, the Quarterdeck
   assert.ok(readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8').includes(`CLI_VERSION: ${version}`));
   assert.ok(readFileSync(join(REPO, 'README.md'), 'utf8').includes(`${DEVCONTAINER_CLI}`));
   assert.ok(readFileSync(join(REPO, 'quarterdeck/Dockerfile'), 'utf8').includes(`ARG DEVCONTAINER_CLI_VERSION=${version}\n`));
+  assert.ok(readFileSync(join(REPO, 'quarterdeck/bin/quarterdeck'), 'utf8').includes(DEVCONTAINER_CLI));
 });
 
 test('verify-image has no option that skips a check', () => {

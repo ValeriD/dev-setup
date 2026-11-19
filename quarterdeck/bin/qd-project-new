@@ -1,0 +1,83 @@
+#!/usr/bin/env node
+// qd-project-new <name> <variant> [preset...]: create a Project that has no GitHub repository.
+// Makes <First Mate home>/projects/<name> a git repository whose first commit on main holds .devcontainer/ rendered
+// from the Variant's Template with the named Presets copied in (ADR 0005), records the git tree of that
+// .devcontainer/ under <work root>/quarterdeck/local-projects/<name> (which no Project container mounts), and links
+// <work root>/projects/<name> to the folder. qd-project-up builds the container from that record, never from main.
+// Everything is checked before anything is created; an existing name changes nothing. Registering the Project in
+// FirstMate and starting its container are not done here.
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const TEMPLATES = process.env.QD_TEMPLATES_DIR ?? '/opt/qd/templates';
+const PRESETS = process.env.QD_PRESETS_DIR ?? '/opt/qd/presets';
+
+function main() {
+  const [name, variant, ...presets] = process.argv.slice(2);
+  if (!name || !variant || !NAME.test(name) || !NAME.test(variant) || presets.some(p => !/^[a-z0-9][a-z0-9._-]*$/.test(p))) throw Error('usage: qd-project-new <name> <variant> [preset...] (plain names)');
+  if (!process.env.QD_WORK_ROOT) throw Error('QD_WORK_ROOT is not set');
+  const root = fs.realpathSync(process.env.QD_WORK_ROOT);
+  const home = process.env.QD_FIRST_MATE_HOME ?? path.join(root, 'fleet/firstmate');
+  const dir = path.join(home, 'projects', name);
+  const recordFile = path.join(root, 'quarterdeck/local-projects', name);
+  const link = path.join(root, 'projects', name);
+  const exists = p => fs.lstatSync(p, { throwIfNoEntry: false }) !== undefined;
+  if (exists(dir) || exists(recordFile) || exists(link)) throw Error(`Project ${name} exists; nothing was changed`);
+
+  // Refuse unknown names before creating anything.
+  const template = path.join(TEMPLATES, variant, '.devcontainer');
+  if (!fs.existsSync(path.join(template, 'devcontainer.json'))) throw Error(`unknown Variant ${variant}`);
+  const image = localImage(root, variant);
+  const extensions = [];
+  for (const p of presets) {
+    let preset;
+    try { preset = JSON.parse(fs.readFileSync(path.join(PRESETS, `${p}.json`), 'utf8')); } catch { throw Error(`unknown or unreadable Preset ${p}`); }
+    if (!preset || !Array.isArray(preset.extensions) || preset.extensions.some(e => !e || typeof e !== 'object' || 'preset' in e)) throw Error(`Preset ${p} is not a valid Preset file`);
+    for (const e of preset.extensions) extensions.push({ ...e, preset: p });
+  }
+
+  // Build beside the target, then move it into place, so a failure leaves no Project behind.
+  const parent = path.join(home, 'projects');
+  fs.mkdirSync(parent, { recursive: true });
+  const tmp = fs.mkdtempSync(path.join(parent, `.${name}.new-`));
+  try {
+    const dc = path.join(tmp, '.devcontainer');
+    fs.cpSync(template, dc, { recursive: true });
+    const cfg = path.join(dc, 'devcontainer.json');
+    // The Markdown Template has no devcontainer-template.json: fill its options here.
+    fs.writeFileSync(cfg, fs.readFileSync(cfg, 'utf8').replaceAll('${templateOption:image}', image).replaceAll('${templateOption:patEnvVar}', 'DEV_SETUP_GITHUB_PAT'));
+    const manifestFile = path.join(dc, 'extensions.json');
+    const manifest = fs.existsSync(manifestFile) ? JSON.parse(fs.readFileSync(manifestFile, 'utf8')) : { extensions: [] };
+    manifest.extensions = [...(manifest.extensions ?? []), ...extensions];
+    fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+    Object.assign(env, { GIT_CONFIG_GLOBAL: '/etc/dev-setup/gitconfig', GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '/dev/null', GIT_CONFIG_KEY_1: 'core.fsmonitor', GIT_CONFIG_VALUE_1: 'false' });
+    const git = (...args) => execFileSync('git', ['-C', tmp, '-c', 'user.name=Quarterdeck', '-c', 'user.email=quarterdeck@localhost', ...args], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git('init', '-q', '-b', 'main');
+    git('add', '.devcontainer');
+    git('commit', '-q', '-m', `Create ${name} from the ${variant} Template`);
+    const tree = git('rev-parse', 'HEAD:.devcontainer');
+    fs.renameSync(tmp, dir);
+    fs.mkdirSync(path.dirname(recordFile), { recursive: true });
+    fs.writeFileSync(recordFile, tree + '\n', { flag: 'wx' });
+    fs.mkdirSync(path.dirname(link), { recursive: true });
+    fs.symlinkSync(dir, link);
+    console.log(dir);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
+// The image id the host `quarterdeck build-variant` recorded for this Variant.
+function localImage(root, variant) {
+  let text = '';
+  try { text = fs.readFileSync(path.join(root, 'quarterdeck/local-variants'), 'utf8'); } catch { /* none */ }
+  const ids = text.split('\n').map(l => l.split(' ')).filter(([v, id]) => v === variant && /^sha256:[a-f0-9]{64}$/.test(id ?? '')).map(([, id]) => id);
+  if (!ids.length) throw Error(`Variant ${variant} is not built here; run \`quarterdeck build-variant ${variant}\` on the host`);
+  return ids[ids.length - 1];
+}
+
+try { main(); } catch (e) {
+  console.error(`qd-project-new: ${e.message}`);
+  process.exitCode = 1;
+}

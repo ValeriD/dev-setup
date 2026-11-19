@@ -1,7 +1,7 @@
 ---
 type: technical-design
 feature: errands
-status: approved
+status: implemented
 base-commit: fa65e1a
 touches:
   - quarterdeck
@@ -159,3 +159,18 @@ Mechanical checks worth keeping: `scripts/check-pins.mjs` and Renovate cover the
 8. Errands on a GitHub Project through the Second Mate, with the `qd-publish` change.
 
 Slices 1 to 7 give the test environment the user asked for. Slice 8 can follow after that has been tried.
+
+## Decision 2026-11-19: revised work is a follow-up Errand
+
+FirstMate latches the first observed `done` head of a local-only task as `local_done_head` (`bin/fm-dod-lib.sh`: "Observing done again never changes that identity. Revised work needs a new task/approval record"), and `bin/fm-merge-local.sh` fast-forwards only to that exact head ("A diverged branch needs a rebase and a new task/approval record under bin/fm-dod-lib.sh's head-latching contract before landing"). Ticket 05 confirmed it: after a send-back that adds a commit, or a rebase, the merge refuses with "differs from the recorded local done head". The FirstMate fork is not edited (ADR 0008), so the design follows the contract instead of working around it.
+
+Decision: revised work after the first `done` never re-lands the old task.
+
+- A send-back that adds commits after `done`, or a rebase onto a `main` that moved, becomes a **follow-up Errand**: a NEW task id (`fm-brief.sh` and `fm-spawn.sh` as usual), branch `fm/<new-id>` from today's `main`. Its Brief names the old branch; its Crewmate brings that branch's commits over (merge or cherry-pick), adds the revision, and reports `done`. It lands through `fm-merge-local.sh` like any Errand, on the user's word.
+- The old Errand is closed without landing. Its branch stays as a record and is never merged.
+- A send-back BEFORE the first `done` stays a relaunch of the same task (SC-14 as written; SC-08 and SC-09 are unchanged).
+- `main` moves once, by the follow-up's fast-forward.
+
+Consequences: the First Mate skill (`qd-errand`) must decide, from whether the old task has an observed `done`, between `fm-control.sh relaunch --note` and a follow-up Errand, and must close the old task without calling its merge.
+
+Addendum (ticket 07): "closed without landing" is FirstMate's `bin/fm-teardown.sh <old-id> --force`, its only close for unlanded work. It needs the user's explicit discard word, and it deletes `fm/<old-id>` (best-effort `branch -D`). So the old branch survives only until the old task is closed. `qd-errand` keeps the old task open until the follow-up has landed, because its branch is the follow-up's source. It closes the old task on the follow-up's accept, after telling the user that this deletes the branch. The landed follow-up closes with a plain `fm-teardown.sh <new-id>`. The ticket 05 test asserts both closes. Nothing in the spec relies on the old branch being kept.

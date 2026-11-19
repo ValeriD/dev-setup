@@ -1,4 +1,4 @@
-Status: approved
+Status: done
 
 # Spec: Errands — hand off work that is not development, and leave
 

@@ -859,6 +859,49 @@ test('mate procedures: managed skills, Charter and Brief contract are installed 
   for (const line of ['PR opened', 'stopped at ticket NN', 'Answered:', 'local only', 'failed twice:', 'Question:']) assert.ok(report.includes(line), line);
 });
 
+// Errands ticket 07: the First Mate's Project and Errand skills, installed beside the MVP's, naming only real commands and files.
+test('mate procedures: qd-project and qd-errand are installed and name only installed commands and files', () => {
+  const started = quarterdeck();
+  assert.equal(started.code, 0, started.err);
+  const installed = p => okInside(`node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1], "utf8"))' '${p}'`);
+  const root = '/etc/claude-code/.claude/skills';
+  const skills = Object.fromEntries(['qd-first-mate', 'qd-spec-run', 'qd-project', 'qd-errand'].map(n => [n, installed(`${root}/${n}/SKILL.md`)]));
+  for (const [name, text] of Object.entries(skills)) assert.match(text, new RegExp(`^---\\nname: ${name}\\ndescription: .+\\n---`));
+  // Every reference a skill links to is installed beside it.
+  const refs = {};
+  for (const [name, text] of Object.entries(skills)) {
+    for (const [, ref] of text.matchAll(/\]\((references\/[a-z-]+\.md)\)/g)) refs[`${name}/${ref}`] = installed(`${root}/${name}/${ref}`);
+  }
+  assert.ok('qd-errand/references/brief.md' in refs);
+  const project = skills['qd-project'];
+  const errand = skills['qd-errand'];
+  const brief = refs['qd-errand/references/brief.md'];
+  const text = [project, errand, brief].join('\n');
+  assert.doesNotMatch(text, /\b(Helm|worker|pause|resume|Ideas)\b/i);
+  // Every FirstMate command named exists in the pinned checkout; every Quarterdeck tool named is installed.
+  const commands = [...new Set(text.match(/fm-[a-z-]+\.sh/g))];
+  for (const command of commands) okInside(`test -x /opt/firstmate/bin/${command}`);
+  for (const tool of new Set(text.match(/\bqd-project-(new|up|rm)\b/g))) okInside(`test -x /opt/qd/bin/${tool}`);
+  for (const p of ['/opt/qd/templates/markdown/.devcontainer/devcontainer.json', '/opt/qd/presets']) okInside(`test -e ${p}`);
+  // The FirstMate skills loaded by name exist in the pinned checkout.
+  for (const s of ['project-management', 'ship-landing']) {
+    assert.ok(text.includes(`\`${s}\``), s);
+    okInside(`test -f /opt/firstmate/.agents/skills/${s}/SKILL.md`);
+  }
+  // The proven sequences, and the guards findings from tickets 04 to 06 require.
+  for (const line of ['fm-brief.sh <id> <project> --mode local-only', 'fm-dispatch-resolve.sh', '--mode local-only --yolo off --harness claude', 'fm-crew-state.sh <id>', 'fm-merge-local.sh <id>', 'relaunch --model <model> --note "Answer:', 'relaunch --model <model> --note "Comment:', 'has exited', 'dirty working tree', 'not a fast-forward of main', 'differs from the recorded local done head', 'Never run `fm-captain-hold.sh`', 'follow-up', 'fm-teardown.sh <old-id> --force', 'Never call `fm-merge-local.sh` for a replaced Errand', 'check: failed', 'kind=ship', 'project=', 'verbatim']) assert.ok(errand.includes(line), line);
+  for (const line of ['{TASK}', '{FIRSTMATE_SPEC}', 'needs-decision', '.quarterdeck/errand-check.md', 'check: passed', 'check: none', 'Delivery contract: mode=local-only', 'Ship branch: fm/<id>', '# Setup', '# Rules', '# Definition of done', 'Errand follow-up: fm/<old-id>', 'verbatim']) assert.ok(brief.includes(line), line);
+  for (const line of ['qd-project-new "$name"', 'exists; nothing was changed', 'local-only off', 'qd-project-up "$M" "$name"', 'qd-project-rm "$name"', 'Only after it succeeds', 'explicit yes', 'local-projects/$name']) assert.ok(project.includes(line), line);
+  // The First Mate's rule, narrowed in one place: Errands in Projects with no remote; a Second Mate's Project stays its own.
+  const first = skills['qd-first-mate'];
+  assert.match(first, /In a Project with a Second Mate, only that Second Mate starts Crewmates\. The First Mate starts a Crewmate only for an Errand in a Project with no remote, through `qd-errand`\./);
+  assert.doesNotMatch(first, /never spawns a project Crewmate/);
+  // Errands on a GitHub Project: handed to the Second Mate, who publishes through the existing route and qd-publish.
+  for (const line of ['Errand: <id>', 'Branch prefix: <prefix>', 'Project: <project>', 'fm-send.sh "sm-$project" "$handoff"', 'report.md', 'verbatim']) assert.ok(first.includes(line), line);
+  for (const line of ['--mode direct-PR --yolo off --branch-prefix', 'qd-route', 'relaunch --model sonnet --note "Publish."', 'qd-publish --body-from-brief', 'no publish', 'merge nothing', 'has exited']) assert.ok(errand.includes(line), line);
+  for (const line of ['--mode direct-PR --branch-prefix', 'qd-publish --body-from-brief "<Second Mate home>" "<project>" "<prefix><id>" "<id>"', '- **Publish.** Run `', 'Delivery contract: mode=direct-PR', 'do not push']) assert.ok(brief.includes(line), line);
+});
+
 test("Claude's policy keeps Base's keys except allowManagedHooksOnly", () => {
   const rendered = JSON.parse(okInside('cat /etc/claude-code/managed-settings.json'));
   const base = JSON.parse(readFileSync(join(REPO, 'base/claude/managed-settings.json'), 'utf8'));
@@ -1443,6 +1486,32 @@ test('qd-publish pushes exactly the named branch and opens one pull request agai
   assert.equal(val('--base'), 'main');
   assert.equal(val('--head'), 'qd/spec');
   assert.ok(log.includes('arg=Tickets implemented in this Spec Run:\n\n- 01: First\n- 02: Second\n- 9: Ninth\n- 10: Third\n'), log);
+});
+
+test('qd-publish --body-from-brief takes the pull request text from the Errand\'s Brief, on a branch with no tickets; without the flag it still fails before the push (Errands SC-15)', () => {
+  const r = publishRun(`
+    c=$b/home/projects/proj; mkdir -p $b/home/data/errx $b/home/data/emptyx
+    git -C $c checkout -q -b chore/errx main; echo e > $c/e.md; git -C $c add e.md; git -C $c commit -q -m errand
+    printf '# Task\n\n## Captain\\x27s intent\n\nErrand: errx\nProject: proj\n\nWrite e.md, short.\n\n## Firstmate spec\nSTOP-HERE\n' > $b/home/data/errx/brief.md
+    printf '## Captain\\x27s intent\n\n## Firstmate spec\nx\n' > $b/home/data/emptyx/brief.md
+    refs() { git --git-dir $b/origin.git for-each-ref --format='%(refname)' | sort | tr '\\n' ' '; echo; }
+    echo "noflag:"; qd-publish $b/home proj chore/errx errx > $b/o 2>&1 && echo ok || echo "code=$?"; cat $b/o; refs; test ! -e $b/gh.log && echo no-gh-call
+    echo "nobrief:"; qd-publish --body-from-brief $b/home proj chore/errx nonesuch > $b/o 2>&1 && echo ok || echo "code=$?"; test ! -e $b/gh.log && echo no-gh-call
+    echo "emptybrief:"; qd-publish --body-from-brief $b/home proj chore/errx emptyx > $b/o 2>&1 && echo ok || echo "code=$?"; refs
+    echo "flag:"; qd-publish --body-from-brief $b/home proj chore/errx errx; refs; echo ---; cat $b/gh.log`);
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  const [, noflag, nobrief, emptybrief, flag] = r.out.split(/^(?:noflag|nobrief|emptybrief|flag):\n/m);
+  assert.match(noflag, /^code=1\nqd-publish: no tickets under \.scratch\/errx\/issues on chore\/errx\nrefs\/heads\/main \nno-gh-call\n$/);
+  assert.match(nobrief, /^code=1\nno-gh-call\n$/);
+  assert.match(emptybrief, /^code=1\nrefs\/heads\/main \n$/);
+  const [printed, log] = flag.split('---\n');
+  assert.equal(printed, 'https://github.com/o/r/pull/7\nrefs/heads/chore/errx refs/heads/main \n');
+  const args = log.split('\n').filter((l) => l.startsWith('arg=')).map((l) => l.slice(4));
+  assert.equal((log.match(/^CALL$/gm) ?? []).length, 1);
+  const val = (k) => args[args.indexOf(k) + 1];
+  assert.deepEqual([val('--base'), val('--head'), val('--title')], ['main', 'chore/errx', 'Errand: errx']);
+  assert.ok(log.includes('arg=Errand errx, from its Brief:\n\nErrand: errx\nProject: proj\n\nWrite e.md, short.\n'), log);
+  assert.doesNotMatch(log, /STOP-HERE/);
 });
 
 test('SC-18: hooks, core.hooksPath, core.fsmonitor and a redirected worktree .git file never run during qd-publish', () => {
