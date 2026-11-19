@@ -117,8 +117,9 @@ Before you start, add `ValeriD/pomoplan` to `QUARTERDECK_GITHUB_TOKEN`.
    cd "$S"
    FM_HOME="$S" bin/fm-brief.sh qd14-gate pomoplan --mode direct-PR --branch-prefix chore/
    ```
-   Edit only the intent and Definition-of-done parts of `$S/data/qd14-gate/brief.md`. Say there: run `pnpm install --frozen-lockfile`, `pnpm run build`, `pnpm run lint` and `pnpm test`; report each exit code; change no files; no push, no PR; on a failure, stop and report it. Then spawn:
+   Edit only the intent and Definition-of-done parts of `$S/data/qd14-gate/brief.md`. Say there: run `pnpm install --frozen-lockfile`, `pnpm run build`, `pnpm run lint` and `pnpm test`; report each exit code; change no files; no push, no PR; on a failure, stop and report it. Then record the dispatch decision (needed once the home has inherited `config/crew-dispatch.json`; with no resolver key it records `off` and sends nothing) and spawn:
    ```sh
+   FM_HOME="$S" bin/fm-dispatch-resolve.sh "$S/data/qd14-gate/brief.md" --project pomoplan
    FM_HOME="$S" bin/fm-spawn.sh qd14-gate projects/pomoplan --mode direct-PR --yolo off --branch-prefix chore/ --harness claude --model sonnet
    ```
    **Do not touch the Crewmate's tab.** Any prompt that appears is a failure to note, not something to answer.
