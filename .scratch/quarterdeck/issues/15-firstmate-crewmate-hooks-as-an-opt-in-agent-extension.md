@@ -1,6 +1,6 @@
 # 15: FirstMate's Crewmate hooks reach a Quarterdeck-created container as an opt-in Agent Extension
 
-**Status:** ready-for-human
+**Status:** done
 **Model:** Opus (the ticket is about an agent hook)
 **Design slice:** 3 (Hardened project container), design open question 3
 
@@ -104,3 +104,5 @@ Ticket 15 remains open: actual ticket 14 hook results are still missing, so its 
 - Spec: `quarterdeck.layer` replacement and the Herdr row were not asked for. **Declined**: replacement is needed for the hook to reach existing containers; the Herdr row records this ticket's investigation.
 - Spec: hook silently does nothing if `<home>/bin` is not exactly a mount point. **Declined**: that is the read-only guarantee the criterion asks for; `qd-project-up` always mounts it so.
 
+
+Closed 2026-11-19 after PR #1 merged. The code and its automated tests are done. The user dropped the remaining manual checks: they will notice problems during normal work, and each problem becomes a new ticket.

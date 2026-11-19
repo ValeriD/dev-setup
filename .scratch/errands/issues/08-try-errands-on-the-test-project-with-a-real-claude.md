@@ -1,6 +1,6 @@
 # 08: Try Errands on the test Project with a real Claude
 
-**Status:** ready-for-human
+**Status:** wontfix
 **Model:** Opus
 **Design slice:** 7 (Manual run)
 
@@ -58,3 +58,5 @@ Steps for the user, each recorded in `quarterdeck/CHECKLIST.md` with what was se
 - The Quarterdeck MVP must start and hold a First Mate session with a real Claude token (MVP tickets under `.scratch/quarterdeck/issues/`, at least 22 and 23).
 
 ## Comments
+
+Dropped 2026-11-19 (status `wontfix`): this ticket is a manual run by the user. The user decided to verify this during normal work instead of as a separate task; each problem found becomes a new ticket.

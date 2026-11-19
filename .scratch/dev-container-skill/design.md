@@ -1,7 +1,7 @@
 ---
 type: technical-design
 feature: dev-container-skill
-status: approved
+status: implemented
 base-commit: 0d61d73
 touches:
   - agent-extensions

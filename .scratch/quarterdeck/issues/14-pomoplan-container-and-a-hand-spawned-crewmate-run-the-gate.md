@@ -1,6 +1,6 @@
 # 14: The hardened project container on pomoplan runs the full gate for a hand-spawned Crewmate
 
-**Status:** ready-for-human
+**Status:** wontfix
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), the real half
 
@@ -150,3 +150,5 @@ Run by the user following `.scratch/quarterdeck/your-tasks.md` task B. pomoplan'
 - **Checklist rows (criterion 7):** the ticket 08 token-scope row is in ticket 08's comment. The SC-02 and SC-07 rows did not pass, for the reasons above.
 
 No criterion is ticked. Still to do: re-run after the trust fix and pomoplan's font egress.
+
+Dropped 2026-11-19 (status `wontfix`): this ticket is a manual run by the user. The user decided to verify this during normal work instead of as a separate task; each problem found becomes a new ticket.

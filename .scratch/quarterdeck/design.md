@@ -1,7 +1,7 @@
 ---
 type: technical-design
 feature: quarterdeck
-status: proposed
+status: implemented
 base-commit: 41f75c3
 touches:
   - quarterdeck

@@ -1,6 +1,6 @@
 # 08: The project container receives a read-only token for fetching Agent Extensions, and nothing that can push
 
-**Status:** ready-for-human
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 3 (Hardened project container), private extension sources
 
@@ -108,3 +108,5 @@ Ticked, each asserted by the dummy-token fixture `qd-project-up extensions fixtu
 - Criterion 5: `testLauncherFixture` runs the launcher with `GH_TOKEN`, `GITHUB_TOKEN`, `DEV_SETUP_GITHUB_PAT` set and asserts none reaches the container's Claude; the extensions fixture shows `QUARTERDECK_EXTENSIONS_TOKEN` is not in the container environment, so the token has only the creation path.
 
 Criterion 4 stays unticked. Its first half already has a test and needed no new one: the no-token fixture runs `qd-project-up` with `QUARTERDECK_EXTENSIONS_TOKEN` unset, asserts exit 0, a running labelled container, and `first.err` matching `/warning.*QUARTERDECK_EXTENSIONS_TOKEN/`. The second half (a Project layer with a private source then fails with the installer's existing `cannot fetch ...` message) needs a private repository or a network fixture that refuses anonymous fetches; it is left to the user's absent-token run on the private-source project (CHECKLIST). No code or test was changed for this ticket. Status stays `ready-for-human`: criterion 4's second half is the only open item.
+
+Closed 2026-11-19 after PR #1 merged. The code and its automated tests are done. The user dropped the remaining manual checks: they will notice problems during normal work, and each problem becomes a new ticket.

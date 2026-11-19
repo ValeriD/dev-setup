@@ -1,7 +1,7 @@
 ---
 type: technical-design
 feature: ci-efficiency
-status: approved
+status: implemented
 base-commit: 61f0821
 touches:
   - ci-release

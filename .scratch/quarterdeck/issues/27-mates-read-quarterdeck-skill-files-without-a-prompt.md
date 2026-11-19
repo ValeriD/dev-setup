@@ -1,6 +1,6 @@
 # 27: The mates read the Quarterdeck's skill files without a permission prompt
 
-**Status:** ready-for-human
+**Status:** done
 **Model:** Opus
 **Design slice:** 5 (Mate skills)
 
@@ -63,3 +63,5 @@ None.
 - Standards, c: name the Claude version in the fixture. **Fixed.**
 - Spec, b: the fixture goes beyond a check of the settings alone. **Declined.** It checks Claude's real decision, and it follows the pattern of `codex-mock-server.mjs`.
 
+
+Closed 2026-11-19 after PR #1 merged. The code and its automated tests are done. The user dropped the remaining manual checks: they will notice problems during normal work, and each problem becomes a new ticket.
