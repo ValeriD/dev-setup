@@ -1,6 +1,6 @@
 # 02: Create a Project with no remote
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 2 (Project creation)
 
@@ -12,16 +12,16 @@ One command creates a Project that has no GitHub repository: a git repository in
 
 ## Acceptance criteria
 
-- [ ] `qd-project-new <name> <variant> [preset…]` creates `<First Mate home>/projects/<name>` as a git repository whose first commit on `main` holds `.devcontainer/` rendered from that Variant's Template, with the named Presets copied in (SC-01).
-- [ ] The same command writes the Project's config record under `<work root>/quarterdeck/`: the git tree of `.devcontainer/` that its container may be built from. No Project container mounts that location.
-- [ ] A second `qd-project-new` with a name that already exists exits non-zero, says the Project exists, and changes no file (SC-03).
-- [ ] An unknown Variant or Preset name is refused before anything is created.
-- [ ] For a Project with no `origin` remote, `qd-project-up` skips the fetch and renders the recorded tree. The result is a running container from the Markdown Variant with egress ready and the mount set of the existing design (SC-01).
-- [ ] After a commit that changes `.devcontainer/` is put on the Project's `main` from inside its container's reach (the test moves `main` directly), `qd-project-up` still renders the recorded tree, not the new one.
-- [ ] A Project that has an `origin` remote behaves exactly as before; the existing fixture tests pass unchanged.
-- [ ] The Project has no Second Mate home and no remote (SC-02).
-- [ ] A link at `<work root>/projects/<name>` points to the Project's folder.
-- [ ] `npm run test:errands` and `npm run test:quarterdeck` pass.
+- [x] `qd-project-new <name> <variant> [preset…]` creates `<First Mate home>/projects/<name>` as a git repository whose first commit on `main` holds `.devcontainer/` rendered from that Variant's Template, with the named Presets copied in (SC-01).
+- [x] The same command writes the Project's config record under `<work root>/quarterdeck/`: the git tree of `.devcontainer/` that its container may be built from. No Project container mounts that location.
+- [x] A second `qd-project-new` with a name that already exists exits non-zero, says the Project exists, and changes no file (SC-03).
+- [x] An unknown Variant or Preset name is refused before anything is created.
+- [x] For a Project with no `origin` remote, `qd-project-up` skips the fetch and renders the recorded tree. The result is a running container from the Markdown Variant with egress ready and the mount set of the existing design (SC-01).
+- [x] After a commit that changes `.devcontainer/` is put on the Project's `main` from inside its container's reach (the test moves `main` directly), `qd-project-up` still renders the recorded tree, not the new one.
+- [x] A Project that has an `origin` remote behaves exactly as before; the existing fixture tests pass unchanged.
+- [x] The Project has no Second Mate home and no remote (SC-02).
+- [x] A link at `<work root>/projects/<name>` points to the Project's folder.
+- [x] `npm run test:errands` and `npm run test:quarterdeck` pass.
 
 ## Technical context
 
@@ -47,3 +47,13 @@ One command creates a Project that has no GitHub repository: a git repository in
 - 01: A Markdown Variant that is built and recorded locally
 
 ## Comments
+
+### Resolution (Sonnet agent)
+
+Built in the commit "errands 02: create a Project with no remote". New `quarterdeck/bin/qd-project-new` (baked into the Quarterdeck image with `templates/markdown/.devcontainer` and `presets/`; `.dockerignore` allows them). It validates name, Variant, built image and Presets first, builds the repository in a temp folder beside the target, then moves it into place, writes `<work root>/quarterdeck/local-projects/<name>` (the `.devcontainer/` tree id) and links `<work root>/projects/<name>`. `qd-project-up` with no `origin` skips the fetch and uses that record (refuses a Project with neither origin nor record; never falls back to `main`); `GIT_NO_REPLACE_OBJECTS=1` is set so replace refs cannot substitute the tree. `PROJECT-CONTAINERS.md` and `ARCHITECTURE.md` updated. One new test in `tests/errands.test.mjs` covers SC-01/02/03, refusals, Presets copied and tagged, and the moved-`main` case. `npm run test:errands` 6/6 and `npm run test:quarterdeck` 45/45 green; cleanup clean.
+
+Decisions: the record is a file per Project holding only the tree id (git objects are hash-bound). `patEnvVar` is left at its Template default `DEV_SETUP_GITHUB_PAT`. The test applies the offline pin by committing a config change and rewriting the record, as an explicit user update would; no `qd-project` update command exists yet (ticket 07's skill).
+
+Not checked: the Preset-bearing Project is created but not started (its skills need the network); `test:skill`, pins and Renovate tests not run (nothing they cover changed). If the record write or link fails after the folder is moved, a retry reports "exists" and needs manual cleanup (small window, not handled).
+
+Review: reviewer agents not spawned; careful self-review against the design and spec. Findings: none requiring change beyond the replace-refs hardening already included.
