@@ -1,4 +1,5 @@
 // Errands feature tests, token-free (run with `npm run test:errands`; never the whole suite).
+// Ticket 04: an Errand on a Project with no remote runs with a stub Crewmate (tests/fixtures/errands-crewmate) through FirstMate's own commands and lands with fm-merge-local.sh.
 // Ticket 02: qd-project-new makes a Project with no remote and records its config tree; qd-project-up follows the record.
 // Ticket 01: the Markdown Variant is built on this machine by the host command and recorded, the built
 // image is hardened like the Node Variant, and qd-project-up accepts an image only from that record.
@@ -453,4 +454,129 @@ test('qd-project-rm removes one Project\'s container, exports and record, refuse
   } finally {
     for (const c of [...Object.values(cids), otherHome, otherCreator, noCreator]) run('docker', ['rm', '-fv', c]);
   }
+});
+
+// Ticket 04: the Errand loop on a Project with no remote. The test script plays the First Mate's skill (ticket 07):
+// FirstMate's own commands register, brief, dispatch, hold and land; the stub Crewmate runs inside the Project's container.
+test('an Errand runs in the Project container on its own branch, reports its check, and lands only through FirstMate\'s merge (SC-05, 06, 10, 11, 12, 13)', async () => {
+  const started = quarterdeck('start', '--no-first-mate');
+  assert.equal(started.code, 0, `${started.out}\n${started.err}`);
+  const home = `${work}/fleet/firstmate`;
+  const p = 'errp';
+  const dir = `${home}/projects/${p}`;
+  const recordOf = `${work}/quarterdeck/local-projects/${p}`;
+  const fm = (command) => okInside(`cd ${home}; FM_HOME=${home} ${command}`);
+  const git = (args) => okInside(`git -C ${dir} ${args}`).trim();
+  const userCommit = (msg) => okInside(`git -C ${dir} add -A && git -C ${dir} -c user.name=User -c user.email=user@example.invalid commit -qm ${msg}`);
+  // The Project, from ticket 02, registered the way FirstMate's project-management procedure says: a registry line, local-only, yolo off.
+  const made = inside(`env QD_WORK_ROOT=${work} qd-project-new ${p} markdown`);
+  assert.equal(made.code, 0, `${made.out}\n${made.err}`);
+  const cfg = okInside(`git -C ${dir} show HEAD:.devcontainer/devcontainer.json`);
+  put(`${dir}/.devcontainer/devcontainer.json`, JSON.stringify({ ...JSON.parse(cfg.replace(/^\s*\/\/.*$/gm, '')), containerEnv: pinEnv() }));
+  userCommit('pin');
+  okInside(`git -C ${dir} rev-parse HEAD:.devcontainer > ${recordOf}`);
+  okInside(`mkdir -p ${home}/data; printf '%s\\n' '- ${p} [local-only] - Errands fixture (added 2026-01-01)' >> ${home}/data/projects.md`);
+  assert.equal(fm(`bin/fm-project-mode.sh ${p}`).trim(), 'local-only off');
+  const up = inside(`env -u QUARTERDECK_EXTENSIONS_TOKEN -u QD_PROJECT_TEST_IMAGE QD_RUN_LABEL=${runLabel} qd-project-up ${home} ${p}`);
+  assert.equal(up.code, 0, `${up.out}\n${up.err}`);
+  const cid = up.out.trim().split('\n').pop();
+  // The stub Crewmate replaces Claude inside this container only.
+  const stub = readFileSync(join(REPO, 'tests/fixtures/errands-crewmate/claude.mjs'), 'utf8');
+  assert.equal(run('docker', ['exec', '-i', '-u', 'root', cid, 'sh', '-c', 'rm -f /usr/local/bin/claude; cat > /usr/local/bin/claude; chmod 755 /usr/local/bin/claude'], { input: stub }).code, 0);
+
+  // What the user's main folder holds: tracked and untracked files by content, the branch, `main`.
+  const folder = () => okInside(`cd ${dir} && { git rev-parse main; git symbolic-ref HEAD; git status --porcelain --ignored; find . -path ./.git -prune -o -type f -exec sha256sum {} +; } | sort`);
+  const errand = async (taskId, { file, text, checkLine }) => {
+    const before = folder();
+    fm(`bin/fm-brief.sh ${taskId} ${p} --mode local-only`);
+    const briefPath = `${home}/data/${taskId}/brief.md`;
+    const generated = okInside(`cat ${briefPath}`);
+    put(briefPath, generated.replace('{TASK}', text)
+      .replace('{FIRSTMATE_SPEC}', `Errand: ${text}\nErrand file: ${file}\n${checkLine}\nAn undecided point ends the session with a needs-decision line and no guess.\nYour final status line ends with \`check: passed\`, \`check: failed\` or \`check: none\`.`));
+    fm(`bin/fm-dispatch-resolve.sh ${briefPath}`);
+    const spawned = fm(`bin/fm-spawn.sh ${taskId} projects/${p} --mode local-only --yolo off --harness claude --model sonnet`);
+    const wt = spawned.match(/worktree=(\S+)/)?.[1];
+    assert.ok(wt, spawned);
+    const sessions = `${home}/state/${taskId}.stub-sessions`;
+    let reported = false;
+    for (let n = 0; n < 120 && !reported; n++) {
+      reported = inside(`test -s ${sessions}`).code === 0;
+      // SC-06 while it runs: nothing in the main folder moves.
+      assert.equal(folder(), before, 'the main folder is unchanged while the Errand runs');
+      if (!reported) await new Promise((r) => setTimeout(r, 500));
+    }
+    assert.ok(reported, `no report: ${inside(`cat ${home}/state/${taskId}.status`).out}`);
+    const session = JSON.parse(okInside(`cat ${sessions}`).trim().split('\n').at(-1));
+    return { wt, session, before, status: okInside(`tail -n1 ${home}/state/${taskId}.status`).trim() };
+  };
+
+  // 1. No check file on main: the Brief says nothing of one, the line says none (SC-11), and it lands (SC-12).
+  const base0 = git('rev-parse main');
+  const e0 = await errand('err-one', { file: 'one.md', text: 'write one.md', checkLine: 'This Project has no check.' });
+  assert.equal(e0.session.host, cid.slice(0, 12), 'the Crewmate ran inside the Project container (SC-05)');
+  assert.equal(e0.session.cwd, e0.wt);
+  assert.ok(e0.wt.startsWith('/home/node/.treehouse/'), e0.wt);
+  assert.equal(e0.session.start, base0, 'its branch starts from the Project main (SC-05)');
+  assert.equal(okInside(`git -C ${e0.wt} branch --show-current`).trim(), 'fm/err-one');
+  assert.equal(okInside(`git -C ${e0.wt} status --porcelain`).trim(), '');
+  assert.match(e0.status, /^done \[at=\d+\]: ready in branch fm\/err-one; check: none$/);
+  assert.equal(folder(), e0.before, 'the main folder is unchanged after the report (SC-06)');
+  assert.equal(git('rev-parse main'), base0);
+  // FirstMate's own observation records the ready head. This Quarterdeck has no tasks-axi, so no captain-hold row can
+  // exist; the guard in fm-merge-local.sh reads that as "not held". The user's word is the test script's decision.
+  assert.match(fm('bin/fm-crew-state.sh err-one'), /done/);
+  assert.equal(inside(`cd ${home}; FM_HOME=${home} bin/fm-captain-hold.sh open err-one --distinguish-absent`).code, 3, 'no hold row');
+  const merge = (taskId) => inside(`cd ${home}; FM_HOME=${home} bin/fm-merge-local.sh ${taskId} 2>&1`);
+  // The test script's accept step: a result reported with `check: failed` is never offered, so FirstMate's merge is not called.
+  const accept = (taskId, status) => (/check: failed$/.test(status) ? { code: null, out: 'check failed: not offered for accept' } : merge(taskId));
+  const landed = accept('err-one', e0.status);
+  assert.equal(landed.code, 0, landed.out);
+  assert.match(landed.out, /merged fm\/err-one into local main/);
+  assert.equal(git('rev-parse main'), e0.session.head, 'main fast-forwarded to the Errand\'s head (SC-12)');
+  assert.equal(git('symbolic-ref --short HEAD'), 'main');
+  assert.equal(git('status --porcelain'), '');
+  assert.equal(okInside(`cat ${dir}/one.md`).trim(), 'write one.md', 'the main folder shows the result');
+
+  // 2. The user adds a check to main. An Errand that breaks it reports failed and is not landed (SC-10).
+  okInside(`mkdir -p ${dir}/.quarterdeck && printf '%s\\n' 'Run this and report its result.' 'command: test ! -e should-fail' > ${dir}/.quarterdeck/errand-check.md`);
+  userCommit('check');
+  const follow = 'Follow .quarterdeck/errand-check.md before you report, and end your report with its result.';
+  const mainWithCheck = git('rev-parse main');
+  const e1 = await errand('err-two', { file: 'should-fail', text: 'write a file the check rejects', checkLine: follow });
+  assert.equal(e1.session.start, mainWithCheck);
+  assert.match(e1.status, /^done \[at=\d+\]: ready in branch fm\/err-two; check: failed$/);
+  assert.equal(folder(), e1.before, 'the main folder is unchanged after the report (SC-06)');
+  const notLanded = accept('err-two', e1.status);
+  assert.equal(notLanded.code, null);
+  assert.equal(git('rev-parse main'), mainWithCheck, 'a failed result is not landed (SC-10)');
+  assert.equal(folder(), e1.before);
+
+  // 3. The check passes: the line says so (SC-10). Then the accept is refused where it would cost the user something (SC-13).
+  const e2 = await errand('err-three', { file: 'three.md', text: 'write three.md', checkLine: follow });
+  assert.match(e2.status, /^done \[at=\d+\]: ready in branch fm\/err-three; check: passed$/);
+  assert.equal(e2.session.host, cid.slice(0, 12));
+  assert.equal(folder(), e2.before);
+  fm('bin/fm-crew-state.sh err-three');
+  const tip = git('rev-parse refs/heads/fm/err-three');
+  // 3a. A file of the user's that the merge would overwrite.
+  okInside(`printf 'mine\\n' > ${dir}/three.md`);
+  const dirty = merge('err-three');
+  assert.notEqual(dirty.code, 0, dirty.out);
+  assert.match(dirty.out, /dirty working tree/);
+  assert.equal(okInside(`cat ${dir}/three.md`), 'mine\n', 'the user\'s file is unchanged');
+  assert.equal(git('rev-parse main'), mainWithCheck, 'main has not moved');
+  assert.equal(git('rev-parse refs/heads/fm/err-three'), tip);
+  okInside(`rm ${dir}/three.md`);
+  // 3b. A main that moved after dispatch.
+  okInside(`echo mine > ${dir}/moved.md`);
+  userCommit('moved');
+  const movedTo = git('rev-parse main');
+  const moved = merge('err-three');
+  assert.notEqual(moved.code, 0, moved.out);
+  assert.match(moved.out, /not a fast-forward of main/);
+  assert.equal(git('rev-parse main'), movedTo, 'main is as the user left it');
+  assert.equal(git('status --porcelain'), '');
+  assert.equal(okInside(`cat ${dir}/moved.md`), 'mine\n');
+  assert.equal(okInside(`test -e ${dir}/three.md`.concat('; echo $?')).trim(), '1', 'the Errand\'s file is not in the main folder');
+  run('docker', ['rm', '-fv', cid]);
 });
