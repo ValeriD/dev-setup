@@ -1,7 +1,7 @@
 ---
 type: technical-design
 feature: errands
-status: approved
+status: implemented
 base-commit: fa65e1a
 touches:
   - quarterdeck

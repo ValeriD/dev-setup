@@ -1,6 +1,6 @@
 # 10: The architecture index and docs describe Errands
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** Documentation
 
@@ -12,12 +12,12 @@ The current-state documents say what now exists: Projects with no remote, the tw
 
 ## Acceptance criteria
 
-- [ ] `ARCHITECTURE.md`'s Quarterdeck table has current rows for `qd-project-new`, `qd-project-rm`, the two skills and the Markdown Variant, and its launcher and creator rows are rewritten, not appended to. The index stays an index.
-- [ ] `docs/architecture/quarterdeck.md` describes the Errand flow for a Project with no remote and for a Project on GitHub, and says what is proven by tests and what only by the manual checklist.
-- [ ] `quarterdeck/PROJECT-CONTAINERS.md` describes the config record, the local Variant record and the launcher's Project selection, each stated once.
-- [ ] The three risks in the design's "Risks accepted in this design" are recorded in an ADR or beside the existing accepted risks, each with what limits it.
-- [ ] `README.md` tells the user how to build the Markdown Variant and where the checklist for trying Errands is.
-- [ ] The design's frontmatter `status` is set to `implemented` only if every other ticket in `.scratch/errands/issues/` is done; otherwise it is left and a comment here says which tickets remain.
+- [x] `ARCHITECTURE.md`'s Quarterdeck table has current rows for `qd-project-new`, `qd-project-rm`, the two skills and the Markdown Variant, and its launcher and creator rows are rewritten, not appended to. The index stays an index.
+- [x] `docs/architecture/quarterdeck.md` describes the Errand flow for a Project with no remote and for a Project on GitHub, and says what is proven by tests and what only by the manual checklist.
+- [x] `quarterdeck/PROJECT-CONTAINERS.md` describes the config record, the local Variant record and the launcher's Project selection, each stated once.
+- [x] The three risks in the design's "Risks accepted in this design" are recorded in an ADR or beside the existing accepted risks, each with what limits it.
+- [x] `README.md` tells the user how to build the Markdown Variant and where the checklist for trying Errands is.
+- [x] The design's frontmatter `status` is set to `implemented` only if every other ticket in `.scratch/errands/issues/` is done; otherwise it is left and a comment here says which tickets remain.
 
 ## Technical context
 
@@ -46,3 +46,13 @@ The current-state documents say what now exists: Projects with no remote, the tw
 ## Comments
 
 Blocker 08 was dropped on 2026-11-19 (`wontfix`, a manual run the user does during normal work), so it no longer blocks this ticket.
+
+### Resolution (Sonnet agent)
+
+Built in the commit "errands 10: the docs describe Errands". Earlier tickets had already added the Quarterdeck table rows for `qd-project-new`, `qd-project-rm`, the two skills, the Markdown Variant and the Publisher. This ticket rewrote the launcher row (home and Project selection) in place and linked the new ADR. `docs/architecture/quarterdeck.md` gained an "Errands" section (no-remote flow with no captain hold and the user's word gating the merge; follow-up Errand for revised work; GitHub flow) and an evidence paragraph stating what `test:errands` proves and what only the manual checklist covers; the "only the owning Second Mate dispatches" sentence and the dependency flow were corrected. `quarterdeck/PROJECT-CONTAINERS.md` gained the local Variant record paragraph; the config record and launcher selection were already stated there once and were left alone. New `docs/adr/0011-accept-shared-state-and-ref-risks-for-errands.md` records the three design risks, each with its limit, plus the two work-root trust limits. `README.md` points to the checklist and tells the user to rebuild the Markdown Variant.
+
+Design `status` set to `implemented` and the spec closed: every other ticket is done, and 08 is wontfix.
+
+Not checked: no test run (documentation only; no tested row changed). The documents were read against ticket resolution comments and the code anchors, not re-run. The checklist rows remain "not run" (ticket 08 dropped).
+
+Review: reviewer agents not spawned; careful self-review against the design and spec. Finding: one claim (the check file path) was verified in `references/brief.md`; no change needed.
