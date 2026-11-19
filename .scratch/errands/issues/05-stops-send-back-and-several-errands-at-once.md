@@ -1,6 +1,6 @@
 # 05: Stops, send back, and several Errands at once
 
-**Status:** ready-for-agent
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 4 (Errand loop), second half
 
@@ -16,7 +16,7 @@ The paths around the happy one, again with the stub Crewmate and FirstMate's rea
 - [x] A stub killed mid-run leaves the branch as it was and nothing landed, and the state FirstMate reports lets a mate say so (SC-09).
 - [x] A relaunch with a comment in its note starts a new session in the same worktree and branch, which sees the earlier commit and the comment, and reports again (SC-14).
 - [x] Two records dispatched in one Project run at the same time on separate branches and worktrees in the same container, and each reports on its own (SC-16).
-- [ ] A record on a `main` that moved since dispatch can be brought up to date by a relaunch whose note asks for a rebase, after which the accept of ticket 04 succeeds.
+- [x] A record on a `main` that moved since dispatch can be brought up to date by a relaunch whose note asks for a rebase, after which the accept of ticket 04 succeeds.
 - [x] `npm run test:errands` passes.
 
 ## Technical context
@@ -59,3 +59,11 @@ Other findings:
 Not checked: `test:quarterdeck`, `test:skill`, pins and Renovate tests (no production file changed).
 
 Review: reviewer agents not spawned; careful self-review against the design and spec. Findings: none requiring change. The test's finding assertions would need updating if the latch question is resolved.
+
+### Resolution, second part (Sonnet agent): revised work is a follow-up Errand
+
+The user decided (recorded in `design.md`, "Decision 2026-11-19: revised work is a follow-up Errand"): a send-back that adds commits after done, or a rebase onto a moved `main`, never re-lands the old FirstMate task, because of FirstMate's head latch (`bin/fm-dod-lib.sh`, `bin/fm-merge-local.sh` header; fork unchanged, ADR 0008). It becomes a follow-up Errand with a new task id and a branch from today's `main`; its Brief names the old branch and its Crewmate brings those commits over and adds the revision; it lands through `fm-merge-local.sh`. A send-back before the first done stays a relaunch.
+
+Under that decision the rebase criterion is satisfied: the test (`tests/errands.test.mjs`, the ticket 05 test) keeps the SC-14 relaunch, asserts the old task's merge is refused ("differs from the recorded local done head"), dispatches a follow-up Errand on the moved `main` (the stub's new `Errand follow-up:` mode cherry-picks the old branch's commits), and asserts: its branch starts from today's `main` and holds the old commits plus the revision; `main` does not move until the accept; the accept fast-forwards `main` once, to the follow-up's head; the old branch's tip is not in `main` and its merge stays refused. The stub's `Rebase onto main` mode was removed. `npm run test:errands` 10/10; cleanup clean.
+
+Ticket 07 (`qd-errand`) must: choose between `fm-control.sh relaunch --note` (no observed done yet: answer, send-back before done) and a follow-up Errand (after an observed done: send-back with commits, or a moved `main`); write the follow-up's Brief to name the old branch (`fm/<old-id>`) and tell the Crewmate to bring its commits over (cherry-pick or merge) onto the new branch from today's `main`; close the old task without calling its merge; and tell the user the landing is the new task's. Detect a dead Crewmate with `fm-send.sh`'s "has exited" notice, not `fm-crew-state.sh`.

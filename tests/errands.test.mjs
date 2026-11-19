@@ -691,32 +691,45 @@ test('an Errand stops on a question, survives a dead Crewmate, is sent back, run
     assert.match(lastStatus('p-one'), /^done \[at=\d+\]: ready in branch fm\/p-one; check: none$/);
     assert.equal(git('rev-parse main'), base);
 
-    // Rebase: main moved after dispatch; a relaunch whose note asks for a rebase brings the branch up to date.
+    // Revised work after done (the send-back above, or a main that moved) lands as a follow-up Errand under a NEW task id,
+    // because FirstMate latches the first observed done head as local_done_head and refuses any other head
+    // (bin/fm-dod-lib.sh, bin/fm-merge-local.sh). Design decision 2026-11-19.
     fm('bin/fm-crew-state.sh p-one');
     okInside(`echo mine > ${dir}/moved.md`);
     userCommit('moved');
     const movedTo = git('rev-parse main');
+    const oldTip = heads('p-one');
     const refused = merge('p-one');
     assert.notEqual(refused.code, 0, refused.out);
-    assert.match(refused.out, /differs from the recorded local done head/, 'the sent-back head is not the one FirstMate latched');
+    assert.match(refused.out, /differs from the recorded local done head/, 'the old task is refused: its head is not the latched one');
     assert.equal(git('rev-parse main'), movedTo);
-    const rebased = relaunch('p-one', 'Rebase onto main, then report.');
-    assert.equal(rebased.code, 0, rebased.out);
-    const third = await waitSession('p-one', 3, folder());
-    assert.equal(third.cwd, wtB);
-    assert.equal(git(`merge-base refs/heads/fm/p-one main`), movedTo, 'the branch now sits on the moved main');
-    assert.equal(git(`rev-list --count ${movedTo}..refs/heads/fm/p-one`), '2');
-    // Finding for ticket 05: FirstMate latches the first observed done head as local_done_head and its merge refuses any
-    // other head ("Revised work needs a new task/approval record"), so neither a send-back nor this rebase can be accepted
-    // through fm-merge-local.sh. The rebase itself works; the accept does not. Nothing is landed and nothing is patched.
-    fm('bin/fm-crew-state.sh p-one');
-    const latched = merge('p-one');
-    assert.notEqual(latched.code, 0, latched.out);
-    assert.match(latched.out, /differs from the recorded local done head/);
-    assert.equal(git('rev-parse main'), movedTo, 'main is as the user left it');
+    const wtF = dispatch('f-one', { file: 'pa.md', text: 'write pa.md revised', checkLine: 'No check.', extra: 'Errand follow-up: fm/p-one\n' });
+    const follow = await waitSession('f-one', 1, folder());
+    assert.notEqual(wtF, wtB, 'a new worktree');
+    assert.equal(follow.cwd, wtF);
+    assert.equal(follow.branch, 'fm/f-one');
+    assert.equal(follow.followUp, 'fm/p-one');
+    assert.ok(follow.log.includes('errand p-one') && follow.log.includes('errand p-one: comment'), 'the old branch\'s commits came over');
+    assert.equal(git(`rev-parse refs/heads/fm/f-one~3`), movedTo, 'the follow-up branch starts from today\'s main');
+    assert.match(lastStatus('f-one'), /^done \[at=\d+\]: ready in branch fm\/f-one; check: none$/);
+    assert.equal(okInside(`cat ${wtF}/pa.md.comment`).trim(), 'put it under a heading', 'the send-back comment\'s work is kept');
+    assert.equal(git('rev-parse main'), movedTo, 'main has not moved yet');
+    assert.equal(heads('p-one'), oldTip, 'the old branch is untouched');
+    fm('bin/fm-crew-state.sh f-one');
+    const landedF = merge('f-one');
+    assert.equal(landedF.code, 0, landedF.out);
+    assert.equal(git('rev-parse main'), follow.head, 'main fast-forwarded to the follow-up\'s head');
+    assert.equal(git(`rev-list --count ${base}..main`), '4', 'main moved once, by the user\'s commit and the three follow-up commits');
+    assert.equal(git(`rev-list --count ${movedTo}..main`), '3');
+    assert.equal(okInside(`cat ${dir}/moved.md`).trim(), 'mine');
+    assert.match(okInside(`cat ${dir}/pa.md`), /revised/);
     assert.equal(git('status --porcelain'), '');
-    assert.equal(heads('p-one'), third.head);
-    assert.equal(inside(`test -e ${dir}/pa.md -o -e ${dir}/pb.md -o -e ${dir}/title.md -o -e ${dir}/dead.md`).code, 1, 'no result of these Errands is in the main folder');
+    // The old task's branch never lands: its commits are not in main, and its accept stays refused.
+    assert.equal(inside(`git -C ${dir} merge-base --is-ancestor ${oldTip} main`).code, 1, 'the old branch tip is not in main');
+    const again = merge('p-one');
+    assert.notEqual(again.code, 0, again.out);
+    assert.equal(git('rev-parse main'), follow.head);
+    assert.equal(inside(`test -e ${dir}/pb.md -o -e ${dir}/title.md -o -e ${dir}/dead.md`).code, 1, 'the other Errands\' results are not in the main folder');
   } finally {
     run('docker', ['rm', '-fv', cid]);
   }

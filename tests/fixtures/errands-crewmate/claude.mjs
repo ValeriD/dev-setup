@@ -71,13 +71,10 @@ try {
     throw Object.assign(Error('asked'), { hung: true });
   }
   if (note && !answer) {
-    // Sent back with a comment, or asked to bring the branch up to date.
-    if (/^Rebase onto main\b/m.test(note)) git('rebase', 'main');
-    else {
-      writeFileSync(`${file}.comment`, `${comment ?? note}\n`);
-      git('add', `${file}.comment`);
-      git('commit', '-qm', `errand ${id}: comment`);
-    }
+    // Sent back with a comment, in the same worktree and branch.
+    writeFileSync(`${file}.comment`, `${comment ?? note}\n`);
+    git('add', `${file}.comment`);
+    git('commit', '-qm', `errand ${id}: comment`);
     const head = git('rev-parse', 'HEAD');
     status(`done: ready in branch ${branch}; check: none`);
     stopHooks();
@@ -85,6 +82,9 @@ try {
     prompt();
     throw Object.assign(Error('sent back'), { hung: true });
   }
+  // A follow-up Errand: a new task on a branch from today's main that brings an earlier branch's commits over.
+  const followUp = brief.match(/^Errand follow-up: (\S+)$/m)?.[1];
+  if (followUp && !note) git('cherry-pick', `${git('merge-base', 'HEAD', followUp)}..${followUp}`);
   const gate = brief.match(/^Errand gate: (\S+)$/m)?.[1];
   if (gate && !note) {
     // Say that this session is up, then wait for the test to open the gate: lets the test show Errands overlapping.
@@ -102,7 +102,7 @@ try {
   git('commit', '-qm', `errand ${id}`);
   status(`done: ready in branch ${branch}; check: ${check}`);
   stopHooks();
-  sessionRecord({ check });
+  sessionRecord({ check, followUp });
   prompt();
 } catch (error) {
   if (!error.hung) {
