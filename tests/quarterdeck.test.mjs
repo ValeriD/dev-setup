@@ -859,6 +859,45 @@ test('mate procedures: managed skills, Charter and Brief contract are installed 
   for (const line of ['PR opened', 'stopped at ticket NN', 'Answered:', 'local only', 'failed twice:', 'Question:']) assert.ok(report.includes(line), line);
 });
 
+// Errands ticket 07: the First Mate's Project and Errand skills, installed beside the MVP's, naming only real commands and files.
+test('mate procedures: qd-project and qd-errand are installed and name only installed commands and files', () => {
+  const started = quarterdeck();
+  assert.equal(started.code, 0, started.err);
+  const installed = p => okInside(`node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1], "utf8"))' '${p}'`);
+  const root = '/etc/claude-code/.claude/skills';
+  const skills = Object.fromEntries(['qd-first-mate', 'qd-spec-run', 'qd-project', 'qd-errand'].map(n => [n, installed(`${root}/${n}/SKILL.md`)]));
+  for (const [name, text] of Object.entries(skills)) assert.match(text, new RegExp(`^---\\nname: ${name}\\ndescription: .+\\n---`));
+  // Every reference a skill links to is installed beside it.
+  const refs = {};
+  for (const [name, text] of Object.entries(skills)) {
+    for (const [, ref] of text.matchAll(/\]\((references\/[a-z-]+\.md)\)/g)) refs[`${name}/${ref}`] = installed(`${root}/${name}/${ref}`);
+  }
+  assert.ok('qd-errand/references/brief.md' in refs);
+  const project = skills['qd-project'];
+  const errand = skills['qd-errand'];
+  const brief = refs['qd-errand/references/brief.md'];
+  const text = [project, errand, brief].join('\n');
+  assert.doesNotMatch(text, /\b(Helm|worker|pause|resume|Ideas)\b/i);
+  // Every FirstMate command named exists in the pinned checkout; every Quarterdeck tool named is installed.
+  const commands = [...new Set(text.match(/fm-[a-z-]+\.sh/g))];
+  for (const command of commands) okInside(`test -x /opt/firstmate/bin/${command}`);
+  for (const tool of new Set(text.match(/\bqd-project-(new|up|rm)\b/g))) okInside(`test -x /opt/qd/bin/${tool}`);
+  for (const p of ['/opt/qd/templates/markdown/.devcontainer/devcontainer.json', '/opt/qd/presets']) okInside(`test -e ${p}`);
+  // The FirstMate skills loaded by name exist in the pinned checkout.
+  for (const s of ['project-management', 'ship-landing']) {
+    assert.ok(text.includes(`\`${s}\``), s);
+    okInside(`test -f /opt/firstmate/.agents/skills/${s}/SKILL.md`);
+  }
+  // The proven sequences, and the guards findings from tickets 04 to 06 require.
+  for (const line of ['fm-brief.sh <id> <project> --mode local-only', 'fm-dispatch-resolve.sh', '--mode local-only --yolo off --harness claude', 'fm-crew-state.sh <id>', 'fm-merge-local.sh <id>', 'relaunch --model <model> --note "Answer:', 'relaunch --model <model> --note "Comment:', 'has exited', 'dirty working tree', 'not a fast-forward of main', 'differs from the recorded local done head', 'Never run `fm-captain-hold.sh`', 'follow-up', 'fm-teardown.sh <old-id> --force', 'Never call `fm-merge-local.sh` for a replaced Errand', 'check: failed', 'kind=ship', 'project=', 'verbatim']) assert.ok(errand.includes(line), line);
+  for (const line of ['{TASK}', '{FIRSTMATE_SPEC}', 'needs-decision', '.quarterdeck/errand-check.md', 'check: passed', 'check: none', 'Delivery contract: mode=local-only', 'Ship branch: fm/<id>', '# Setup', '# Rules', '# Definition of done', 'Errand follow-up: fm/<old-id>', 'verbatim']) assert.ok(brief.includes(line), line);
+  for (const line of ['qd-project-new "$name"', 'exists; nothing was changed', 'local-only off', 'qd-project-up "$M" "$name"', 'qd-project-rm "$name"', 'Only after it succeeds', 'explicit yes', 'local-projects/$name']) assert.ok(project.includes(line), line);
+  // The First Mate's rule, narrowed in one place: Errands in Projects with no remote; a Second Mate's Project stays its own.
+  const first = skills['qd-first-mate'];
+  assert.match(first, /In a Project with a Second Mate, only that Second Mate starts Crewmates\. The First Mate starts a Crewmate only for an Errand in a Project with no remote, through `qd-errand`\./);
+  assert.doesNotMatch(first, /never spawns a project Crewmate/);
+});
+
 test("Claude's policy keeps Base's keys except allowManagedHooksOnly", () => {
   const rendered = JSON.parse(okInside('cat /etc/claude-code/managed-settings.json'));
   const base = JSON.parse(readFileSync(join(REPO, 'base/claude/managed-settings.json'), 'utf8'));

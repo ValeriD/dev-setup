@@ -172,3 +172,5 @@ Decision: revised work after the first `done` never re-lands the old task.
 - `main` moves once, by the follow-up's fast-forward.
 
 Consequences: the First Mate skill (`qd-errand`) must decide, from whether the old task has an observed `done`, between `fm-control.sh relaunch --note` and a follow-up Errand, and must close the old task without calling its merge.
+
+Addendum (ticket 07): "closed without landing" is FirstMate's `bin/fm-teardown.sh <old-id> --force`, its only close for unlanded work. It needs the user's explicit discard word, and it deletes `fm/<old-id>` (best-effort `branch -D`). So the old branch survives only until the old task is closed. `qd-errand` keeps the old task open until the follow-up has landed, because its branch is the follow-up's source. It closes the old task on the follow-up's accept, after telling the user that this deletes the branch. The landed follow-up closes with a plain `fm-teardown.sh <new-id>`. The ticket 05 test asserts both closes. Nothing in the spec relies on the old branch being kept.

@@ -5,7 +5,7 @@ description: Provision a Consuming Project's Second Mate or hand the user's deci
 
 # First Mate: hand off a Spec Run
 
-Use the user's supplied grilling decisions as input. Only the owning Second Mate starts project Crewmates; the First Mate never spawns a project Crewmate or writes project files.
+Use the user's supplied grilling decisions as input. In a Project with a Second Mate, only that Second Mate starts Crewmates. The First Mate starts a Crewmate only for an Errand in a Project with no remote, through `qd-errand`. It never writes project files.
 
 ## 0. Register and provision once per project
 

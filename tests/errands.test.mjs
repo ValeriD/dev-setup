@@ -730,6 +730,24 @@ test('an Errand stops on a question, survives a dead Crewmate, is sent back, run
     assert.notEqual(again.code, 0, again.out);
     assert.equal(git('rev-parse main'), follow.head);
     assert.equal(inside(`test -e ${dir}/pb.md -o -e ${dir}/title.md -o -e ${dir}/dead.md`).code, 1, 'the other Errands\' results are not in the main folder');
+
+    // Closing records by FirstMate's teardown, as qd-errand does (ticket 07): the landed follow-up closes plainly; the
+    // replaced Errand is refused as unlanded and closes only by an explicit discard. Neither moves main.
+    const teardown = (taskId, ...flags) => inside(`cd ${home}; FM_HOME=${home} bin/fm-teardown.sh ${taskId} ${flags.join(' ')} 2>&1`);
+    const closedF = teardown('f-one');
+    assert.equal(closedF.code, 0, closedF.out);
+    const keptOld = teardown('p-one');
+    assert.notEqual(keptOld.code, 0, keptOld.out);
+    assert.match(keptOld.out, /REFUSED: local-only worktree \S+ has work not yet merged into main/);
+    assert.ok(inside(`test -e ${home}/state/p-one.meta`).code === 0, 'a refused teardown keeps the record');
+    const closedOld = teardown('p-one', '--force');
+    assert.equal(closedOld.code, 0, closedOld.out);
+    for (const t of ['f-one', 'p-one']) assert.equal(inside(`test -e ${home}/state/${t}.meta`).code, 1, `${t} is closed`);
+    // FirstMate's teardown deletes the task branch, so the replaced Errand's branch is gone once it is closed (its work is in main through f-one).
+    assert.equal(inside(`git -C ${dir} rev-parse --verify -q refs/heads/fm/p-one`).code, 1, 'teardown deleted fm/p-one');
+    assert.equal(git('rev-parse main'), follow.head);
+    assert.equal(git('status --porcelain'), '');
+    assert.equal(inside(`test -e ${home}/state/p-two.meta`).code, 0, 'another open Errand is untouched');
   } finally {
     run('docker', ['rm', '-fv', cid]);
   }
