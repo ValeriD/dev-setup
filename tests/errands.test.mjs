@@ -296,3 +296,79 @@ test('qd-project-new creates a Project with no remote, qd-project-up runs it fro
   assert.equal(inside(`find ${work}/quarterdeck/config/${p} -name planted | grep -q .`).code === 0, false, 'the new tree was not rendered');
   run('docker', ['rm', '-fv', cid]);
 });
+
+test('the launcher routes a Crewmate launch by home and Project, from FirstMate\'s record, and never to the Quarterdeck', () => {
+  const started = quarterdeck('start', '--no-first-mate');
+  assert.equal(started.code, 0, `${started.out}\n${started.err}`);
+  const home = `${work}/fleet/firstmate`;
+  const recordOf = (n) => `${work}/quarterdeck/local-projects/${n}`;
+  okInside(`mkdir -p ${home}/state ${home}/data ${home}/bin ${home}/config; cp -a /opt/firstmate/bin/. ${home}/bin/`);
+  const cids = {};
+  for (const p of ['lpa', 'lpb']) {
+    const made = inside(`env QD_WORK_ROOT=${work} qd-project-new ${p} markdown`);
+    assert.equal(made.code, 0, `${made.out}\n${made.err}`);
+    const dir = `${home}/projects/${p}`;
+    const cfg = okInside(`git -C ${dir} show HEAD:.devcontainer/devcontainer.json`);
+    put(`${dir}/.devcontainer/devcontainer.json`, JSON.stringify({ ...JSON.parse(cfg.replace(/^\s*\/\/.*$/gm, '')), containerEnv: pinEnv() }));
+    okInside(`git -C ${dir} add -A && git -C ${dir} -c user.name=T -c user.email=t@example.invalid commit -qm pin && git -C ${dir} rev-parse HEAD:.devcontainer > ${recordOf(p)}`);
+    const up = inside(`env -u QUARTERDECK_EXTENSIONS_TOKEN -u QD_PROJECT_TEST_IMAGE QD_RUN_LABEL=${runLabel} qd-project-up ${home} ${p}`);
+    assert.equal(up.code, 0, `${up.out}\n${up.err}`);
+    cids[p] = up.out.trim().split('\n').pop();
+    // A stub Crewmate: records which container it ran in. No real agent session.
+    const stub = `#!/usr/bin/env node\nconst fs=require('fs'),os=require('os');fs.appendFileSync(process.cwd()+'/launched-in',os.hostname()+'\\n');\n`;
+    assert.equal(run('docker', ['exec', '-i', '-u', 'root', cids[p], 'sh', '-c', 'rm -f /usr/local/bin/claude; cat > /usr/local/bin/claude; chmod 755 /usr/local/bin/claude'], { input: stub }).code, 0);
+  }
+  assert.notEqual(cids.lpa, cids.lpb);
+  // FirstMate's own brief writer names the Project for each record id.
+  for (const [id, p] of [['ta', 'lpa'], ['tb', 'lpb'], ['tc', 'lpc']]) {
+    const b = inside(`cd ${home}; FM_HOME=${home} bin/fm-brief.sh ${id} ${p} --mode local-only`);
+    assert.equal(b.code, 0, `${b.out}\n${b.err}`);
+  }
+  const wtRoot = '/home/node/.treehouse/launcher-routing';
+  const launchCmd = (id, wt) => `mkdir -p ${wt} && cd ${wt} && FM_TASK_INBOX=${home}/state/${id}.inbox timeout 60 script -qec 'claude --model sonnet' /dev/null`;
+  const launch = (id, wt) => inside(launchCmd(id, wt));
+  const log = () => okInside(`cat ${work}/quarterdeck/logs/launch.log`).trim().split('\n').map((l) => JSON.parse(l));
+  const logFor = (wt) => log().filter((l) => l.cwd === wt && l.route !== 'note'); // 'note': these worktrees are plain folders, not clones' worktrees
+  const ranIn = (wt) => okInside(`cat ${wt}/launched-in`).trim();
+  // Each Project's launch reaches its own container.
+  for (const [id, p] of [['ta', 'lpa'], ['tb', 'lpb']]) {
+    const wt = `${wtRoot}/${p}`;
+    const r = launch(id, wt);
+    assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+    assert.deepEqual(logFor(wt).map((l) => [l.route, l.container]), [['project', cids[p]]]);
+    assert.equal(ranIn(wt), cids[p].slice(0, 12));
+  }
+  // Values planted where a Project container can write do not change the choice.
+  const wta = `${wtRoot}/lpa`;
+  okInside(`printf 'project=${home}/projects/lpb\\nhome=${home}\\n' > ${home}/state/ta.meta; echo lpb > ${wta}/.qd-project; echo lpb > ${home}/state/ta.project`);
+  assert.equal(launch('ta', wta).code, 0);
+  assert.equal(logFor(wta).at(-1).container, cids.lpa);
+  assert.equal(ranIn(wta).split('\n').at(-1), cids.lpa.slice(0, 12));
+  // A Project with no container fails with a message and never runs in the Quarterdeck.
+  const wtc = `${wtRoot}/lpc`;
+  const missing = launch('tc', wtc);
+  assert.notEqual(missing.code, 0);
+  assert.match(missing.out + missing.err, /expected exactly one running project container for home and Project lpc/);
+  assert.deepEqual(logFor(wtc), []);
+  assert.equal(inside(`test -e ${wtc}/launched-in`).code === 0, false);
+  // Two containers for the same home and Project fail too.
+  const dup = run('docker', ['run', '-d', '--label', runLabel, '--label', 'quarterdeck.creator=qd-project-up', '--label', `quarterdeck.home=${home}`, '--label', 'quarterdeck.project=lpa', '--entrypoint', 'sleep', recorded, '600']);
+  assert.equal(dup.code, 0, dup.err);
+  try {
+    const wtd = `${wtRoot}/dup`;
+    const ambiguous = launch('ta', wtd);
+    assert.notEqual(ambiguous.code, 0);
+    assert.match(ambiguous.out + ambiguous.err, /expected exactly one running project container/);
+    assert.deepEqual(logFor(wtd), []);
+  } finally {
+    run('docker', ['rm', '-fv', dup.out.trim()]);
+  }
+  // Overlapping launches into one container all end trusted.
+  const wts = [1, 2, 3, 4, 5, 6].map((n) => `${wtRoot}/overlap${n}`);
+  okInside(`${wts.map((wt) => `(${launchCmd('ta', wt)}) & `).join('')} wait`);
+  const trusted = JSON.parse(run('docker', ['exec', '-u', 'node', cids.lpa, 'sh', '-c', 'cat "$CLAUDE_CONFIG_DIR/.claude.json"']).out).projects;
+  for (const wt of wts) assert.equal(trusted[wt]?.hasTrustDialogAccepted, true, `${wt} trusted`);
+  const other = JSON.parse(run('docker', ['exec', '-u', 'node', cids.lpb, 'sh', '-c', 'cat "$CLAUDE_CONFIG_DIR/.claude.json"']).out).projects;
+  assert.equal(other[wts[0]], undefined, 'the other Project container was not touched');
+  for (const c of Object.values(cids)) run('docker', ['rm', '-fv', c]);
+});

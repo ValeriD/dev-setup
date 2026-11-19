@@ -41,8 +41,18 @@ case "$cwd/" in
       export "GIT_CONFIG_KEY_$count=core.fsmonitor" "GIT_CONFIG_VALUE_$count=false"
       export GIT_CONFIG_COUNT=$((count + 1))
     else
-      ids=$(docker ps -q --no-trunc --filter label=quarterdeck.creator=qd-project-up --filter "label=quarterdeck.home=$home")
-      [[ -n "$ids" && "$ids" != *$'\n'* ]] || die 'expected exactly one running project container for home; run qd-project-up'
+      # The Project comes from FirstMate's brief record (<home>/data/<id>/brief.md, written by fm-brief.sh as
+      # "a disposable git worktree of <project>"). Project containers mount state/, never data/, so they cannot
+      # change it; nothing under state/ or the worktree is consulted. A home whose id has no such record
+      # (a Second Mate's single-Project home) is routed by home alone, as before.
+      project=
+      if [[ -f "$home/data/$id/brief.md" ]]; then
+        project=$(sed -n 's/^.*disposable git worktree of \([A-Za-z0-9._-][A-Za-z0-9._-]*\)[ ,.:;].*$/\1/p' "$home/data/$id/brief.md" | head -n 1)
+      fi
+      filters=(--filter label=quarterdeck.creator=qd-project-up --filter "label=quarterdeck.home=$home")
+      [[ -z "$project" ]] || filters+=(--filter "label=quarterdeck.project=$project")
+      ids=$(docker ps -q --no-trunc "${filters[@]}")
+      [[ -n "$ids" && "$ids" != *$'\n'* ]] || die "expected exactly one running project container for home${project:+ and Project $project}; run qd-project-up"
       container=$ids
     fi
     ;;
@@ -65,7 +75,8 @@ if [[ "$route" = project ]]; then
   fi
 fi
 # No forwarded env on this preparation exec: use the container's own CLAUDE_CONFIG_DIR.
-docker exec -u node "$container" node -e '
+# Overlapping launches into one container serialise on a lock file beside the config, so neither trust entry is lost.
+docker exec -u node "$container" sh -c 'mkdir -p "$CLAUDE_CONFIG_DIR" && exec flock "$CLAUDE_CONFIG_DIR/.qd-trust.lock" node -e "$0" "$@"' '
 const fs=require("fs"), path=require("path");
 const dir=process.env.CLAUDE_CONFIG_DIR;
 if (!dir) throw Error("CLAUDE_CONFIG_DIR is required");
