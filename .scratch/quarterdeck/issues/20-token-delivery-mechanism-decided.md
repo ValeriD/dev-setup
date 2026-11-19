@@ -1,6 +1,6 @@
 # 20: Token delivery mechanism decided
 
-**Status:** ready-for-human
+**Status:** done
 **Model:** Sonnet
 **Design slice:** 1 (Quarterdeck up), credentials
 
@@ -68,3 +68,5 @@ Verified [ADR 0010](../../../docs/adr/0010-read-only-agent-extensions-token.md):
 Validation remains the prior Quarterdeck-only `npm run test:quarterdeck` report: **31 passes, 0 ordinary failures, 1 failing TODO (32 total)**. This is **not full acceptance**. Neither the independent reviewers nor this documentation-only close/record phase reran tests; broader regression was intentionally not run. No unsafe probes, real-secret checks, or new product changes were performed.
 
 **Status remains open / `ready-for-human`.** Despite all listed checkboxes now being satisfied, the ticket's completion condition requires both 03 and 08 to be complete. Ticket 08 remains incomplete: security concern 05 tracks devcontainer CLI persistence to `/etc/environment`, requiring supported prevention or explicit human narrowing; actual private Project-layer installation, absent-token private-source failure, and read-only/repository-scoped permission evidence remain pending. Follow the existing safe handoff above after the persistence decision; accepted inspect visibility does not waive that blocker. No design/spec is closed and no other ticket is implemented. Unrelated working-tree changes remain excluded from this record commit.
+
+Closed 2026-11-19 after PR #1 merged. The code and its automated tests are done. The user dropped the remaining manual checks: they will notice problems during normal work, and each problem becomes a new ticket.

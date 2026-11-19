@@ -1,6 +1,6 @@
 # 04: Verify the Agent Extensions token's repository and permission boundary
 
-Status: ready-for-human
+Status: wontfix
 Type: task
 
 ## Evidence
@@ -27,3 +27,7 @@ A mistakenly supplied project token, classic PAT or write-capable token would vi
 - [ ] Confirm operators deliberately recreate the identified project container when changing/removing the token and revoke compromised credentials at GitHub.
 
 This is distinct from concern 01 (project configuration/Feature trust) and concern 03 (credentials already stored in the shared clone Git store). Continue the approved implementation; these checks are not claimed completed.
+
+## Comments
+
+Dropped 2026-11-19 (status `wontfix`): this ticket is a manual run by the user. The user decided to verify this during normal work instead of as a separate task; each problem found becomes a new ticket.

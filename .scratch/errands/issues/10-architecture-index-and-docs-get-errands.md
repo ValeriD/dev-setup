@@ -44,3 +44,5 @@ The current-state documents say what now exists: Projects with no remote, the tw
 - 09: An Errand on a Project with a GitHub repository
 
 ## Comments
+
+Blocker 08 was dropped on 2026-11-19 (`wontfix`, a manual run the user does during normal work), so it no longer blocks this ticket.

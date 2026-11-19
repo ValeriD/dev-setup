@@ -1,6 +1,6 @@
 # 18: A failing ticket is retried once then stops; a question stops the run
 
-**Status:** ready-for-human
+**Status:** wontfix
 **Model:** Opus (the stop rules and report text are skill content)
 **Design slice:** 8 (Failure paths)
 
@@ -127,3 +127,5 @@ No tests or runtime probes performed. Broader regression intentionally not run; 
 ```
 
 Resolution scope: append this comment only; preserve unrelated dirty files and untracked security-review 01. Whitespace validation: `git diff --check`; stage and commit only this ticket with its path reference. No product or skill corrections were made.
+
+Dropped 2026-11-19 (status `wontfix`): this ticket is a manual run by the user. The user decided to verify this during normal work instead of as a separate task; each problem found becomes a new ticket.

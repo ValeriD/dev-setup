@@ -1,7 +1,7 @@
 ---
 type: technical-design
 feature: node-devcontainer
-status: approved
+status: implemented
 base-commit: none (repository not yet initialised; only agent docs, CONTEXT.md, ADRs 0001-0004 and research exist)
 touches:
   - image-build

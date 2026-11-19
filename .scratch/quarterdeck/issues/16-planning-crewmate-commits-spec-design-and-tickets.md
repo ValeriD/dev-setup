@@ -1,6 +1,6 @@
 # 16: A planning Crewmate commits the Spec, design and tickets on the Spec Run's branch
 
-**Status:** ready-for-human
+**Status:** wontfix
 **Model:** Opus (the ticket exercises and corrects skill text and the planning Brief; the planning Crewmate itself runs on Sonnet)
 **Design slice:** 4 (Planning Crewmate)
 
@@ -124,3 +124,5 @@ Run by the user with the real First Mate. Supervision host errors are ticket 26.
 - Not yet run: case 1 with a really decided request (one commit with spec, design and issues; `plan committed` status), and the case 2 weekly-goal request.
 
 Ticked from this run: the `launch.log` criterion and the SC-12 precursor criterion.
+
+Dropped 2026-11-19 (status `wontfix`): this ticket is a manual run by the user. The user decided to verify this during normal work instead of as a separate task; each problem found becomes a new ticket.

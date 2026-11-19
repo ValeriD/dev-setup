@@ -1,5 +1,7 @@
 # Your tasks to finish the Quarterdeck MVP
 
+> **Dropped 2026-11-19.** The user decided to do these manual checks during normal work instead of as separate tasks. Tickets 14, 16, 17 and 18 are `wontfix`; problems found become new tickets. The steps below stay as a reference.
+
 These are the steps that need you: a real token, a real GitHub repository, or a real Claude session. The steps are in order, and each task builds on the one before it. The ticket each task closes is in its heading.
 
 Where this file and `quarterdeck/CHECKLIST.md` disagree, this file is right. The checklist's blocker notes for tickets 13, 14, 16 and 17 predate tickets 21, 22 and 23. Those three tickets settled the security concerns, the shallow FirstMate history and the start without the First Mate, so none of these blockers stand any more.

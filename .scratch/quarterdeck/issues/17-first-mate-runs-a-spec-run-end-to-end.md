@@ -1,6 +1,6 @@
 # 17: One sentence to the First Mate runs a Spec Run to a pull request and a report
 
-**Status:** ready-for-human
+**Status:** wontfix
 **Model:** Opus (the First Mate's skill and handoff are what is proven and corrected)
 **Design slice:** 7 (First Mate as a session, end to end)
 
@@ -127,3 +127,5 @@ No tests or runtime probes performed during this review; broader regression inte
 
 **Spec: 0 findings; end-to-end acceptance remains blocked and unproven.**
 ```
+
+Dropped 2026-11-19 (status `wontfix`): this ticket is a manual run by the user. The user decided to verify this during normal work instead of as a separate task; each problem found becomes a new ticket.
