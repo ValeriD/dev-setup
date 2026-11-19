@@ -1,0 +1,11 @@
+{
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  },
+  "permissions": {
+    "allow": ["Read(//etc/claude-code/.claude/skills/**)"]
+  },
+  "disableSkillShellExecution": true,
+  "disableSideloadFlags": true,
+  "disableCommandPluginSources": true
+}

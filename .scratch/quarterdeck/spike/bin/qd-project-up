@@ -1,0 +1,30 @@
+#!/bin/bash
+# Spike: (re)create the project container under the decision-34 mount rule.
+# Runs inside the Quarterdeck as node. Usage:
+#   qd-project-up <fm-home> <clone-dir> [extra-home-subpath[:rw|:ro]]...
+# Mounts, all at the same absolute path as in the Quarterdeck:
+#   worktree pool (rw) at /home/node/.treehouse; <clone>/.git (rw) with hooks
+#   and config read-only; <home>/bin (ro); <home>/state (rw); plus any extra
+#   home sub-paths named on the command line (recorded in FINDINGS.md).
+set -euo pipefail
+home=${1:?home}; clone=${2:?clone}; shift 2
+name=${QD_PROJECT_CONTAINER:-qd-spike-project}
+mkdir -p "$home/state" "$home/bin" "$clone/.git/hooks"
+args=(-v "$QD_ROOT/treehouse:/home/node/.treehouse"
+      -v "$clone/.git:$clone/.git" -v "$clone/.git/hooks:$clone/.git/hooks:ro" -v "$clone/.git/config:$clone/.git/config:ro"
+      -v "$home/bin:$home/bin:ro" -v "$home/state:$home/state")
+for extra in "$@"; do
+  p=${extra%%:*}; m=rw; [ "$p" != "$extra" ] && m=${extra##*:}
+  mkdir -p "$home/$p"; args+=(-v "$home/$p:$home/$p:$m")
+done
+docker rm -f "$name" >/dev/null 2>&1 || true
+docker run -d --name "$name" --label qd-spike=1 --hostname project \
+  --cap-drop=ALL --security-opt no-new-privileges \
+  -e CLAUDE_CODE_OAUTH_TOKEN \
+  -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL \
+  "${args[@]}" qd-spike-project:dev >/dev/null
+# Claude's first-run state: onboarding done, no token in the file.
+docker exec -i "$name" sh -c 'cat > /home/node/.claude.json' <<'JSON'
+{"hasCompletedOnboarding": true, "theme": "dark", "numStartups": 1, "projects": {"/home/node/.treehouse": {"hasTrustDialogAccepted": true}}}
+JSON
+echo "project container $name up with ${#args[@]} mount args"

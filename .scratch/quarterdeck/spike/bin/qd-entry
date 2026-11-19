@@ -1,0 +1,14 @@
+#!/bin/bash
+# Spike entrypoint, runs as root only long enough to load the token file.
+# The token file is root-owned 0600, so the docker CLI (as the user) cannot read
+# it with --env-file. Docker mounts it here; root sources it, then drops to node
+# and starts the Herdr server so every pane inherits the tokens by environment.
+# Nothing here prints or writes a token value.
+set -euo pipefail
+set -a; . /run/qd/spike.env; set +a
+for v in CLAUDE_CODE_OAUTH_TOKEN GH_TOKEN; do [ -n "${!v:-}" ] && echo "$v set" || echo "$v MISSING"; done
+export HOME=/home/node USER=node LOGNAME=node
+drop() { setpriv --reuid=1000 --regid=1000 --groups="1000,${QD_SOCK_GID:?}" "$@"; }
+drop gh auth setup-git && echo "gh setup-git ok" || echo "gh setup-git failed"
+drop bash -c 'cd /home/node && exec herdr --session default server' </dev/null >/tmp/herdr-server.log 2>&1 &
+exec setpriv --reuid=1000 --regid=1000 --groups="1000,${QD_SOCK_GID}" sleep infinity
