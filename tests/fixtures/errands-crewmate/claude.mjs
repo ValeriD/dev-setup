@@ -21,9 +21,77 @@ try {
   const branch = brief.match(/^Ship branch: (\S+)/m)?.[1];
   const file = brief.match(/^Errand file: (\S+)/m)?.[1];
   if (!branch || !file) throw Error('the Brief names no Ship branch or Errand file');
+  const notes = brief.split(/^## Progress note[^\n]*\n/m);
+  const note = notes.length > 1 ? notes.at(-1).trim() : '';
   const start = git('rev-parse', 'HEAD');
+  const sessionRecord = (extra = {}) => appendFileSync(`${state}/${id}.stub-sessions`, `${JSON.stringify({ host: hostname(), cwd: process.cwd(), branch: git('branch', '--show-current'), note, start, head: git('rev-parse', 'HEAD'), log: git('log', '--format=%s', '-n', '20'), ...extra })}\n`);
+  const prompt = () => {
+    // Stay at a prompt like an interactive Claude, until FirstMate ends the session with /exit.
+    let composer = '';
+    const draw = () => process.stdout.write(`\x1b[2J\x1b[H────────────────────────────────────────\r\n❯ ${composer}\r\n────────────────────────────────────────\r\n\x1b[2;${3 + composer.length}H`);
+    process.stdin.setRawMode(true);
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (input) => {
+      for (const ch of input) {
+        if (ch === '\r' || ch === '\n') {
+          if (composer === '/exit') process.exit(0);
+          composer = '';
+        } else if (ch === '\x1b' || ch === '\x03' || ch === '\x15') composer = '';
+        else if (ch === '\x7f') composer = composer.slice(0, -1);
+        else composer += ch;
+      }
+      draw();
+    });
+    draw();
+    process.stdin.resume();
+  };
+  const stopHooks = () => {
+    const settings = JSON.parse(readFileSync('.claude/settings.local.json', 'utf8'));
+    for (const entry of settings.hooks.Stop) for (const hook of entry.hooks) execFileSync('bash', ['-c', hook.command]);
+  };
   if (git('branch', '--show-current') !== branch) git('checkout', '-b', branch);
-  writeFileSync(file, `${brief.match(/^Errand: (.+)$/m)?.[1] ?? ''}\n`);
+  const question = brief.match(/^Errand question: (.+)$/m)?.[1];
+  const answer = note.match(/^Answer: (.+)$/m)?.[1];
+  const comment = note.match(/^Comment: (.+)$/m)?.[1];
+  if (/^Errand hang: true$/m.test(brief) && !note) {
+    // Work in progress that never finishes: the test ends this process from outside. Nothing is committed.
+    writeFileSync(file, 'half done\n');
+    sessionRecord({ hung: true });
+    prompt();
+    setInterval(() => {}, 1000);
+    throw Object.assign(Error('hung'), { hung: true });
+  }
+  if (question && !answer) {
+    // An undecided point: the question, no guess, no commit; the half-done file stays for the answer.
+    writeFileSync(file, 'half done before the question\n');
+    status(`needs-decision: ${question}`);
+    stopHooks();
+    sessionRecord({ asked: true });
+    prompt();
+    throw Object.assign(Error('asked'), { hung: true });
+  }
+  if (note && !answer) {
+    // Sent back with a comment, or asked to bring the branch up to date.
+    if (/^Rebase onto main\b/m.test(note)) git('rebase', 'main');
+    else {
+      writeFileSync(`${file}.comment`, `${comment ?? note}\n`);
+      git('add', `${file}.comment`);
+      git('commit', '-qm', `errand ${id}: comment`);
+    }
+    const head = git('rev-parse', 'HEAD');
+    status(`done: ready in branch ${branch}; check: none`);
+    stopHooks();
+    sessionRecord({ head, sawEarlier: true });
+    prompt();
+    throw Object.assign(Error('sent back'), { hung: true });
+  }
+  const gate = brief.match(/^Errand gate: (\S+)$/m)?.[1];
+  if (gate && !note) {
+    // Say that this session is up, then wait for the test to open the gate: lets the test show Errands overlapping.
+    writeFileSync(`${state}/${id}.stub-started`, `${process.cwd()}\n`);
+    while (!existsSync(gate)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
+  writeFileSync(file, `${brief.match(/^Errand: (.+)$/m)?.[1] ?? ''}${answer ? ` (${answer})` : ''}\n`);
   // The check runs only when the Brief tells the Crewmate to follow the file and the file is there.
   let check = 'none';
   if (/\.quarterdeck\/errand-check\.md/.test(brief) && existsSync('.quarterdeck/errand-check.md')) {
@@ -33,15 +101,12 @@ try {
   git('add', file);
   git('commit', '-qm', `errand ${id}`);
   status(`done: ready in branch ${branch}; check: ${check}`);
-  const settings = JSON.parse(readFileSync('.claude/settings.local.json', 'utf8'));
-  for (const entry of settings.hooks.Stop) for (const hook of entry.hooks) execFileSync('bash', ['-c', hook.command]);
-  appendFileSync(`${state}/${id}.stub-sessions`, `${JSON.stringify({ host: hostname(), cwd: process.cwd(), start, head: git('rev-parse', 'HEAD'), check })}\n`);
-  // Stay at a prompt like an interactive Claude, until FirstMate ends the session.
-  process.stdin.setRawMode(true);
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', () => process.stdout.write('\x1b[2J\x1b[H────────────────────────────────────────\r\n❯ \r\n────────────────────────────────────────\r\n'));
-  process.stdin.resume();
+  stopHooks();
+  sessionRecord({ check });
+  prompt();
 } catch (error) {
-  status(`failed: stub: ${error.message}`);
-  process.exitCode = 1;
+  if (!error.hung) {
+    status(`failed: stub: ${error.message}`);
+    process.exitCode = 1;
+  }
 }
