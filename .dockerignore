@@ -2,7 +2,6 @@
 !base/
 !installer/
 !extensions/
-!quarterdeck/
 !presets/
 !templates/markdown/
 !skills/
@@ -11,7 +10,6 @@ skills/**
 !skills/dev-container/scripts/
 !skills/dev-container/scripts/package.json
 !skills/dev-container/scripts/pnpm-lock.yaml
-quarterdeck/node_modules
 !variants/node/extensions.json
 !variants/markdown/extensions.json
 installer/node_modules
